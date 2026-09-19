@@ -1,8 +1,7 @@
 """Unit tests for the Phase 6 remediation loop (plan → execute → verify).
 
-Covers the three transitions in ``agent/remediation.py`` end-to-end with
-canned LLM + canned MCP clients. Also asserts idempotency key semantics
-and the tier-policy guardrails on planner output.
+Covers the three transitions in ``agent/remediation.py`` end to end with canned
+clients, plus idempotency key semantics and the tier guardrails on planner output.
 """
 
 from __future__ import annotations
@@ -70,40 +69,26 @@ def _now() -> datetime:
     return datetime(2026, 7, 30, 12, 0, tzinfo=UTC)
 
 
-#: The default alert for this file, and it names NO subject on purpose.
-#:
-#: It used to carry ``consumer_group: "worker-dispatcher"``, which was harmless
-#: for as long as nothing compared the alert against the plan. ADR 0032 does:
-#: the subject-target guard refuses any plan whose action does not act on the
-#: alert's subject, so a subject-naming default would bind that guard on every
-#: test in this file — and seventeen of them plan a DLQ action to exercise a
-#: DIFFERENT guard entirely (verify targeting, read-before-act, argument
-#: shape). Each would then be refused for a reason it is not about, and the
-#: file would read as if those guards had changed.
-#:
-#: A condition-naming alert is the honest default, not a convenience: it is one
-#: of the three legitimate inert cases ``alert_subject`` documents, and it is
-#: what `db_latency_high`, `alert_storm_meta` and a whole-queue DLQ depth alert
-#: all look like. Tests that mean to exercise the subject-target guard pass
-#: their own ``alert=`` and say which subject they are naming.
+# The default alert for this file, and it names NO subject on purpose.
+#
+# It carried ``consumer_group`` until ADR 0032's subject-target guard began comparing
+# the alert against the plan: a subject-naming default would bind that guard on every
+# test here, and seventeen of them plan a DLQ action to exercise a DIFFERENT guard, so
+# each would be refused for a reason it is not about. A condition-naming alert is one
+# of the three legitimate inert cases ``alert_subject`` documents; tests that mean to
+# exercise the subject guard pass their own ``alert=``.
 _CONDITION_ALERT: Final[dict[str, Any]] = {
     "source": "platform.kafka",
     "severity": "high",
     "fingerprint": "db_latency_high",
 }
 
-#: The alert for tests whose plan acts on ``worker-dispatcher``.
-#:
-#: Two jobs, and separating them from the default above is the point. It names
-#: the consumer group as the alert's SUBJECT, so a plan that restarts that group
-#: satisfies ADR 0032's target test — which is the realistic pairing, and the
-#: one live run D actually made. And it puts the string ``"worker-dispatcher"``
-#: in the evidence value corpus, which is what ``_unsourced_resource_args``
-#: requires of any resource a plan names: the group has to have been uttered by
-#: the platform (alert or tool result) before a plan may act on it. That second
-#: job is why the default alert cannot simply drop the group and be done —
-#: without a provenance source, every consumer-restart plan in this file is
-#: refused for a copy-don't-re-type violation instead.
+# The alert for tests whose plan acts on ``worker-dispatcher``, with two jobs. It names
+# the group as the alert's SUBJECT, so a restart of that group satisfies ADR 0032's
+# target test — the realistic pairing, and the one live run D made. And it puts the
+# string in the evidence value corpus, which ``_unsourced_resource_args`` requires of
+# any resource a plan names: without a provenance source every consumer-restart plan
+# here is refused for a copy-don't-re-type violation instead.
 _GROUP_ALERT: Final[dict[str, Any]] = {
     "source": "platform.kafka",
     "severity": "high",
@@ -143,13 +128,9 @@ def _run_state(
 def _dlq_listing() -> EvidenceEntry:
     """One unfiltered ``list_dlq_messages`` reading, as the loop records it.
 
-    Several inertness controls below use ``replay_dlq_by_category`` as their
-    "an action that names no resource" example, which is exactly right for
-    the guards they test and, since ADR 0028, no longer a plan that any run
-    may make on empty evidence. Arguments are the WIRED ones —
-    ``wire_arguments`` fills every unset optional with an explicit ``null``,
-    so an unfiltered read reaches the ledger with ``remediation_hint: None``
-    rather than with the key absent.
+    Arguments are the WIRED ones — ``wire_arguments`` fills every unset optional with an
+    explicit ``null``, so an unfiltered read reaches the ledger with
+    ``remediation_hint: None`` rather than with the key absent.
     """
     return EvidenceEntry(
         tool_name="list_dlq_messages",
@@ -237,11 +218,9 @@ class TestPlanning:
         assert any("no hypotheses" in e.result_summary for e in result.evidence)
 
     def test_non_tier_1_action_escalates(self) -> None:
-        # Post-hardening: RemediationPlan.action_tool is Literal-typed to
-        # Tier-1 tools. A read-tool value is a schema violation; Pydantic
-        # rejects at validation time. The make_llm_plan ValidationError
-        # catch escalates with a "planner LLM invalid" reason mentioning
-        # the rejected value.
+        # Post-hardening: ``RemediationPlan.action_tool`` is Literal-typed to Tier-1 tools, so
+        # a read-tool value is a schema violation Pydantic rejects, and ``make_llm_plan``'s
+        # catch escalates naming the rejected value.
         bad = _plan_dict(action_tool="get_consumer_lag")
         transition = make_llm_plan(self._canned_planner(bad), model=_MODEL)
         run = _run_state(
@@ -302,9 +281,8 @@ class TestPlanning:
         )
         result = transition(run, _now())
         assert result.state is IncidentState.ESCALATED
-        # Post-hardening: RemediationPlan.verify_tool is Literal-typed
-        # to read tools. A Tier-1 write value is rejected by Pydantic; the
-        # planner LLM catch escalates.
+        # Post-hardening: ``verify_tool`` is Literal-typed to read tools, so a Tier-1 write
+        # value is rejected by Pydantic and the planner catch escalates.
         assert any(
             "restart_consumer_group" in e.result_summary or "invalid" in e.result_summary
             for e in result.evidence
@@ -371,10 +349,9 @@ class TestRemediating:
         assert result.state is IncidentState.ESCALATED
 
     def test_unparseable_response_still_records_the_executed_action(self) -> None:
-        # R2-38: the platform returned a NON-error result, so the Tier-1
-        # action ran; only our parse of its response failed. Dropping
-        # attempted_tool here hid an executed action from the SAFETY grader
-        # and from the human reading the briefing.
+        # R2-38: the platform returned a NON-error result, so the Tier-1 action RAN and only
+        # our parse of its response failed. Dropping attempted_tool here hid an executed
+        # action from the SAFETY grader and from the human reading the briefing.
         mcp = _FakeMCP(
             lambda _n, _a: ToolResult(content=[{"type": "text", "text": "not json at all"}])
         )
@@ -393,9 +370,8 @@ class TestRemediating:
         assert "idempotency_key" in attempted
 
     def test_unparseable_response_charges_the_call_it_made(self) -> None:
-        # The action executed, so it costs a tool call and a remediation
-        # attempt — same as the success path. Charging nothing let a run
-        # spend an unbudgeted Tier-1 action.
+        # The action executed, so it costs a tool call and an attempt, as on the success path.
+        # Charging nothing let a run spend an unbudgeted Tier-1 action.
         mcp = _FakeMCP(lambda _n, _a: ToolResult(content=[{"type": "text", "text": "{}"}]))
         transition = make_remediate(mcp)
         run = _run_state(state=IncidentState.REMEDIATING, remediation_plan=_plan_dict())
@@ -590,13 +566,9 @@ class TestPlanRoundTrip:
 class TestSingleAttemptInvariant:
     """One Tier-1 attempt per incident (ADR 0008).
 
-    Under the current allowed-transition graph, PLANNING is only
-    reachable from INVESTIGATING (attempts == 0). VERIFYING has no
-    PLANNING successor. The check in ``make_llm_plan`` is therefore
-    an *invariant guard*, not a soft limit — it fires only if the
-    state machine graph is mutated or a RunState is constructed
-    directly bypassing dispatch. Practice 8 requires that guard to
-    have a matching test.
+    PLANNING is reachable only from INVESTIGATING and VERIFYING has no PLANNING
+    successor, so the check in ``make_llm_plan`` is an INVARIANT GUARD rather than a soft
+    limit — it fires only if the graph is mutated or a RunState bypasses dispatch.
     """
 
     def test_first_attempt_transitions_normally(self) -> None:
@@ -619,9 +591,8 @@ class TestSingleAttemptInvariant:
         assert result.state is IncidentState.REMEDIATING
 
     def test_impossible_state_fires_invariant_guard(self) -> None:
-        # Construct the state directly (bypassing dispatch, which would
-        # never allow this reachable). LLM queue empty — the guard must
-        # escalate before any planner tokens are spent.
+        # Construct the state directly, bypassing the dispatch that would never allow this.
+        # The LLM queue is empty: the guard must escalate before any planner tokens are spent.
         llm = CannedLLMClient([])
         transition = make_llm_plan(llm, model=_MODEL)
         run = _run_state(
@@ -675,11 +646,9 @@ class TestSingleAttemptInvariant:
 class TestEvidenceSourcedArgs:
     """Copy, don't re-type: plan resource args must be platform-produced.
 
-    Campaign exhibit: the planner rebuilt an alert-provided cache key as
-    `worker-dispatcher:hot_set` (dropping the `cache:jobs:` prefix); the
-    platform allowlist refused it. This validator rejects the plan before
-    any call is attempted — and because the bad value is a SUBSTRING of
-    the true key, matching must be exact-value, not containment.
+    Campaign exhibit: the planner rebuilt an alert-provided cache key without its
+    ``cache:jobs:`` prefix and the platform allowlist refused it. Because the bad value
+    is a SUBSTRING of the true key, matching must be exact-value, not containment.
     """
 
     _TRUE_KEY = "cache:jobs:worker-dispatcher:hot_set"
@@ -707,14 +676,10 @@ class TestEvidenceSourcedArgs:
         )
 
     def _cache_plan(self, key: str) -> dict[str, Any]:
-        # Verifies through get_cache_key_info on the same key. This class is
-        # about SOURCING — whether the key came from the platform's own
-        # words — and the verify leg is scaffolding for that question. It
-        # used to be `get_redis_health` with no arguments, which ADR 0025
-        # now refuses: server-wide keyspace counters cannot observe one key
-        # (the 2026-09-07 live run). Keeping the old leg here would have
-        # meant these sourcing assertions passing or failing for a reason
-        # that has nothing to do with sourcing.
+        # Verifies through get_cache_key_info on the same key. This class is about SOURCING and
+        # the verify leg is scaffolding: it used to be `get_redis_health` with no arguments,
+        # which ADR 0025 now refuses, and keeping it would mean these assertions passing or
+        # failing for a reason that has nothing to do with sourcing.
         return _plan_dict(
             target_hypothesis="stale-cache",
             action_tool="invalidate_cache_key",
@@ -729,14 +694,10 @@ class TestEvidenceSourcedArgs:
         assert result.state is IncidentState.REMEDIATING
 
     def test_retyped_key_rejected_even_as_substring_of_truth(self) -> None:
-        # "worker-dispatcher:hot_set" is inside the true key — containment
-        # matching would fake-green this exact campaign failure.
-        #
-        # TWO canned plans, not one, since ADR 0030. The guard now refuses
-        # the first offence and re-asks, so a one-plan client escalates on
-        # `no more canned responses` and this assertion passes without the
-        # guard having decided anything — the vacuity the anti-vacuity check
-        # below now forbids.
+        # "worker-dispatcher:hot_set" is inside the true key — containment matching would
+        # fake-green this exact campaign failure. TWO canned plans since ADR 0030: the guard
+        # refuses the first offence and re-asks, so a one-plan client escalates on "no more
+        # canned responses" and the assertion passes without the guard deciding anything.
         bad = self._cache_plan("worker-dispatcher:hot_set")
         llm = CannedLLMClient([bad, bad])
         result = make_llm_plan(llm, model=_MODEL)(self._cache_run(), _now())
@@ -816,27 +777,20 @@ class TestEvidenceSourcedArgs:
         reasons = " ".join(e.result_summary for e in result.evidence)
         assert invented in reasons
         assert "no more canned responses" not in reasons
-        # Cut on the message's real delimiters. Splitting on "." stopped at
-        # the dot inside "replay_dlq_by_ids.job_ids=", so the inspected slice
-        # was ": replay_dlq_by_ids" — a span that can never hold a UUID, and
-        # a negative assertion that could not fail whatever the rejection
-        # named (WO-R2-102).
+        # Cut on the message's real delimiters. Splitting on "." stopped at the dot inside
+        # "replay_dlq_by_ids.job_ids=", so the inspected slice could never hold a UUID and the
+        # negative assertion could not fail whatever the rejection named (WO-R2-102).
         named = reasons.split("not evidence-sourced: ", 1)[1].split(". Resource names")[0]
         assert invented in named, "the rejection must name the id it refused"
         assert known not in named, "the evidence-sourced id must not be blamed"
-        # ...but the id that WAS read is offered back as a candidate, which is
-        # a different sentence and the whole point of ADR 0030. Blaming it and
-        # offering it are opposites; the message has to do exactly one.
+        # ...but the id that WAS read is offered back as a candidate, which is the point of
+        # ADR 0030. Blaming it and offering it are opposites; the message does exactly one.
         assert known in reasons
 
     def test_non_resource_fields_are_unconstrained(self) -> None:
-        # category / max_replays / delay_seconds are parameters, not
-        # resource names — the planner may choose them freely.
-        #
-        # The listing is ADR 0028's requirement, not this guard's: a bulk
-        # replay needs some reading that covered the slice it will expand
-        # to. Without it the plan is refused before this check is reached
-        # and the test would pass for the wrong reason.
+        # category / max_replays / delay_seconds are parameters, not resource names. The
+        # listing is ADR 0028's requirement rather than this guard's: without it the plan is
+        # refused before this check is reached and the test would pass for the wrong reason.
         run = _run_state(
             state=IncidentState.PLANNING,
             hypotheses=(
@@ -860,12 +814,9 @@ class TestEvidenceSourcedArgs:
         assert result.state is IncidentState.REMEDIATING
 
     # -- B-08: probe-argument laundering ---------------------------------
-    # get_consumer_lag accepts ANY group name and returns lag:null for
-    # unknown ones (platform: backend/app/mcp/tools/consumer_lag.py), and
-    # its output echoes consumer_group back (cache_key embeds it). A
-    # hallucinated name used once as a probe argument must not whitelist
-    # itself for the Tier-1 action — neither via argument ingestion nor
-    # via the platform's echo of it in the result.
+    # # get_consumer_lag accepts ANY group name, returns lag:null for unknown ones and
+    # # echoes the group back in its output — so a hallucinated name used once as a probe
+    # # argument must not whitelist itself for the Tier-1 action, by ingestion or by echo.
 
     _HALLUCINATED_GROUP = "worker-dispatchr"  # note the missing 'e'
 
@@ -933,9 +884,8 @@ class TestEvidenceSourcedArgs:
         assert result.state is IncidentState.REMEDIATING
 
     def test_result_discovered_id_survives_later_argument_echo(self) -> None:
-        # Echo exclusion is per-entry, not global: a job id the platform
-        # produced in one result stays corpus-eligible even after a later
-        # probe echoes it back as an argument.
+        # Echo exclusion is per entry, not global: a job id the platform produced in one
+        # result stays corpus-eligible even after a later probe echoes it back.
         discovered = "44444444-4444-4444-4444-444444444444"
         run = _run_state(
             state=IncidentState.PLANNING,
@@ -976,12 +926,10 @@ class TestEvidenceSourcedArgs:
 class TestNamedResourceArgs:
     """WO-R2-15 / ADR 0024: a plan must NAME the resource on both legs.
 
-    The hole this closes: ``GetConsumerLagInput.consumer_group`` carries
-    ``default="worker-dispatcher"`` (mirroring the platform's published
-    input schema, which the contract snapshot pins). When the planner
-    omitted the group on the verify leg, ``_unsourced_resource_args``
-    skipped the absent field, ``wire_arguments`` default-filled it, and
-    the run restarted one consumer group while verifying a *different*,
+    ``GetConsumerLagInput.consumer_group`` carries a default mirroring the platform's
+    published schema, so when the planner omitted the group on the verify leg
+    ``_unsourced_resource_args`` skipped the absent field, ``wire_arguments``
+    default-filled it, and the run restarted one group while verifying a different
     healthy one — then reported RESOLVED on a still-broken consumer.
     """
 
@@ -989,11 +937,9 @@ class TestNamedResourceArgs:
     _DEFAULT_FILLED = "worker-dispatcher"  # GetConsumerLagInput's default
 
     def _run(self, **overrides: Any) -> RunState:
-        # The alert names the group this class's plans remediate, so it is both
-        # the provenance source `_unsourced_resource_args` demands and the
-        # subject ADR 0032's target test compares the action against. A test
-        # whose plan deliberately acts on something else passes its own
-        # ``alert=`` rather than having this one contradict it.
+        # The alert names the group these plans remediate, so it is both the provenance source
+        # ``_unsourced_resource_args`` demands and the subject ADR 0032 compares the action
+        # against. A test whose plan acts on something else passes its own ``alert=``.
         overrides.setdefault(
             "alert",
             {
@@ -1026,9 +972,8 @@ class TestNamedResourceArgs:
     # -- absence -------------------------------------------------------
 
     def test_omitted_verify_group_is_rejected_before_execution(self) -> None:
-        # The confirmed defect. Pre-fix this reached REMEDIATING and the
-        # verify probe read `worker-dispatcher` — a group the incident
-        # never touched.
+        # The confirmed defect: pre-fix this reached REMEDIATING and the verify probe read
+        # `worker-dispatcher`, a group the incident never touched.
         result = make_llm_plan(CannedLLMClient([self._plan(verify_arguments={})]), model=_MODEL)(
             self._run(), _now()
         )
@@ -1048,10 +993,9 @@ class TestNamedResourceArgs:
         assert "action restart_consumer_group.consumer_group" in reasons
 
     def test_omitted_required_field_is_caught_at_plan_time_not_wire_time(self) -> None:
-        # `get_dag_state.job_id` is REQUIRED, so wire_arguments would have
-        # raised — but only inside VERIFYING, i.e. after the Tier-1 pause
-        # already executed. Absence is a planning-time rejection for every
-        # resource field, not just the default-carrying ones.
+        # `get_dag_state.job_id` is REQUIRED, so wire_arguments would have raised — but only
+        # inside VERIFYING, after the Tier-1 pause executed. Absence is a planning-time
+        # rejection for every resource field, not just the default-carrying ones.
         seed = "33333333-3333-3333-3333-333333333333"
         run = _run_state(
             state=IncidentState.PLANNING,
@@ -1092,24 +1036,15 @@ class TestNamedResourceArgs:
         assert result.state is IncidentState.REMEDIATING
 
     def test_resource_free_verify_tool_needs_no_arguments(self) -> None:
-        # `list_dlq_messages` names no resource, so an empty verify leg is
-        # still a legal plan — the absence check reads RESOURCE_ARG_FIELDS,
-        # it does not demand arguments per se.
+        # `list_dlq_messages` names no resource, so an empty verify leg is still a legal plan:
+        # the absence check reads RESOURCE_ARG_FIELDS rather than demanding arguments per se.
         #
-        # This used to be asserted with `invalidate_cache_key` verified by
-        # `get_redis_health`, which ADR 0025 now refuses: a read that names
-        # no resource is only legal when NO read observes the acted-on
-        # resource, and `get_cache_key_info` observes a cache key. The
-        # property under test here is unchanged and still true; only the
-        # example had to move to an action where it still holds. Bulk
-        # category replay is that action — it names a category, not a row.
-        # The listing is ADR 0028's requirement on a bulk replay, not this
-        # guard's; without it the refusal would land before this check.
-        # A condition-naming alert, not this class's consumer alert: the
-        # example plan is a bulk DLQ replay, and under an alert about a
-        # consumer group ADR 0032's target test would refuse it for acting on
-        # something the alert never reported — a correct refusal about a
-        # different property than the one under test here.
+        # This was asserted with `invalidate_cache_key` verified by `get_redis_health`, which
+        # ADR 0025 now refuses, so the example moved to an action where the property still
+        # holds — a bulk category replay, which names a category rather than a row. The listing
+        # is ADR 0028's requirement, not this guard's, and the condition-naming alert is
+        # deliberate: under a consumer alert ADR 0032 would refuse the plan for acting on
+        # something the alert never reported.
         run = self._run(evidence=(_dlq_listing(),), alert=dict(_CONDITION_ALERT))
         plan = _plan_dict(
             target_hypothesis="consumer_saturation",
@@ -1124,9 +1059,8 @@ class TestNamedResourceArgs:
     # -- verify targets the action ---------------------------------------
 
     def _run_with_both_groups_in_corpus(self) -> RunState:
-        # Both names are legitimately platform-produced, so the
-        # evidence-sourcing guard has no objection to either one. Only the
-        # cross-leg check can catch this plan.
+        # Both names are legitimately platform-produced, so the evidence-sourcing guard has no
+        # objection to either. Only the cross-leg check can catch this plan.
         return self._run(
             evidence=(
                 EvidenceEntry(
@@ -1228,11 +1162,9 @@ class TestNamedResourceArgs:
 class TestLLMUsageAccrual:
     """C-06 + ADR 0015: every LLM call charges total token volume and dollars.
 
-    ``client.py`` puts the system prompt behind ``cache_control``, so on a
-    live call most input volume arrives on ``cache_creation_tokens`` /
-    ``cache_read_tokens``. Summing only input+output metered the un-cached
-    remainder and under-enforced ``BUDGET_MAX_TOKENS`` exactly when caching
-    worked well.
+    ``client.py`` puts the system prompt behind ``cache_control``, so on a live call most
+    input volume arrives on the cache counters — summing only input+output metered the
+    un-cached remainder and under-enforced ``BUDGET_MAX_TOKENS`` when caching worked well.
     """
 
     _USAGE = CannedUsage(
@@ -1311,10 +1243,9 @@ class TestLLMUsageAccrual:
 class TestRejectedPlansAreStillBilled:
     """A plan the agent throws away is a plan the platform charged for.
 
-    The accrual used to sit after six validation branches, every one of
-    which returns early. So the runs that made the most LLM calls — a
-    planner producing rejectable plans — were the runs whose spend the
-    ledger saw least of. ADR 0015: over-report, never under-report.
+    The accrual used to sit after six validation branches that all return early, so the
+    runs making the most LLM calls were the ones whose spend the ledger saw least of.
+    ADR 0015: over-report, never under-report.
     """
 
     _USAGE = CannedUsage(input_tokens=100, output_tokens=50)
@@ -1337,11 +1268,9 @@ class TestRejectedPlansAreStillBilled:
         )
         return transition(run, _now())
 
-    # Only the branches a schema-valid plan can reach. The tier/registry
-    # branches above them are defense-in-depth against registry drift:
-    # ``action_tool`` and ``verify_tool`` are Literal-typed, so a payload
-    # naming a bad tool is rejected by pydantic inside the client and
-    # arrives as the LLMError path below, not as a rejected plan.
+    # Only the branches a schema-valid plan can reach. The tier/registry branches above are
+    # defence in depth against registry drift: ``action_tool`` and ``verify_tool`` are
+    # Literal-typed, so a bad tool name arrives as the LLMError path.
     @pytest.mark.parametrize(
         ("label", "overrides"),
         [
@@ -1364,12 +1293,9 @@ class TestRejectedPlansAreStillBilled:
     def test_the_argument_refusal_charges_both_the_plan_and_the_re_ask(self) -> None:
         """ADR 0030's cost, stated as a number rather than left to be inferred.
 
-        The unsourced-argument case used to sit in the parametrize above,
-        where it asserted ONE billed call. It no longer escalates on the
-        first offence, so leaving it there would have quietly asserted that
-        a re-asked plan is free — the exact under-report ADR 0015 forbids,
-        and the reason this is its own test rather than a changed number in
-        the table. Two calls, two charges.
+        The unsourced-argument case used to sit in the parametrize above asserting ONE billed
+        call; it no longer escalates on the first offence, so leaving it there would have
+        asserted that a re-asked plan is free. Two calls, two charges.
         """
         bad = _plan_dict(
             action_arguments={"consumer_group": "never-mentioned"},
@@ -1450,23 +1376,16 @@ class TestRejectedPlansAreStillBilled:
 class TestVerifyLegObservesTheAction:
     """ADR 0025: the verify leg must be able to OBSERVE what the action changed.
 
-    ``_misdirected_verify_args`` (ADR 0024) already refuses a verify leg
-    that names a resource the action left alone. It is inert when the
-    verify leg names no resource at all, and ADR 0024 recorded that
-    inertness as a deliberate escape hatch: "the escape hatch is a
-    resource-free verify tool". This class is the record that the escape
-    hatch was too wide.
+    ``_misdirected_verify_args`` (ADR 0024) refuses a verify leg naming a resource the
+    action left alone, and is inert when the verify leg names no resource — an escape
+    hatch that ADR recorded deliberately. This class is the record that it was too wide.
 
-    The 2026-09-07 paid run of ``remediate_stale_cache_success`` is the
-    exhibit. Chaos planted a 90-byte stale value; the agent probed the
-    exact key, invalidated exactly that key (``deleted: true``), and then
-    verified with ``get_redis_health``, whose ``keyspace_hits`` /
-    ``keyspace_misses`` are server-wide. Nothing in the eval world reads
-    that hot set, so the counters were dominated by unrelated traffic —
-    hits frozen at 209 while misses climbed 437635 → 442480. The judge
-    honestly answered ``not_verified`` six times and the agent escalated.
-    Every other dimension was green. The agent was right; the plan asked a
-    question the world could not answer.
+    The exhibit is the 2026-09-07 paid run of ``remediate_stale_cache_success``: chaos
+    planted a 90-byte stale value, the agent invalidated exactly that key, and then
+    verified with ``get_redis_health``, whose keyspace counters are server-wide and were
+    dominated by unrelated traffic. The judge honestly answered ``not_verified`` six
+    times and the agent escalated. The agent was right; the plan asked a question the
+    world could not answer.
     """
 
     _KEY = "cache:jobs:worker-dispatcher:hot_set"
@@ -1508,9 +1427,8 @@ class TestVerifyLegObservesTheAction:
     # -- red before --------------------------------------------------------
 
     def test_the_live_runs_plan_is_refused_then_escalated(self) -> None:
-        # THE regression. This exact plan — verbatim from the trajectory of
-        # archive 7acd2b441961 — was ADMITTED before ADR 0025 and executed
-        # to an unverifiable outcome.
+        # THE regression: this exact plan, verbatim from archive 7acd2b441961's trajectory,
+        # was ADMITTED before ADR 0025 and executed to an unverifiable outcome.
         live_plan = self._cache_plan(verify_tool="get_redis_health", verify_arguments={})
         llm = CannedLLMClient([live_plan, live_plan])
         result = make_llm_plan(llm, model=_MODEL)(self._cache_run(), _now())
@@ -1542,10 +1460,9 @@ class TestVerifyLegObservesTheAction:
         assert len(refusals) == 1
 
     def test_the_steer_reaches_the_planner_in_full(self) -> None:
-        # A steer that arrives truncated is not a steer. Evidence lines are
-        # cut at 200 chars; the refusal is rendered whole and separately, so
-        # assert the planner's SECOND context actually carries the required
-        # call — including the key, which sits past that cut.
+        # A steer that arrives truncated is not a steer. Evidence lines are cut at 200 chars
+        # and the refusal is rendered whole and separately, so assert the planner's SECOND
+        # context carries the required call — including the key, which sits past that cut.
         llm = CannedLLMClient(
             [
                 self._cache_plan(verify_tool="get_redis_health", verify_arguments={}),
@@ -1607,13 +1524,10 @@ class TestVerifyLegObservesTheAction:
     # -- inert controls ----------------------------------------------------
 
     def test_bulk_category_replay_names_no_resource_and_stays_legal(self) -> None:
-        # `replay_dlq_by_category` names a category, not a row, so there is
-        # no resource to demand an observation of. Declared inert in the
-        # map rather than merely absent from it.
-        #
-        # The listing is ADR 0028's requirement on a bulk replay, not this
-        # guard's; without it the refusal lands before the verify-target
-        # check and the control would prove nothing about VERIFY_PROBE.
+        # `replay_dlq_by_category` names a category, not a row, so there is no resource to
+        # demand an observation of — declared inert in the map rather than merely absent. The
+        # listing is ADR 0028's requirement: without it the refusal lands before the
+        # verify-target check and the control would prove nothing.
         llm = CannedLLMClient(
             [
                 _plan_dict(
@@ -1642,9 +1556,9 @@ class TestVerifyLegObservesTheAction:
         assert result.state is IncidentState.REMEDIATING
 
     def test_targeted_replay_verified_by_the_listing_stays_legal(self) -> None:
-        # `list_dlq_messages` observes DLQ rows without being able to name
-        # one, so picking it IS the requirement — there is no value to
-        # match, and demanding one would refuse every correct replay plan.
+        # `list_dlq_messages` observes DLQ rows without being able to name one, so picking it
+        # IS the requirement: there is no value to match, and demanding one would refuse every
+        # correct replay plan.
         job_id = "af67d1b1-13f8-5a2c-8c44-66ec5564597d"
         run = _run_state(
             state=IncidentState.PLANNING,
@@ -1678,9 +1592,8 @@ class TestVerifyLegObservesTheAction:
         assert make_llm_plan(llm, model=_MODEL)(run, _now()).state is IncidentState.REMEDIATING
 
     def test_action_naming_no_resource_value_is_left_to_the_absence_guard(self) -> None:
-        # An action whose resource field is missing entirely is
-        # `_absent_resource_args`' business. This guard must not also fire
-        # and bury the actionable message under a second one.
+        # An action whose resource field is missing entirely is ``_absent_resource_args``'
+        # business. This guard must not also fire and bury the actionable message.
         llm = CannedLLMClient(
             [
                 self._cache_plan(
@@ -1757,24 +1670,14 @@ def _dag_mcp(*, paused: bool, root_status: str, child_status: str) -> _FakeMCP:
 class TestStabilizeOnlyActionsNeverResolve:
     """A verified stabilizer escalates. It does not resolve.
 
-    The judge is asked "did the action work?", which is not "is the
-    incident over?". For ``pause_dag`` the two answers come apart, and the
-    platform's own tool description is what pulls them apart: it says a
-    successful pause "reads as paused=true with children still in
-    `waiting`". Hand that reading to a judge holding an expectation of
-    "children stop advancing" and the honest verdict is ``verified`` — on a
-    chain that is exactly as stuck as it was, and that will be stuck again
-    the moment the 10-minute TTL lapses. There is no judge prompt that
-    fixes this, because the judge is not wrong.
-
-    ``policies.RESOLUTION_CLASS`` is the separation, and this class is the
-    proof that it reaches the one RESOLVED transition the state machine
-    has (``remediation.transition_verify``). Before it, the same inputs
-    produced ``IncidentState.RESOLVED``.
-
-    Found by a pre-spend sweep of ``remediate_runaway_saga_success`` on
-    2026-09-07, before the scenario's first paid run. Nothing had executed
-    a ``pause_dag`` plan live; the defect was reachable and unexercised.
+    The judge is asked "did the action work?", which is not "is the incident over?", and
+    for ``pause_dag`` the two come apart: the platform's own description says a
+    successful pause "reads as paused=true with children still in `waiting`", so a judge
+    holding that expectation answers ``verified`` on a chain exactly as stuck as it was
+    and stuck again when the TTL lapses. No judge prompt fixes this, because the judge is
+    not wrong. ``policies.RESOLUTION_CLASS`` is the separation and this is the proof it
+    reaches the one RESOLVED transition the machine has. Found by a pre-spend sweep
+    before the scenario's first paid run: reachable and unexercised.
     """
 
     def _pause_plan(self, **overrides: Any) -> dict[str, Any]:
@@ -1820,11 +1723,9 @@ class TestStabilizeOnlyActionsNeverResolve:
     def test_the_judge_still_answered_verified(self) -> None:
         """The escalation is a policy decision, not a re-judged verdict.
 
-        Worth pinning separately: if a later change made this pass by
-        making the judge say ``not_verified``, the class would go green
-        while the actual guarantee — "a working stabilizer still
-        escalates" — had been replaced by "a stabilizer is graded as a
-        failure", which is a different and wrong claim.
+        If a later change made this pass by making the judge say ``not_verified``, the class
+        would go green while "a working stabilizer still escalates" had been replaced by "a
+        stabilizer is graded as a failure", which is a different and wrong claim.
         """
         transition = make_llm_verify(
             _dag_mcp(paused=True, root_status="dead_letter", child_status="waiting"),
@@ -1861,12 +1762,10 @@ class TestStabilizeOnlyActionsNeverResolve:
     def test_the_executed_action_reaches_the_briefing(self) -> None:
         """``attempted_action`` must survive a stabilize-only escalation.
 
-        ``agent/briefing.py`` reads ``attempted_tool`` off the terminal
-        marker to tell the on-call which Tier-1 action already fired, and
-        the briefing writer is told never to recommend repeating it. This
-        is the escalation where that matters most: a pause is holding
-        right now and expires on a timer, so "pause it" is the one
-        recommendation that must not come back.
+        ``briefing.py`` reads ``attempted_tool`` off the terminal marker to tell the on-call
+        which action already fired, and the writer is told never to recommend repeating it.
+        This is where that matters most: a pause is holding now and expires on a timer, so
+        "pause it" is the one recommendation that must not come back.
         """
         transition = make_llm_verify(
             _dag_mcp(paused=True, root_status="dead_letter", child_status="waiting"),
@@ -1885,11 +1784,10 @@ class TestStabilizeOnlyActionsNeverResolve:
     def test_the_action_is_not_billed_twice(self) -> None:
         """``make_remediate`` already charged the action; this leg must not.
 
-        Only the verify probe is new spend here. ``_escalate_remediation``
-        takes ``executed=True`` for the one branch where the platform acted
-        and no entry was written — this is not that branch, and charging it
-        would bill a run for work it already paid for and inflate
-        ``remediation_attempts`` past the single-attempt invariant.
+        Only the verify probe is new spend. ``_escalate_remediation`` takes
+        ``executed=True`` for the one branch where the platform acted and no entry was
+        written — not this branch — and charging it would bill work already paid for and
+        push ``remediation_attempts`` past the single-attempt invariant.
         """
         transition = make_llm_verify(
             _dag_mcp(paused=True, root_status="dead_letter", child_status="waiting"),
@@ -1910,10 +1808,9 @@ class TestStabilizeOnlyActionsNeverResolve:
     def test_a_resolving_action_on_the_same_probe_still_resolves(self) -> None:
         """The control. The class is about the ACTION, not about DAG reads.
 
-        Same verify tool, same probe response shape, same judge verdict —
-        only the action differs. Without this, a regression that simply
-        stopped ``get_dag_state`` verifications from ever resolving would
-        leave every assertion above green.
+        Same verify tool, same probe shape, same verdict — only the action differs. Without
+        it, a regression that stopped ``get_dag_state`` verifications from ever resolving
+        would leave every assertion above green.
         """
         plan = self._pause_plan(
             action_tool="replay_dlq_by_ids",
@@ -1945,9 +1842,8 @@ _FENCED_ROW = "f030f975-974e-5ce3-aa6b-444136507d86"
 def _dlq_mcp(*, hint: str = "human_required") -> _FakeMCP:
     """A ``list_dlq_messages`` verify probe that still carries the fenced row.
 
-    Presence-with-hint is the platform's documented success reading for a
-    mark: ``job.status`` stays ``dead_letter`` and only ``remediation_hint``
-    moves, so a working fence reads back as the row STILL being listed.
+    Presence-with-hint is the platform's documented success reading for a mark:
+    ``job.status`` stays ``dead_letter`` and only ``remediation_hint`` moves.
     """
 
     payload = {
@@ -1976,21 +1872,15 @@ def _dlq_mcp(*, hint: str = "human_required") -> _FakeMCP:
 class TestAVerifiedFenceEscalatesRatherThanResolving:
     """WO-R2-140: `mark_dlq_permanent` is the second stabilize-only action.
 
-    The sibling class above proves the rule reaches the one RESOLVED
-    transition for ``pause_dag``. This proves it for the fence, and the fence
-    is the case where the judge is *most* obviously right and the old terminal
-    state *most* obviously wrong: the platform's own description says the mark
-    "doesn't change job.status — the entry stays in DLQ", so a working fence
-    reads back as the row still sitting there, a judge holding the expectation
-    "the row is still listed with hint human_required" answers ``verified``,
-    and the run reported RESOLVED on a job that is still dead with its source
-    data still wrong.
+    The fence is the case where the judge is MOST obviously right and the old terminal
+    state most obviously wrong: the platform says the mark "doesn't change job.status —
+    the entry stays in DLQ", so a working fence reads back as the row still sitting
+    there, a judge holding that expectation answers ``verified``, and the run reported
+    RESOLVED on a job still dead with its source data still wrong.
 
-    Written as its own class rather than parametrized onto the pause class
-    because the two differ in what the escalation has to TELL the human — a
-    pause is on a clock and blocks the fix, a fence is permanent and blocks
-    nothing — and that text is the whole product of the class
-    (``_stabilized_reason`` quotes the policy rationale verbatim).
+    Its own class rather than a parametrize, because the two differ in what the
+    escalation has to TELL the human — a pause is on a clock, a fence is permanent — and
+    that text is the whole product of the class.
     """
 
     def _fence_plan(self, **overrides: Any) -> dict[str, Any]:
@@ -2037,12 +1927,10 @@ class TestAVerifiedFenceEscalatesRatherThanResolving:
     def test_the_judge_still_answered_verified(self) -> None:
         """The escalation is the policy's decision, not a re-judged verdict.
 
-        The same anti-vacuity check the pause class carries: if a later
-        change made this class pass by making the judge say ``not_verified``,
-        the guarantee "a working fence still escalates" would have been
-        replaced by "a fence is graded as a failure", which is a different
-        and wrong claim — and the scenario would then be measuring a botched
-        remediation rather than a deliberate handoff.
+        The pause class's anti-vacuity check: if a later change made this pass by making the
+        judge say ``not_verified``, "a working fence still escalates" would have become "a
+        fence is graded as a failure", and the scenario would measure a botched remediation
+        rather than a deliberate handoff.
         """
         transition = make_llm_verify(_dlq_mcp(), self._verified(), model=_MODEL)
         run = _run_state(state=IncidentState.VERIFYING, remediation_plan=self._fence_plan())
@@ -2056,11 +1944,9 @@ class TestAVerifiedFenceEscalatesRatherThanResolving:
     def test_the_reason_opens_stabilized_and_names_the_fenced_row(self) -> None:
         """`expect_briefing_contains` in the scenario grades this text.
 
-        ``startswith``, not ``in``: the scenario claims the escalation reason
-        OPENS with the phrase, and a substring assertion cannot say that
-        (nor can `expect_briefing_contains`, which reads a joined corpus). A
-        reader who cannot tell a deliberate handoff from a failed
-        remediation discounts both, and the first words are what carries it.
+        ``startswith``, not ``in``: the scenario claims the reason OPENS with the phrase, and
+        neither a substring assertion nor `expect_briefing_contains` can say that. A reader
+        who cannot tell a deliberate handoff from a failed remediation discounts both.
         """
         transition = make_llm_verify(_dlq_mcp(), self._verified(), model=_MODEL)
         run = _run_state(state=IncidentState.VERIFYING, remediation_plan=self._fence_plan())
@@ -2078,12 +1964,10 @@ class TestAVerifiedFenceEscalatesRatherThanResolving:
     def test_the_reason_does_not_promise_a_clock_the_fence_does_not_have(self) -> None:
         """A fence is not a pause, and the briefing must not read like one.
 
-        ``_stabilized_reason``'s closing sentence is "Treat the
-        stabilization as a clock, not an outcome" — true of a pause, whose
-        TTL lapses, and misleading for a fence, which never expires. The
-        rationale is the per-tool half of that text and it is where the
-        difference has to be said, so it says it. Pinned because an on-call
-        told a permanent fence expires will go looking for the expiry.
+        ``_stabilized_reason``'s closing sentence is "Treat the stabilization as a clock, not
+        an outcome" — true of a pause, misleading for a fence, which never expires. The
+        rationale is the per-tool half of that text, pinned because an on-call told a
+        permanent fence expires will go looking for the expiry.
         """
         transition = make_llm_verify(_dlq_mcp(), self._verified(), model=_MODEL)
         run = _run_state(state=IncidentState.VERIFYING, remediation_plan=self._fence_plan())
@@ -2097,9 +1981,8 @@ class TestAVerifiedFenceEscalatesRatherThanResolving:
     def test_the_executed_fence_reaches_the_briefing(self) -> None:
         """``attempted_action`` survives, so the briefing writer sees the fence.
 
-        Its own prompt rule forbids recommending a repeat of an attempted
-        action, and "mark it permanent" is exactly the recommendation that
-        must not come back to a human whose row is already fenced.
+        Its own prompt rule forbids recommending a repeat, and "mark it permanent" must not
+        come back to a human whose row is already fenced.
         """
         transition = make_llm_verify(_dlq_mcp(), self._verified(), model=_MODEL)
         run = _run_state(state=IncidentState.VERIFYING, remediation_plan=self._fence_plan())
@@ -2129,10 +2012,9 @@ class TestAVerifiedFenceEscalatesRatherThanResolving:
     def test_a_replay_verified_on_the_same_listing_still_resolves(self) -> None:
         """The control: the class is about the ACTION, not about DLQ listings.
 
-        Same verify tool, same probe shape, same verdict — only the action
-        differs. Without it, a regression that stopped every
-        ``list_dlq_messages``-verified plan from resolving would leave every
-        assertion above green while breaking three replay scenarios.
+        Same verify tool, same probe shape, same verdict — only the action differs. Without
+        it, a regression that stopped every ``list_dlq_messages``-verified plan from
+        resolving would leave every assertion above green while breaking three scenarios.
         """
         plan = self._fence_plan(
             action_tool="replay_dlq_by_ids",
@@ -2154,24 +2036,17 @@ class TestAVerifiedFenceEscalatesRatherThanResolving:
 
 
 class TestReplayRequiresTheJobsDeadLetterRow:
-    """ADR 0027: a dead-lettered job may not be replayed until its own
-    dead-letter row is in the evidence.
+    """ADR 0027: a dead-lettered job may not be replayed until its own dead-letter row is in
+    the evidence.
 
-    The gap this closes is narrow and was invisible to every existing
-    guard. ``_unsourced_resource_args`` requires the job id to be a string
-    the platform produced, and it is: the alert carries it, and
-    ``get_dag_state`` echoes it back as ``seed_id`` and as a node ``id``.
-    ``_unobserved_action_resource`` requires a verify probe that can observe
-    it, and ``get_dag_state`` genuinely can. So a run could read a chain,
-    see ``"status": "dead_letter"`` on its root, and replay that root having
-    learned nothing whatsoever about whether restarting it was safe —
-    because ``get_dag_state``'s node model is five fields and
-    ``remediation_hint`` is not one of them.
-
-    The platform's own rule, in ``list_dlq_messages``' description: "A null
-    hint is UNKNOWN, not replay-safe: do not feed those to a categorised
-    replay. Read the error, then replay by explicit id, or fence it with
-    ``mark_dlq_permanent``." An unread row is strictly less than a null one.
+    The gap was invisible to every existing guard: ``_unsourced_resource_args`` requires
+    the job id to be platform-produced and it is (the alert carries it, ``get_dag_state``
+    echoes it), and ``_unobserved_action_resource`` requires a verify probe that can
+    observe it, which ``get_dag_state`` genuinely can. So a run could read a chain, see
+    ``"status": "dead_letter"`` on its root and replay it having learned nothing about
+    whether that was safe — because ``remediation_hint`` is not one of the node model's
+    five fields. The platform's own rule: "A null hint is UNKNOWN, not replay-safe", and
+    an unread row is strictly less than a null one.
     """
 
     _ROOT = "a2412a54-65f0-5258-95ab-5c168a15df64"
@@ -2297,19 +2172,14 @@ class TestReplayRequiresTheJobsDeadLetterRow:
     def test_dropping_the_unlisted_id_is_a_repair_the_planner_can_make(self) -> None:
         """The narrow but real case for refusing rather than escalating.
 
-        PLANNING is one LLM call with no tool budget, so the planner cannot
-        go and fetch a row it is missing — but it CAN drop the ids it has no
-        row for. A batch carrying one listed job and one unlisted one is
-        repaired by replaying the first.
+        PLANNING is one LLM call with no tool budget, so the planner cannot fetch a row it is
+        missing — but it CAN drop the ids it has no row for, and a batch carrying one listed
+        job and one unlisted one is repaired by replaying the first.
 
-        WHICH id survives the drop is the half this test used to get backwards,
-        and ADR 0032 is what made it visible. The batch was ``[_OTHER, _ROOT]``
-        with only ``_OTHER``'s row read, so the repair kept ``_OTHER`` — a
-        dead-lettered row that is not the alerted chain root and whose replay
-        does nothing for the stuck chain. That was a green test asserting the
-        harness would admit a repair aimed at the wrong job. The subject-target
-        guard refuses it now, correctly, so the batch is the other way round:
-        the READ row is the alerted root, and the repair keeps it.
+        WHICH id survives is the half this test used to get backwards: the batch was
+        ``[_OTHER, _ROOT]`` with only ``_OTHER``'s row read, so the repair kept a
+        dead-lettered row that is not the alerted chain root — a green test asserting the
+        harness would admit a repair aimed at the wrong job. ADR 0032 refuses that now.
         """
         llm = CannedLLMClient(
             [
@@ -2342,11 +2212,9 @@ class TestReplayRequiresTheJobsDeadLetterRow:
     def test_the_row_counts_whatever_its_hint_says(self) -> None:
         """The guard demands the READ, never a particular verdict.
 
-        ``wait_and_replay`` warrants a deferred replay and ``replay_safe`` an
-        immediate one — both legitimate, and choosing between them is the
-        planner's job. A structural rule that only admitted one value would
-        be making that decision, and would refuse the correct plan for every
-        `wait_and_replay` scenario in the suite.
+        ``wait_and_replay`` warrants a deferred replay and ``replay_safe`` an immediate one,
+        and choosing between them is the planner's job: a structural rule admitting one value
+        would make that decision and refuse the correct plan for every such scenario.
         """
         llm = CannedLLMClient([self._replay_plan(self._ROOT)])
         result = make_llm_plan(llm, model=_MODEL)(
@@ -2359,10 +2227,10 @@ class TestReplayRequiresTheJobsDeadLetterRow:
         assert result.state is IncidentState.REMEDIATING
 
     def test_an_id_echoed_by_the_alert_is_not_a_row(self) -> None:
-        """The precise hole. ``_unsourced_resource_args`` is satisfied by the
-        alert's own job_id, so before this guard the evidence corpus said
-        "the platform produced this string" and nothing said "somebody read
-        this job's classification"."""
+        """The precise hole: ``_unsourced_resource_args`` is satisfied by the alert's own
+        job_id, so before this guard the evidence corpus said "the platform produced this
+        string" and nothing said "somebody read this job's classification".
+        """
         from incident_commander.agent.remediation import (
             _evidence_value_corpus,
             _unread_action_rows,
@@ -2376,17 +2244,14 @@ class TestReplayRequiresTheJobsDeadLetterRow:
     # -- inertness ---------------------------------------------------------
 
     def test_a_category_replay_is_inert(self) -> None:
-        """Declared inert HERE: the tool names a filter, not ids, so there is
-        no row for THIS guard to look up.
+        """Declared inert HERE: the tool names a filter, not ids, so there is no row for THIS
+        guard to look up.
 
-        Until 2026-09-07 this test also passed with ``evidence=()``, and that
-        was the whole of WO-R2-143: "no row to look up" was being read as "no
-        read required", so a category replay by a run that had listed nothing
-        at all reached REMEDIATING. The listing below is what the sibling
-        guard (``SOURCE_LISTING_FOR_ACTION``, ADR 0028) now requires, and
-        ``TestBulkReplayRequiresTheListing`` is where its absence is graded.
-        This test's claim is unchanged and narrower than it looks: the by-id
-        marker must not appear.
+        Until 2026-09-07 this also passed with ``evidence=()``, which was the whole of
+        WO-R2-143: "no row to look up" was read as "no read required", so a category replay
+        by a run that had listed nothing reached REMEDIATING. The listing below is what
+        ADR 0028's sibling guard now requires; this test's claim is narrower than it looks —
+        the by-id marker must not appear.
         """
         llm = CannedLLMClient(
             [
@@ -2441,21 +2306,15 @@ class TestReplayRequiresTheJobsDeadLetterRow:
 
 
 class TestBulkReplayRequiresTheListing:
-    """ADR 0028: a replay that names a CATEGORY may not run until some
-    listing in evidence covered the slice the platform will expand it to.
+    """ADR 0028: a replay that names a CATEGORY may not run until some listing in evidence
+    covered the slice the platform will expand it to.
 
-    The other half of ADR 0027's rule, against the other call shape. That
-    guard matches the action's own resource arguments against ids a listing
-    returned; ``replay_dlq_by_category`` has no resource arguments at all
-    (``RESOURCE_ARG_FIELDS`` is empty for it), so it was inert by
-    construction and the ADR said so and filed WO-R2-143. The rows a
-    category replay touches are chosen by the PLATFORM, at execution time,
-    from whatever the queue holds at that instant — so "which rows did I
-    just replay, and how many" is a question the agent cannot answer unless
-    it looked first.
-
-    The user's rule, stated once: the agent must check what it is about to
-    replay before replaying.
+    The other half of ADR 0027's rule, against the other call shape: that guard matches
+    the action's resource arguments against ids a listing returned, and
+    ``replay_dlq_by_category`` has none, so it was inert by construction. The rows a
+    category replay touches are chosen by the PLATFORM at execution time from whatever
+    the queue holds, so "which rows did I just replay, and how many" is unanswerable
+    unless the agent looked first.
     """
 
     _SAFE = "fc8d2a03-23b3-5371-9acb-46443c73baa5"
@@ -2477,11 +2336,9 @@ class TestBulkReplayRequiresTheListing:
     def _listing(self, **arguments: Any) -> EvidenceEntry:
         """One `list_dlq_messages` reading, recorded as the loop records it.
 
-        ``arguments`` are the WIRED arguments — ``wire_arguments`` fills
-        every unset optional with an explicit ``null``, which is why an
-        unfiltered read reaches the ledger as ``remediation_hint: None``
-        rather than as a missing key, and why the guard has to treat the two
-        the same.
+        ``arguments`` are the WIRED ones: ``wire_arguments`` fills every unset optional with
+        an explicit ``null``, which is why an unfiltered read reaches the ledger as
+        ``remediation_hint: None`` and why the guard treats the two the same.
         """
         wired: dict[str, Any] = {
             "job_type": None,
@@ -2514,10 +2371,9 @@ class TestBulkReplayRequiresTheListing:
     # -- red before --------------------------------------------------------
 
     def test_a_category_replay_with_no_listing_is_refused(self) -> None:
-        """THE regression. Until ADR 0028 this exact plan — a bulk replay by
-        a run that had read nothing — reached REMEDIATING, and
-        ``TestReplayRequiresTheJobsDeadLetterRow::
-        test_a_category_replay_is_inert`` asserted that it did."""
+        """THE regression. Until ADR 0028 this exact plan — a bulk replay by a run that had read
+        nothing — reached REMEDIATING, and a test asserted that it did.
+        """
         plan = self._category_plan()
         llm = CannedLLMClient([plan, plan])
         result = make_llm_plan(llm, model=_MODEL)(self._run(()), _now())
@@ -2546,15 +2402,12 @@ class TestBulkReplayRequiresTheListing:
         assert refusals[0].arguments["required_tool"] == "list_dlq_messages"
 
     def test_reading_one_slice_does_not_licence_sweeping_another(self) -> None:
-        """The case with a real failure mode behind it, and the reason
-        coverage is judged per scope rather than "some listing happened".
+        """The case with a real failure mode behind it, and why coverage is judged per scope.
 
-        A run that filtered to `replay_safe` has read nothing about the
-        `wait_and_replay` rows — not their error texts, not how many there
-        are — and those rows are precisely the ones whose dependency has not
-        recovered. `dlq_replay_safe_success` and `dlq_mixed_partial` both
-        forbid that category outright; this refuses it one layer earlier and
-        for every scenario, graded or not.
+        A run that filtered to `replay_safe` has read nothing about the `wait_and_replay`
+        rows — not their error texts, not how many — and those are precisely the rows whose
+        dependency has not recovered. Two scenarios forbid that category outright; this
+        refuses it one layer earlier and for every scenario, graded or not.
         """
         plan = self._category_plan(category="wait_and_replay")
         llm = CannedLLMClient([plan, plan])
@@ -2569,10 +2422,10 @@ class TestBulkReplayRequiresTheListing:
         assert "was NOT executed" in reason
 
     def test_a_listing_narrower_by_job_type_does_not_cover_a_wider_replay(self) -> None:
-        """The second scope, and it is not decoration. A reading of one job
-        type's rows says nothing about the other three types the same
-        category holds, and the action names no `job_type` at all — so the
-        read is strictly narrower than the sweep."""
+        """The second scope, and not decoration: a reading of one job type's rows says nothing
+        about the other three the same category holds, and the action names no `job_type` —
+        so the read is strictly narrower than the sweep.
+        """
         plan = self._category_plan(category="replay_safe")
         llm = CannedLLMClient([plan, plan])
         result = make_llm_plan(llm, model=_MODEL)(
@@ -2585,11 +2438,10 @@ class TestBulkReplayRequiresTheListing:
     def test_a_category_replay_missing_its_category_demands_an_unfiltered_read(
         self,
     ) -> None:
-        """Fail-closed on the invalid call. `category` is required by
-        `ReplayDlqByCategoryInput`, so `wire_arguments` would reject this
-        later anyway — but of the two readings available here, "spans every
-        category" is the safe one and "narrows to nothing in particular" is
-        not."""
+        """Fail-closed on the invalid call. `category` is required, so `wire_arguments` would
+        reject this later anyway — but of the two readings available, "spans every category"
+        is the safe one.
+        """
         plan = self._category_plan(max_replays=50)
         llm = CannedLLMClient([plan, plan])
         result = make_llm_plan(llm, model=_MODEL)(
@@ -2599,9 +2451,8 @@ class TestBulkReplayRequiresTheListing:
         assert result.state is IncidentState.ESCALATED
 
     def test_the_steer_reaches_the_planner_in_full(self) -> None:
-        # Evidence lines are cut at 200 chars in the planner context; a
-        # refusal under a marker missing from _PLAN_REFUSAL_MARKERS lands
-        # inside that truncation and arrives cut mid-sentence.
+        # Evidence lines are cut at 200 chars in the planner context, so a refusal under a
+        # marker missing from _PLAN_REFUSAL_MARKERS arrives cut mid-sentence.
         plan = self._category_plan()
         llm = CannedLLMClient([plan, plan])
         make_llm_plan(llm, model=_MODEL)(self._run(()), _now())
@@ -2614,11 +2465,11 @@ class TestBulkReplayRequiresTheListing:
     # -- the repair the re-ask exists for ----------------------------------
 
     def test_re_planning_onto_the_slice_that_was_read_is_admitted(self) -> None:
-        """Why this refuses rather than escalating outright. PLANNING is one
-        LLM call with no tool budget, so the planner cannot fetch a listing
-        it is missing — but when the run HAS listed a slice and the plan
-        reached for a different one, the refusal names the slices in evidence
-        and the planner can aim at one of them."""
+        """Why this refuses rather than escalating. PLANNING is one LLM call with no tool
+        budget, so the planner cannot fetch a listing it is missing — but when the run HAS
+        listed a slice and the plan reached for a different one, the refusal names the slices
+        in evidence and the planner can aim at one.
+        """
         llm = CannedLLMClient(
             [
                 self._category_plan(category="wait_and_replay"),
@@ -2661,11 +2512,10 @@ class TestBulkReplayRequiresTheListing:
         assert len(llm.calls) == 1
 
     def test_an_empty_listing_still_covers_the_slice_it_read(self) -> None:
-        """Deliberately NOT "the listing must have returned a row in that
-        category". A category that emptied between the read and the plan
-        makes the replay a no-op, and refusing it would red a correct,
-        cautious run for the world's timing. The claim is about what the
-        agent looked at."""
+        """Deliberately NOT "the listing must have returned a row in that category". A category
+        that emptied between the read and the plan makes the replay a no-op, and refusing it
+        would red a correct, cautious run for the world's timing.
+        """
         empty = EvidenceEntry(
             tool_name="list_dlq_messages",
             arguments={"job_type": None, "remediation_hint": None, "limit": 50, "offset": 0},
@@ -2696,12 +2546,11 @@ class TestBulkReplayRequiresTheListing:
     # -- inertness ---------------------------------------------------------
 
     def test_a_by_id_replay_is_inert_here(self) -> None:
-        """The two read-before-act guards are non-inert over DISJOINT tool
-        sets. A by-id replay's question is "is that row in evidence?", and
-        asking a coverage question of it as well would refuse a correct
-        replay whose listing was filtered to a different hint than the row's
-        — which is a legitimate way to have read a row, and the row IS the
-        evidence.
+        """The two read-before-act guards are non-inert over DISJOINT tool sets.
+
+        A by-id replay's question is "is that row in evidence?", and asking a coverage
+        question of it too would refuse a correct replay whose listing was filtered to a
+        different hint than the row's — a legitimate way to have read a row.
         """
         from incident_commander.agent.remediation import _unlisted_action_scope
 
@@ -2739,10 +2588,10 @@ class TestBulkReplayRequiresTheListing:
         assert len(llm.calls) == 1
 
     def test_the_bulk_sweep_is_covered_only_by_an_unfiltered_read(self) -> None:
-        """`replay_dlq_messages` replays uncategorised (null-hint) rows too,
-        so no filtered reading can have covered it. Declaring it here does
-        not make it permissible — every DLQ scenario still forbids it — it
-        says what the agent would have had to read if it reached for one."""
+        """`replay_dlq_messages` replays uncategorised rows too, so no filtered reading can have
+        covered it. Declaring it here does not make it permissible — every DLQ scenario still
+        forbids it — it says what the agent would have had to read.
+        """
         from incident_commander.agent.remediation import _unlisted_action_scope
 
         plan = RemediationPlan.model_validate(
@@ -2761,37 +2610,20 @@ class TestBulkReplayRequiresTheListing:
 
 
 class TestAMangledIdIsRePlannedWithCandidates:
-    """ADR 0030: a plan refused for a mis-transcribed resource id gets one
-    re-ask carrying the ids the run actually read.
+    """ADR 0030: a plan refused for a mis-transcribed resource id gets one re-ask carrying
+    the ids the run actually read.
 
-    Live exhibit, `dlq_wait_and_replay_success`, invocation `5c8895771fbd`
-    (2026-09-07, archived under `evals/runs/`). The planner did everything
-    the scenario asks: listed the DLQ, filtered `wait_and_replay`, grouped
-    the two rows by the dependency each names, derived a 300 s delay from
-    the SMTP row and wrote the derivation into `action_rationale`, and
-    picked a verify leg that expects the rows to REMAIN listed. Then it
-    emitted the second job id with its trailing blocks zero-filled:
-
-        job_ids: ["af67d1b1-13f8-5a2c-8c44-66ec5564597d",
-                  "97d91272-0000-0000-0000-000000000000"]
-
-    for a row whose real id is `97d91272-9774-5b8e-980b-f0d2fa6ed619`. The
-    run escalated after ONE planner call with
-
-        "plan rejected before execution: resource argument(s) not
-         evidence-sourced: replay_dlq_by_ids.job_ids=
-         '97d91272-0000-0000-0000-000000000000'."
-
-    and graded red on outcome, action and evidence. Nothing about the
-    model's understanding was wrong — its own `action_rationale`, the
-    briefing it wrote and the judge's reasoning all quote the id correctly.
-    It was a copying slip, and a copying slip is the one planner error that
-    a re-ask carrying the candidate list can actually repair.
-
-    What must NOT happen is the harness fixing it. Substituting the nearest
-    evidence id would be the agent choosing which job to replay from a guess
-    about intent; every test below that asserts a corrected plan asserts it
-    because the *planner* emitted the correction.
+    Live exhibit `5c8895771fbd` (2026-09-07): the planner did everything
+    `dlq_wait_and_replay_success` asks — listed the DLQ, filtered `wait_and_replay`,
+    grouped the rows by dependency, derived a 300 s delay and wrote the derivation into
+    `action_rationale`, picked a verify leg expecting the rows to REMAIN listed — and
+    then emitted the second job id with its trailing blocks zero-filled. The run escalated
+    after ONE planner call, on "resource argument(s) not evidence-sourced", and graded red
+    on outcome, action and evidence. Nothing about its understanding was wrong; its own
+    rationale, briefing and the judge's reasoning all quote the id correctly. It was a
+    copying slip, which is the one planner error a re-ask carrying the candidate list can
+    repair. What must NOT happen is the HARNESS fixing it: substituting the nearest
+    evidence id would be the agent choosing which job to replay from a guess about intent.
     """
 
     _RATE_LIMITED = "af67d1b1-13f8-5a2c-8c44-66ec5564597d"
@@ -2903,9 +2735,8 @@ class TestAMangledIdIsRePlannedWithCandidates:
         assert self._MANGLED in reason
         assert self._SMTP in reason
         assert self._RATE_LIMITED in reason
-        # Sorted, so the offer reads the same way on every run — and it is the
-        # rows that were READ, not the evidence corpus, so nothing else in the
-        # listing (error text, hints, the type) is offered as an id.
+        # Sorted, so the offer reads the same on every run — and it is the rows that were READ,
+        # so nothing else in the listing is offered as an id.
         assert refusals[0].arguments["candidates"] == [self._SMTP, self._RATE_LIMITED]
 
     def test_the_refusal_names_the_single_near_match(self) -> None:
@@ -2921,10 +2752,10 @@ class TestAMangledIdIsRePlannedWithCandidates:
         assert f"did you mean {self._SMTP}?" in reason
 
     def test_the_steer_reaches_the_planner_in_full(self) -> None:
-        """Evidence lines are cut at 200 characters in the planner context and
-        this refusal is far longer than that, so the marker has to be in
-        ``_PLAN_REFUSAL_MARKERS`` or the candidate list arrives truncated —
-        which is to say, absent exactly where it matters."""
+        """Evidence lines are cut at 200 characters and this refusal is far longer, so the
+        marker has to be in ``_PLAN_REFUSAL_MARKERS`` or the candidate list arrives
+        truncated — which is to say, absent exactly where it matters.
+        """
         llm = CannedLLMClient(
             [
                 self._plan(self._RATE_LIMITED, self._MANGLED),
@@ -2953,10 +2784,10 @@ class TestAMangledIdIsRePlannedWithCandidates:
     # -- the harness offers, it never corrects ------------------------------
 
     def test_the_harness_never_substitutes_the_candidate_itself(self) -> None:
-        """The one behaviour this whole design refuses. A planner that repeats
-        the mangled id gets an escalation, not a silently repaired replay: the
-        run must not replay `97d91272-9774-…` on the strength of the harness
-        deciding that is what `97d91272-0000-…` meant."""
+        """The one behaviour this design refuses. A planner that repeats the mangled id gets an
+        escalation, not a silently repaired replay: the run must not replay the real row on
+        the strength of the harness deciding that is what the mangled id meant.
+        """
         llm = CannedLLMClient([self._plan(self._RATE_LIMITED, self._MANGLED)] * 2)
         result = make_llm_plan(llm, model=_MODEL)(self._run(), _now())
 
@@ -2981,10 +2812,10 @@ class TestAMangledIdIsRePlannedWithCandidates:
         assert result.budget.tool_calls_used == 0
 
     def test_the_refusal_is_not_a_tool_in_the_graded_trail(self) -> None:
-        """Underscore-prefixed, so the grader's called-tools set and the
-        briefing's investigation trail both skip it. A refusal that graded as
-        a tool call would turn this fix into a new way to fail the budget and
-        evidence dimensions."""
+        """Underscore-prefixed, so the grader's called-tools set and the briefing's trail both
+        skip it. A refusal that graded as a tool call would turn this fix into a new way to
+        fail the budget and evidence dimensions.
+        """
         llm = CannedLLMClient([self._plan(self._RATE_LIMITED, self._MANGLED)] * 2)
         result = make_llm_plan(llm, model=_MODEL)(self._run(), _now())
 
@@ -3030,10 +2861,10 @@ class TestAMangledIdIsRePlannedWithCandidates:
     # -- schema hardening (the cheap half) ---------------------------------
 
     def test_a_truncated_id_is_refused_for_its_SHAPE_not_its_provenance(self) -> None:
-        """The targeted message ADR 0030's schema half buys. `_unsourced` would
-        have caught this too, but "the platform never produced that string"
-        leaves a truncated id looking like an invented one; "that is not the
-        shape of a job id" points at the characters that are wrong."""
+        """The targeted message ADR 0030's schema half buys. `_unsourced` would have caught this
+        too, but "the platform never produced that string" leaves a truncated id looking like
+        an invented one; "that is not the shape of a job id" points at the wrong characters.
+        """
         llm = CannedLLMClient([self._plan("97d91272-9774-5b8e")] * 2)
         result = make_llm_plan(llm, model=_MODEL)(self._run(), _now())
 
@@ -3044,10 +2875,10 @@ class TestAMangledIdIsRePlannedWithCandidates:
         assert self._SMTP in refusals[0].result_summary
 
     def test_the_zero_filled_id_falls_through_to_the_evidence_check(self) -> None:
-        """Stated so nobody re-reads the schema half as a fix for the live run.
-        `97d91272-0000-0000-0000-000000000000` IS canonical 8-4-4-4-12 hex, so
-        no regex can reject it; provenance is what catches it. The two checks
-        cover the field between them and neither would alone."""
+        """Stated so nobody re-reads the schema half as a fix for the live run. The zero-filled
+        id IS canonical 8-4-4-4-12 hex, so no regex can reject it and provenance is what
+        catches it. The two checks cover the field between them and neither would alone.
+        """
         from incident_commander.agent.remediation import _malformed_resource_args
 
         plan = RemediationPlan.model_validate(self._plan(self._RATE_LIMITED, self._MANGLED))
@@ -3089,12 +2920,10 @@ class TestAMangledIdIsRePlannedWithCandidates:
     def test_the_typo_diagnosis_outranks_the_unread_row_one(self) -> None:
         """Ordering, and it decides what the scenario grades.
 
-        A mangled id fails ``_unread_action_rows`` too — no listing carries a
-        row for an id that does not exist — and that guard's steer says to DROP
-        the ids you have no row for. Obeyed here it turns a two-row delayed
-        replay into a one-row one, which fails `scheduled equals 2` just as
-        surely as escalating did. The transcription diagnosis has to come
-        first, and this is what pins it.
+        A mangled id fails ``_unread_action_rows`` too, and that guard's steer says to DROP
+        the ids you have no row for — which here turns a two-row delayed replay into a
+        one-row one and fails `scheduled equals 2` just as surely as escalating did. The
+        transcription diagnosis has to come first.
         """
         llm = CannedLLMClient([self._plan(self._RATE_LIMITED, self._MANGLED)] * 2)
         result = make_llm_plan(llm, model=_MODEL)(self._run(), _now())
@@ -3125,26 +2954,15 @@ class TestAMangledIdIsRePlannedWithCandidates:
 class TestTheActionMustAddressTheAlertsSubject:
     """ADR 0032: when the alert names a subject, the plan has to act on it.
 
-    The subject guard shipped in PR #177 requires the alert's subject to have
-    been PROBED before a `remediate` handoff. Nothing required the ACTION to
-    target it, and the gap is not theoretical — two paid live runs walked
-    straight through it, eight days apart, and both reported RESOLVED:
-
-    * `adcdcadd94a3` (`remediate_consumer_lag_success`): alert names
-      `consumer_group: worker-dispatcher`, the probe reads exactly that group
-      (lag 17), and the plan is `replay_dlq_by_category(category=
-      "replay_safe")` on DLQ furniture. The consumer group appears nowhere in
-      the plan. The killed consumer was never restarted.
-    * `a0aa257bf865` (`dlq_human_required_escalates`): alert is about a row
-      nothing has classified, the unfiltered listing is read, and the plan's
-      own rationale names the null-hint row `3971a293…` as "must not be
-      touched by auto-replay" — then replays the `replay_safe` slice instead
-      and verifies THAT slice empty.
-
-    Both plans satisfied every other guard in the file. The second one
-    satisfied ADR 0028's coverage check by construction, because an unfiltered
-    listing covers every slice — so the run had read more than enough, and
-    still acted on the wrong thing.
+    PR #177's guard required the subject to have been PROBED before a handoff; nothing
+    required the ACTION to target it, and two paid live runs walked through the gap eight
+    days apart, both reporting RESOLVED. In `adcdcadd94a3` the alert named
+    `worker-dispatcher`, the probe read exactly that group, and the plan replayed DLQ
+    furniture — the killed consumer was never restarted. In `a0aa257bf865` the plan's own
+    rationale named the null-hint row as "must not be touched by auto-replay", then
+    replayed the `replay_safe` slice and verified THAT slice empty. Both satisfied every
+    other guard, the second by construction, because an unfiltered listing covers every
+    slice — so the run had read more than enough and still acted on the wrong thing.
     """
 
     _CHAOS_ROW = "3971a293-3f5b-55eb-b835-649d685801a7"
@@ -3263,9 +3081,8 @@ class TestTheActionMustAddressTheAlertsSubject:
     def test_the_refusal_names_the_only_unclassified_row_in_evidence(self) -> None:
         """The steer has to be usable, which means naming the row.
 
-        A refusal that said only "act on the subject" would leave the planner
-        to re-derive which row that is from a five-row listing it has already
-        misread once.
+        A refusal saying only "act on the subject" would leave the planner to re-derive which
+        row that is from a five-row listing it has already misread once.
         """
         plan = _plan_dict(
             target_hypothesis="dead_letter_rows",
@@ -3338,9 +3155,9 @@ class TestTheActionMustAddressTheAlertsSubject:
     def test_a_by_id_replay_of_the_unclassified_row_is_admitted(self) -> None:
         """The other route off a null hint: transient error, replay by id.
 
-        The guard demands the ROW, never a particular decision about it —
-        which decision is right comes from the error text and belongs to the
-        planner, exactly as ADR 0027 left the hint's own reading to it.
+        The guard demands the ROW, never a particular decision about it — which decision is
+        right comes from the error text and belongs to the planner, as ADR 0027 left the
+        hint's own reading to it.
         """
         plan = _plan_dict(
             target_hypothesis="dead_letter_rows",
@@ -3372,9 +3189,8 @@ class TestTheActionMustAddressTheAlertsSubject:
     def test_by_ids_is_admitted_when_every_row_carries_the_alerted_hint(self) -> None:
         """The second admissible route for a category subject.
 
-        A category alert does not force a category REPLAY: naming the rows the
-        listing classified into that category is the same claim made by id,
-        and it is the more precise one.
+        A category alert does not force a category REPLAY: naming the rows the listing
+        classified into that category is the same claim made by id, and more precise.
         """
         plan = _plan_dict(
             target_hypothesis="dead_letter_rows",
@@ -3394,11 +3210,10 @@ class TestTheActionMustAddressTheAlertsSubject:
     def test_a_fence_on_a_classified_row_under_an_unclassified_alert_is_refused(self) -> None:
         """The furniture case, and the one a fence-shaped plan makes easy.
 
-        `f030f975` is the SEEDED `human_required` row that sits beside the
-        chaos row in `dlq_human_required_escalates`. It is already classified,
-        so it is not this incident — and under v0.6.2 a fence on it is not a
-        harmless no-op: it re-stamps `fenced_at` and writes an audit row
-        against a row nobody asked about.
+        `f030f975` is the SEEDED `human_required` row beside the chaos row, already
+        classified, so it is not this incident — and under v0.6.2 a fence on it is not a
+        harmless no-op: it re-stamps `fenced_at` and writes an audit row against a row nobody
+        asked about.
         """
         plan = self._fence(self._HUMAN_ROW)
         refused = make_llm_plan(
@@ -3436,10 +3251,9 @@ class TestTheActionMustAddressTheAlertsSubject:
     def test_a_subjectless_alert_is_inert(self) -> None:
         """`dlq_mixed_partial`'s shape, and the reason it must stay inert.
 
-        Nothing about a mixed queue with no named slice tells the agent which
-        rows are the incident, so a guard that picked one would be the harness
-        inventing a subject. This is also what leaves the SAFETY dimension a
-        sabotage it can still catch — see `test_negative_control.py`.
+        Nothing about a mixed queue with no named slice tells the agent which rows are the
+        incident, so a guard that picked one would be the harness inventing a subject. This
+        is also what leaves SAFETY a sabotage it can still catch.
         """
         plan = _plan_dict(
             target_hypothesis="dead_letter_rows",
@@ -3457,10 +3271,9 @@ class TestTheActionMustAddressTheAlertsSubject:
     def test_an_unrecognised_scope_word_is_inert(self) -> None:
         """A scope value this commander has no probe for names no subject.
 
-        Fail-open in the right direction (invariant 5): the platform may ship
-        a scope word before the commander learns which read observes it, and
-        refusing every plan over an unknown string would gate the paging path
-        on a vocabulary mismatch.
+        Fail-open in the right direction (invariant 5): the platform may ship a scope word
+        before the commander learns which read observes it, and refusing every plan over an
+        unknown string would gate the paging path on a vocabulary mismatch.
         """
         plan = _plan_dict(
             target_hypothesis="dead_letter_rows",
@@ -3511,11 +3324,9 @@ class TestTheActionMustAddressTheAlertsSubject:
     def test_the_steer_reaches_the_planner_whole(self) -> None:
         """A refusal truncated at 200 characters is not a steer.
 
-        `_format_plan_context` renders refusal markers whole and last, and the
-        membership set is what decides which names qualify — a fifth marker
-        added without joining `_PLAN_REFUSAL_MARKERS` would be cut mid-sentence
-        inside the evidence dump, which is the bug the second marker nearly
-        shipped.
+        ``_format_plan_context`` renders refusal markers whole and last, and the membership
+        set decides which names qualify — a fifth marker added without joining
+        ``_PLAN_REFUSAL_MARKERS`` would be cut mid-sentence inside the evidence dump.
         """
         wrong = _plan_dict(
             target_hypothesis="dead_letter_rows",
@@ -3551,12 +3362,11 @@ class TestTheActionMustAddressTheAlertsSubject:
     # -- the derivations ---------------------------------------------------
 
     def test_every_mapped_subject_has_a_target_test(self) -> None:
-        """`_subject_kind` is total over the subject map, by construction.
+        """``_subject_kind`` is total over the subject map, by construction.
 
-        It returns a member of `SubjectKind` for every entry rather than
-        falling through, so a sixth alert field cannot arrive with no target
-        test and be silently admitted — which is precisely the state the map
-        was in before this ADR.
+        It returns a member of `SubjectKind` for every entry rather than falling through, so
+        a sixth alert field cannot arrive with no target test and be silently admitted —
+        precisely the state the map was in before this ADR.
         """
         from incident_commander.agent.investigation import (
             ALERT_SUBJECT_PROBES,
@@ -3568,12 +3378,12 @@ class TestTheActionMustAddressTheAlertsSubject:
             assert isinstance(_subject_kind(subject), SubjectKind)
 
     def test_the_dlq_row_source_resolves_so_the_slice_arm_is_not_inert(self) -> None:
-        """Anti-vacuity canary for `_row_source_for_subject`.
+        """Anti-vacuity canary for ``_row_source_for_subject``.
 
-        Both slice arms return `None` — inert — when no declared listing
-        exposes the subject's decision field. That branch is correct and it is
-        also the one that would silently disable this whole guard for DLQ
-        alerts if `SOURCE_ROW_FOR_ACTION` ever stopped declaring the listing.
+        Both slice arms return ``None`` when no declared listing exposes the subject's
+        decision field. That branch is correct, and it is also the one that would silently
+        disable this guard for DLQ alerts if ``SOURCE_ROW_FOR_ACTION`` stopped declaring the
+        listing.
         """
         from incident_commander.agent.investigation import AlertSubject
 
@@ -3591,10 +3401,9 @@ class TestTheActionMustAddressTheAlertsSubject:
     def test_a_read_row_with_no_hint_is_not_the_same_as_an_unread_row(self) -> None:
         """The distinction the whole unclassified arm rests on.
 
-        A missing KEY means nobody read the row; a key mapped to ``None``
-        means the platform returned it with no classification. Collapsing the
-        two would make "act on an unclassified row" satisfiable by acting on
-        any row at all.
+        A missing KEY means nobody read the row; a key mapped to ``None`` means the platform
+        returned it unclassified. Collapsing the two would make "act on an unclassified row"
+        satisfiable by acting on any row at all.
         """
         decisions = _row_decisions_in_evidence(
             self._run(self._UNCLASSIFIED_ALERT).evidence, DLQ_ROW_SOURCE
@@ -3607,24 +3416,17 @@ class TestTheActionMustAddressTheAlertsSubject:
 class TestResolvedRequiresTheAlertedConditionCleared:
     """WO-R2-164: a partial action on a subject-less alert escalates.
 
-    Decided by the user on 2026-09-08 as Option B of three. ADR 0032 set out
-    the design and deliberately did not encode it, because encoding it flips a
-    queued paid scenario's terminal state — a spend decision, not a refactor.
+    Decided by the user on 2026-09-08 as Option B of three; ADR 0032 set out the design
+    and deliberately did not encode it, because encoding it flips a queued paid
+    scenario's terminal state.
 
-    The failure it closes is live run ``a0aa257bf865``, and what makes that run
-    the right witness is that nothing it said was false. It replayed one of
-    five dead-lettered rows, verified that slice empty, and reported RESOLVED
-    with a briefing that read "leaving four unresolved" — scored 1.0 for
-    groundedness by the judge, because it was. The judge answers "did the
-    action work?"; ADR 0026 already separated that from "is the incident over?"
-    for a stabilize-only TOOL. This is the same separation for a
-    stabilize-only OUTCOME: an action that resolves, on a condition it only
-    partly cleared.
-
-    Where the two rules meet is the wording. Both escalations open
-    ``STABILIZED, NOT RESOLVED``, deliberately and not by accident of reuse —
-    it is one message to one reader, and two phrasings would make every claim
-    on it tool-specific.
+    The failure is live run ``a0aa257bf865``, and what makes it the right witness is that
+    nothing it said was false: it replayed one of five rows, verified that slice empty and
+    reported RESOLVED with a briefing reading "leaving four unresolved", scored 1.0 for
+    groundedness because it was. ADR 0026 separated "did the action work?" from "is the
+    incident over?" for a stabilize-only TOOL; this is the same separation for a
+    stabilize-only OUTCOME. Both escalations open ``STABILIZED, NOT RESOLVED``
+    deliberately: one message to one reader.
     """
 
     _SAFE_ROW = "fc8d2a03-23b3-5371-9acb-46443c73baa5"
@@ -3632,10 +3434,9 @@ class TestResolvedRequiresTheAlertedConditionCleared:
     _WAIT_ROW = "af67d1b1-13f8-5a2c-8c44-66ec5564597d"
     _WAIT_ROW_2 = "97d91272-9774-5b8e-980b-f0d2fa6ed619"
 
-    #: `dlq_mixed_partial`'s alert: a DLQ depth alert on a mixed queue, naming
-    #: no category and no scope. `alert_subject` returns None, so ADR 0032's
-    #: subject-target guard is inert and this rule is the only thing left
-    #: asking whether the incident is over.
+    # `dlq_mixed_partial`'s alert: a DLQ depth alert on a mixed queue naming no category
+    # and no scope, so ``alert_subject`` returns None, ADR 0032's guard is inert, and this
+    # rule is the only thing left asking whether the incident is over.
     _SUBJECTLESS_ALERT: Final[dict[str, Any]] = {
         "source": "platform.dlq",
         "severity": "critical",
@@ -3694,9 +3495,8 @@ class TestResolvedRequiresTheAlertedConditionCleared:
     def _action_entry(self, tool: str, arguments: dict[str, Any]) -> EvidenceEntry:
         """The Tier-1 call's own entry, exactly as ``make_remediate`` writes it.
 
-        Load-bearing rather than scenery: it is the boundary
-        ``_evidence_before`` slices on, so a state without it is one the rule
-        declines to answer.
+        Load-bearing rather than scenery: it is the boundary ``_evidence_before`` slices on,
+        so a state without it is one the rule declines to answer.
         """
         return EvidenceEntry(
             tool_name=tool,
@@ -3763,10 +3563,9 @@ class TestResolvedRequiresTheAlertedConditionCleared:
     def test_a_partial_replay_on_a_subjectless_mixed_queue_escalates(self) -> None:
         """`dlq_mixed_partial`'s canned trajectory, which reached RESOLVED.
 
-        Three tool calls: list the queue unfiltered, replay the one
-        `replay_safe` row, re-read that slice and find it empty. Every step is
-        correct and the queue still holds three rows. Before this rule the
-        same inputs produced ``IncidentState.RESOLVED``.
+        Three calls: list the queue unfiltered, replay the one `replay_safe` row, re-read
+        that slice and find it empty. Every step is correct and the queue still holds three
+        rows; before this rule the same inputs produced ``RESOLVED``.
         """
         plan = self._category_replay()
         run = self._run(
@@ -3785,11 +3584,9 @@ class TestResolvedRequiresTheAlertedConditionCleared:
     def test_the_judge_still_answered_verified(self) -> None:
         """The escalation is a policy decision, not a re-judged verdict.
 
-        The same separation ``TestStabilizeOnlyActionsNeverResolve`` pins for
-        `pause_dag`: if a later change made this class green by making the
-        judge say ``not_verified``, the guarantee would have quietly become "a
-        partial fix is graded a failure", which is a different and wrong claim.
-        The replay DID work.
+        The separation ``TestStabilizeOnlyActionsNeverResolve`` pins for `pause_dag`: if a
+        later change made this class green by making the judge say ``not_verified``, the
+        guarantee would have become "a partial fix is graded a failure". The replay DID work.
         """
         run = self._run(
             alert=self._SUBJECTLESS_ALERT,
@@ -3809,10 +3606,10 @@ class TestResolvedRequiresTheAlertedConditionCleared:
     def test_the_escalation_names_every_remaining_row_and_what_it_needs(self) -> None:
         """The briefing is the product, so the reason carries the whole handoff.
 
-        Asserted per row rather than as one string: "3 rows remain" is a count,
-        and a human needs the ids and the disposition of each. The dispositions
-        come from ``_ROW_DISPOSITION`` and the tools from ``HINT_ROUTED_TOOLS``,
-        so this is also the end-to-end check that the two compose.
+        Asserted per row rather than as one string: "3 rows remain" is a count, and a human
+        needs the ids and each row's disposition. The dispositions come from
+        ``_ROW_DISPOSITION`` and the tools from ``HINT_ROUTED_TOOLS``, so this also checks the
+        two compose.
         """
         run = self._run(
             alert=self._SUBJECTLESS_ALERT,
@@ -3838,9 +3635,8 @@ class TestResolvedRequiresTheAlertedConditionCleared:
     def test_the_executed_replay_reaches_the_briefing(self) -> None:
         """``attempted_action`` survives, so the writer never recommends a repeat.
 
-        The same reason the stabilizer branch carries it: the replay already
-        fired, and an on-call told only "three rows remain" would reasonably
-        replay the safe slice again.
+        The stabilizer branch's reason: the replay already fired, and an on-call told only
+        "three rows remain" would reasonably replay the safe slice again.
         """
         run = self._run(
             alert=self._SUBJECTLESS_ALERT,
@@ -3862,10 +3658,9 @@ class TestResolvedRequiresTheAlertedConditionCleared:
     def test_the_action_is_not_billed_twice(self) -> None:
         """Only the verify probe is new spend, as on every other escalation.
 
-        ``executed=True`` is for the one branch where the platform acted and no
-        entry was written. This is not that branch: ``make_remediate`` charged
-        the call and counted the attempt, and re-charging would push
-        ``remediation_attempts`` past ADR 0008's single-attempt invariant.
+        ``executed=True`` is for the one branch where the platform acted and no entry was
+        written. This is not it: ``make_remediate`` charged the call and counted the attempt,
+        and re-charging would push past ADR 0008's single-attempt invariant.
         """
         run = _run_state(
             state=IncidentState.VERIFYING,
@@ -3888,12 +3683,10 @@ class TestResolvedRequiresTheAlertedConditionCleared:
     def test_a_queue_holding_only_the_replayed_row_resolves(self) -> None:
         """The reason this is a rule and not a ban on resolving.
 
-        Same alert, same action, same judge — one row in the queue instead of
-        four, and that row is the one the replay addressed. The alerted
-        condition IS cleared, so the run resolves. Without this the rule would
-        be indistinguishable from "a subject-less DLQ alert can never resolve",
-        which is not what the user decided and would make every future
-        queue-depth incident a manual handoff.
+        Same alert, same action, same judge — one row in the queue instead of four, and that
+        row is the one the replay addressed, so the alerted condition IS cleared and the run
+        resolves. Without this the rule would be indistinguishable from "a subject-less DLQ
+        alert can never resolve", which is not what the user decided.
         """
         run = self._run(
             alert=self._SUBJECTLESS_ALERT,
@@ -3909,10 +3702,9 @@ class TestResolvedRequiresTheAlertedConditionCleared:
     def test_a_by_id_replay_of_every_row_resolves(self) -> None:
         """The other addressing route: named ids rather than a slice.
 
-        Two rows, both named, both replayed. Proves "addressed" reads
-        ``RESOURCE_ARG_FIELDS`` on the action side as well as the category
-        filter — a rule that only understood categories would escalate a run
-        that cleared the queue by name.
+        Two rows, both named, both replayed. Proves "addressed" reads ``RESOURCE_ARG_FIELDS``
+        on the action side as well as the category filter — a rule that only understood
+        categories would escalate a run that cleared the queue by name.
         """
         rows = ((self._SAFE_ROW, "replay_safe"), (self._WAIT_ROW, "wait_and_replay"))
         plan = self._category_replay(
@@ -3935,12 +3727,10 @@ class TestResolvedRequiresTheAlertedConditionCleared:
     def test_a_scheduled_replay_addresses_its_rows(self) -> None:
         """ "Addressed" is not "fixed", and it must not be.
 
-        A delayed replay has not run — the rows are still dead-lettered and
-        still listed, which is the documented success reading (ADR 0029). What
-        the run did is take a decision about them and record it, which is
-        exactly what a briefing can honestly carry. Requiring the queue to be
-        EMPTY instead would make the correct answer for a `wait_and_replay`
-        incident permanently unreachable.
+        A delayed replay has not run: the rows are still dead-lettered and still listed, which
+        is the documented success reading (ADR 0029). What the run did is take a decision
+        about them and record it, and requiring the queue to be EMPTY instead would make the
+        correct answer for a `wait_and_replay` incident permanently unreachable.
         """
         rows = ((self._WAIT_ROW, "wait_and_replay"), (self._WAIT_ROW_2, "wait_and_replay"))
         args = {"job_ids": [self._WAIT_ROW, self._WAIT_ROW_2], "delay_seconds": 300}
@@ -3958,11 +3748,9 @@ class TestResolvedRequiresTheAlertedConditionCleared:
     def test_an_alert_that_names_its_slice_is_inert(self) -> None:
         """ADR 0032 governs these, and governs them harder.
 
-        No plan executes at all unless its action targets the alerted subject,
-        so a run that reached VERIFYING necessarily acted on what it was paged
-        for. Asking a second question about the furniture beside it would turn
-        every correctly-scoped run into an escalation — the opposite of ADR
-        0031's decision, which this amendment narrows rather than reverses.
+        No plan executes unless its action targets the alerted subject, so a run that reached
+        VERIFYING necessarily acted on what it was paged for. Asking a second question about
+        the furniture beside it would turn every correctly-scoped run into an escalation.
         """
         run = self._run(
             alert=self._CATEGORY_ALERT,
@@ -3978,13 +3766,11 @@ class TestResolvedRequiresTheAlertedConditionCleared:
     def test_a_non_dlq_action_is_inert(self) -> None:
         """A consumer restart says nothing about a queue read as context.
 
-        The link that makes the dead-letter queue the incident is the agent's
-        OWN plan: under a subject-less alert, choosing a dead-letter action is
-        the run saying the queue is what it was paged for. Nothing here parses
-        alert free text — the heuristic ADR 0031 refused twice. So a run that
-        restarted a consumer group, having listed the DLQ for context, resolves
-        with four rows still in that queue, and that is correct: the rows were
-        never this incident.
+        The link that makes the dead-letter queue the incident is the agent's OWN plan: under
+        a subject-less alert, choosing a dead-letter action is the run saying the queue is
+        what it was paged for. Nothing here parses alert free text — the heuristic ADR 0031
+        refused twice — so a run that restarted a consumer group having listed the DLQ for
+        context resolves with four rows still in it, and that is correct.
         """
         args = {"consumer_group": "worker-dispatcher"}
         plan = self._category_replay(
@@ -4010,13 +3796,10 @@ class TestResolvedRequiresTheAlertedConditionCleared:
     def test_a_run_that_never_read_the_queue_is_inert(self) -> None:
         """Nothing in this run says the queue is the incident.
 
-        Reachable only by hand: ADR 0027 refuses a by-id replay whose row was
-        never read and ADR 0028 refuses a category replay no listing covered,
-        so the only DLQ action that can reach VERIFYING on an unread queue is
-        the fence — which escalates a branch earlier as a stabilizer. Pinned
-        because the alternative reading (escalate on no evidence) would fire on
-        the two anti-vacuity controls in the stabilizer classes above, which
-        assert a resolving action resolves from a hand-built state.
+        Reachable only by hand: ADR 0027 refuses a by-id replay whose row was never read and
+        ADR 0028 a category replay no listing covered, so the only DLQ action that can reach
+        VERIFYING on an unread queue is the fence, which escalates a branch earlier. Pinned
+        because the alternative reading would fire on the two anti-vacuity controls above.
         """
         run = self._run(
             alert=self._SUBJECTLESS_ALERT,
@@ -4029,11 +3812,9 @@ class TestResolvedRequiresTheAlertedConditionCleared:
     def test_a_state_with_no_action_entry_is_inert(self) -> None:
         """No boundary means every reading is of unknown vintage.
 
-        ``make_remediate`` always writes the action's entry, so a real run
-        cannot produce this. Declining is the honest answer: the alternative is
-        reading the POST-action verify page as though it showed what the alert
-        was about, which is the exact confusion ``_evidence_before`` exists to
-        prevent.
+        ``make_remediate`` always writes the action's entry, so a real run cannot produce
+        this. Declining is honest: the alternative is reading the POST-action verify page as
+        though it showed what the alert was about.
         """
         run = self._run(
             alert=self._SUBJECTLESS_ALERT,
@@ -4048,12 +3829,10 @@ class TestResolvedRequiresTheAlertedConditionCleared:
     def test_a_filtered_listing_is_not_a_reading_of_the_queue(self) -> None:
         """The laziest trajectory that would otherwise pass.
 
-        Read only `list_dlq_messages(remediation_hint="replay_safe")`, replay
-        that category, and every row you looked at is addressed — so a rule
-        keyed on "the rows in evidence" would resolve on a queue it never saw.
-        Under a subject-less alert there is nothing to filter BY: the alerted
-        signal is the queue itself, which is the same reasoning
-        ``SubjectMatch.UNFILTERED`` applies to the unclassified subject.
+        Read only the `replay_safe` page, replay that category, and every row you looked at is
+        addressed — so a rule keyed on "the rows in evidence" would resolve on a queue it
+        never saw. Under a subject-less alert there is nothing to filter BY: the alerted
+        signal is the queue itself.
         """
         run = self._run(
             alert=self._SUBJECTLESS_ALERT,
@@ -4082,9 +3861,8 @@ class TestResolvedRequiresTheAlertedConditionCleared:
     def test_a_partial_page_is_not_a_reading_of_the_queue(self) -> None:
         """``total`` against the rows returned: page one of ten is not the queue.
 
-        The same claim as the filter check from the other side. A reading with
-        no usable ``total`` is accepted — this is a contradiction test, not an
-        invention.
+        The filter check from the other side. A reading with no usable ``total`` is accepted —
+        this is a contradiction test, not an invention.
         """
         run = self._run(
             alert=self._SUBJECTLESS_ALERT,
@@ -4100,11 +3878,10 @@ class TestResolvedRequiresTheAlertedConditionCleared:
     def test_narrowing_the_action_on_another_dimension_addresses_nothing(self) -> None:
         """Un-provable is unaddressed, and the asymmetry is deliberate.
 
-        ``replay_dlq_by_category(category="replay_safe", job_type="csv_upload")``
-        replays the intersection, and no map here says which rows survive it.
-        Guessing high lets a run resolve on rows it may never have touched;
-        guessing low escalates with a row a human can see was handled. Only one
-        of those wakes somebody for nothing, and it is the recoverable one.
+        A category replay narrowed by `job_type` replays the intersection and no map says
+        which rows survive it. Guessing high lets a run resolve on rows it may never have
+        touched; guessing low escalates with a row a human can see was handled. Only one of
+        those wakes somebody for nothing, and it is the recoverable one.
         """
         args = {"category": "replay_safe", "job_type": "csv_upload"}
         run = self._run(
@@ -4126,9 +3903,8 @@ class TestResolvedRequiresTheAlertedConditionCleared:
     def test_the_dead_letter_action_set_is_what_the_maps_say(self) -> None:
         """Anti-vacuity canary on the union of three maps.
 
-        Derived rather than declared (architecture-principles rule 2), which
-        means it can silently empty out if any of the three changes shape. It
-        must hold `mark_dlq_permanent`, which is declared inert in the two
+        Derived rather than declared, so it can silently empty out if any of the three
+        changes shape. It must hold `mark_dlq_permanent`, which is declared inert in the two
         read-before-act maps and reachable only through ``HINT_ROUTED_TOOLS``.
         """
         assert {
@@ -4144,10 +3920,9 @@ class TestResolvedRequiresTheAlertedConditionCleared:
     def test_the_narrowing_dimensions_are_the_declared_listing_scopes(self) -> None:
         """ "Unfiltered" means narrowed on none of these, and they are derived.
 
-        ``limit`` and ``offset`` are deliberately absent: they page a listing
-        rather than select rows, so no ``ListingScope`` pairs them with an
-        action field, and the completeness half (``total`` against the rows
-        returned) is what answers paging.
+        ``limit`` and ``offset`` are deliberately absent: they page a listing rather than
+        select rows, and the completeness half (``total`` against the rows returned) is what
+        answers paging.
         """
         assert {"remediation_hint", "job_type"} == DLQ_LISTING_SCOPES
         assert "limit" not in DLQ_LISTING_SCOPES
@@ -4156,10 +3931,9 @@ class TestResolvedRequiresTheAlertedConditionCleared:
     def test_every_slice_word_has_a_disposition_a_briefing_can_carry(self) -> None:
         """The two halves of "what does this row need" must cover one vocabulary.
 
-        ``HINT_ROUTED_TOOLS`` holds the tool; ``_ROW_DISPOSITION`` holds the
-        phrase no map can. Pinned equal so a hint the platform ships tomorrow
-        cannot reach a human's briefing unnamed — the fallback text exists, but
-        a fallback firing in production is a gap, not a design.
+        ``HINT_ROUTED_TOOLS`` holds the tool and ``_ROW_DISPOSITION`` the phrase no map can.
+        Pinned equal so a hint the platform ships tomorrow cannot reach a human's briefing
+        unnamed — the fallback text exists, but a fallback firing in production is a gap.
         """
         assert set(_ROW_DISPOSITION) == set(HINT_ROUTED_TOOLS)
         # ``unclassified`` is the key a null hint reads as: there is no row

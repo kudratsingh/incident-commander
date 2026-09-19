@@ -434,11 +434,13 @@ class TestTheDefaultIsBaseline:
         assert default_strategy().name == _settings().inference_strategy.value == "baseline"
 
     def test_an_unknown_configured_strategy_is_refused_at_construction(self) -> None:
-        # A name from plan 02 § 4 with no implementation yet is the right stand-in — the
-        # placeholder was ``best_of_n_sampled``, then ``reflection``, then ``search``
-        # (WP-5.3, WP-9.1, WP-12.1). ``adaptive`` is plan 02 § 15's, which WP-13.2 builds.
+        # The stand-in used to be the next plan name with no implementation — first
+        # ``best_of_n_sampled``, then ``reflection``, then ``search``, then ``adaptive``
+        # (WP-5.3, WP-9.1, WP-12.1, WP-13.2). All seven of plan 00 § 7 item 4's arms now
+        # exist, so the stand-in is a plausible TYPO instead: the refusal has to list the
+        # real names for the operator who wrote one.
         with pytest.raises(ValidationError) as caught:
-            _settings(inference_strategy="adaptive")
+            _settings(inference_strategy="adaptive_ladder")
         message = str(caught.value)
         assert "baseline" in message, (
             "the refusal must name the permitted values; an operator who typed "

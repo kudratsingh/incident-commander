@@ -2318,6 +2318,68 @@ When an operator has overridden a threshold, the row's `live_value_split` is `No
 the declared split — nobody can say which split a value typed into an environment came from,
 and saying `untuned` would be a false claim about provenance rather than an absent one.
 
+## The adaptive ladder and its frontier
+
+`adaptive` (WP-13.2, plan 02 § 15, [ADR 0064](ADR/0064-the-ladder-climbs-on-the-steps-own-numbers-and-the-record-says-which-rung-paid.md))
+is the arm that spends inference where a step's own numbers ask for it. Per planner step it climbs a
+fixed ladder, and it stops at the first rung where none of the thresholds above fires:
+
+| rung | what it costs | what it can clear |
+|---|---|---|
+| `baseline` | one planner call — `investigation._plan_next_step`, the control group's own | nothing; it is where the reading comes from |
+| `best_of_n_enumerated` | one more planner call, N = 4 | low top-1 confidence, a narrow top1/top2 margin, a self-contradicting leader |
+| `candidate_selector` | one selector call over the set the rung below already paid for | the margin (by committing to one diagnosis), the selector's own uncertainty |
+| `search` | one bounded walk (depth ≤ 2, branch ≤ 3), recorded mode only | whatever a read separates |
+| `escalate` | nothing | nothing — it is the tail taken when `search` cannot run |
+
+**The cheap half is a count, not a claim.** An easy step makes exactly one planner call and no
+selector call, and the step, the accrued state and the `llm_calls` on its record are `baseline`'s —
+`tests/unit/test_adaptive.py` asserts that equality against `BaselineStrategy` on the same turn. The
+record carries `ladder.extra_llm_calls`, which is zero on such a step, so "easy cases stay cheap" is
+a number a reader can check and a test can falsify.
+
+**The transitions are on the record.** Each step's `StepRecord` carries a `ladder` block: the
+resolved rung order, the rung it terminated on, the extra-call count, whether `search` was reachable,
+the live value of every threshold, and one row per rung with `entered_because` (the signals the rung
+below fired), `fired`, `unmeasured`, the reasons in words, and that rung's own token, dollar and
+tool-call deltas. Exactly one row is `emitted`; the rest are `climbed`. That is what makes "what
+fraction of runs escalated at each rung" (plan 03 § 173) a printed answer — an adaptive arm that
+climbs on nearly everything is `baseline` plus overhead, and this is where that shows.
+
+**Two rules keep the ladder honest.** The tail is `search` where the run has a branch prober and
+`escalate` where it has none, because a walk that cannot read the world must not be reported as one
+(ADR 0060); falling back to the selector rung's step would hide a missing rung. And a signal no rung
+can clear — `remediation_attempt_failed`, whose attempt record stays on the ledger for the rest of the
+run (ADR 0056) — buys the climb but does not decide the tail, or every step after one failed attempt
+would escalate unconditionally and the reinvestigation that signal exists to fund would be stopped on
+the step it was granted for. When that happens the signal is still on the record, as
+`ladder.unclearable`.
+
+**Safety is unchanged at every rung.** A rung emits an ordinary `InvestigationStep`, so the `FIX_MAP`
+gate, the 0.7 confidence bar, the subject-probe refusal, ADR 0041's whole-queue rule and the tier
+re-check all run in `investigation.py` exactly as they do for `baseline`. The module constructs no
+action but a `StopAction` — an AST scan asserts it — so the action a rung emits is the one a planner
+call proposed. One consequence of the declared thresholds is worth knowing when reading a report: the
+0.75 confidence floor sits *above* the loop's 0.7 remediate bar, so under the defaults an adaptive run
+cannot emit a remediation that bar would refuse. The bar is unchanged and still runs; it is simply no
+longer the thing that refuses.
+
+**Budget it for the climb, not for the average.** A climbing step bills up to three calls plus a
+walk where `baseline` bills one, so an adaptive sweep metered against the control group's token and
+dollar ceilings can exhaust mid-investigation and escalate — and the report would read that as the
+strategy failing rather than as the budget refusing to fund it. Set `TOKEN_BUDGET_MULTIPLIER` and
+`USD_BUDGET_MULTIPLIER` with the arm, as a best-of-N sweep does; tool calls are never multiplied,
+because probing the world is what the arms compete on (plan 02 § 8).
+
+**What the report says about it.** `make research-report` gains two sections:
+`adaptive_cost_frontier` — the accuracy/cost Pareto over arms on the same paired instances, with the
+dominated and non-dominated arms named and every regression printed rather than summarised away — and
+`adaptive_rung_distribution`, the terminating rung per difficulty read off the `ladder` blocks in the
+committed traces. Both are computed from archives only, both refuse when the arms do not share
+instances, and both say "not measurable" with what they need until an archive carrying an `adaptive`
+arm is in scope. The sweep that produces one is a paid run, deferred under standing instruction O-22,
+and so is the Phase 13 close.
+
 ## What eval doesn't cover (yet)
 
 - **Adversarial robustness** — Phase 7. Injection payloads in log lines, DLQ bodies, trace metadata.

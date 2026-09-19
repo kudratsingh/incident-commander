@@ -9,6 +9,7 @@ through ``artifacts.newest``; and byte-for-byte regeneration of the committed do
 from __future__ import annotations
 
 import json
+from collections.abc import Sequence
 from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
@@ -117,6 +118,74 @@ def _archive(root: Path, archive_id: str, outcomes: tuple[ScenarioOutcome, ...])
 def _differences(document: dict[str, Any]) -> list[dict[str, Any]]:
     section = document["sections"]["paired_differences"]
     return list(section["differences"])
+
+
+def _synthetic_root(tmp_path: Path) -> Path:
+    """A root ``assemble`` can read end to end: it loads the corpus for the pass@k section."""
+    (tmp_path / "evals" / "scenarios").mkdir(parents=True, exist_ok=True)
+    return tmp_path
+
+
+def _rung(rung: str, *, entered: tuple[str, ...] = (), tokens: int = 0) -> dict[str, Any]:
+    return {
+        "rung": rung,
+        "index": 0,
+        "entered_because": list(entered),
+        "fired": [],
+        "unmeasured": [],
+        "reasons": [],
+        "llm_calls": 1,
+        "tokens_used": tokens,
+        "usd_used": "0",
+        "tool_calls_used": 0,
+        "climbed": False,
+        "emitted": True,
+    }
+
+
+def _ladder_block(
+    *,
+    terminated_on: str = "baseline",
+    extra: int = 0,
+    rungs: tuple[dict[str, Any], ...] = (),
+    search_available: bool = False,
+    unclearable: tuple[str, ...] = (),
+) -> dict[str, Any]:
+    """One ``LadderRecord`` as a trace line carries it (WP-13.2)."""
+    return {
+        "ladder": ["baseline", "best_of_n_enumerated", "candidate_selector", "search_or_escalate"],
+        "terminated_on": terminated_on,
+        "rungs_used": len(rungs) or 1,
+        "extra_llm_calls": extra,
+        "search_available": search_available,
+        "unclearable": list(unclearable),
+        "thresholds": {"top1_confidence_floor": 0.75},
+        "rungs": list(rungs or (_rung(terminated_on),)),
+    }
+
+
+def _step_line(scenario: str, ladder: dict[str, Any], *, strategy: str = "adaptive") -> str:
+    return json.dumps(
+        {
+            "kind": "step",
+            "step_id": "a" * 12,
+            "run_id": scenario,
+            "iteration": 0,
+            "strategy": strategy,
+            "model": "claude-sonnet-4-6",
+            "candidate_set": [],
+            "ladder": ladder,
+            "emitted_step": {"hypotheses": [], "next_action": {"kind": "stop", "reason": "done"}},
+            "llm_calls": [],
+        }
+    )
+
+
+def _trace(root: Path, archive: str, scenario: str, lines: Sequence[str]) -> None:
+    """Write one scenario's trace file inside a synthetic archive."""
+    directory = root / "evals/runs" / archive / "traces"
+    directory.mkdir(parents=True, exist_ok=True)
+    (directory / f"{scenario}.jsonl").write_text("\n".join(lines) + "\n")
 
 
 # --------------------------------------------------------------------------
@@ -382,7 +451,17 @@ def test_a_missing_action_is_not_counted_as_a_forbidden_action(tmp_path: Path) -
 
 
 def test_the_committed_report_carries_every_section_and_none_is_empty() -> None:
+    # Every section of the list as it stood when that version was written: the two WP-13.2
+    # sections came later and are named in ``_DELIBERATE_NEW_SECTIONS`` below.
     document = json.loads(artifacts.newest("research_report").read_text())
+    expected = tuple(key for key in research.SECTION_KEYS if key not in _DELIBERATE_NEW_SECTIONS)
+    assert tuple(document["sections"]) == expected
+    for key in expected:
+        assert document["sections"][key], f"section {key} is empty"
+
+
+def test_a_fresh_report_carries_every_section_in_the_closed_list() -> None:
+    document = research.assemble(research.REPO_ROOT)
     assert tuple(document["sections"]) == research.SECTION_KEYS
     for key in research.SECTION_KEYS:
         assert document["sections"][key], f"section {key} is empty"
@@ -597,6 +676,16 @@ _DELIBERATE_ROW_CHANGES: Final[tuple[str, ...]] = (
     "judge_gate",
 )
 
+#: Sections a later packet ADDED, which the committed document therefore cannot carry: the
+#: artifact is named after its scope (see the test above), so a section added without a new
+#: archive aims at a path invariant 9 refuses to rewrite. Both of these report themselves
+#: unmeasurable today and neither renders into the Markdown half, which is why that half is
+#: still compared with nothing excused. WP-13.2's two.
+_DELIBERATE_NEW_SECTIONS: Final[tuple[str, ...]] = (
+    "adaptive_cost_frontier",
+    "adaptive_rung_distribution",
+)
+
 
 def _without_the_deliberate_changes(payload: Any) -> Any:
     """The document with the enumerated keys dropped from every row that has them.
@@ -615,16 +704,48 @@ def _without_the_deliberate_changes(payload: Any) -> Any:
     return payload
 
 
+def _without_the_new_sections(document: dict[str, Any]) -> dict[str, Any]:
+    """The document with the sections a later packet added removed, by name."""
+    return {
+        **document,
+        "sections": {
+            key: value
+            for key, value in document["sections"].items()
+            if key not in _DELIBERATE_NEW_SECTIONS
+        },
+    }
+
+
 def test_the_committed_report_regenerates_byte_for_byte() -> None:
     """Every input is a locked archive, so the document is a function of the repo.
 
-    A failure outside ``_DELIBERATE_ROW_CHANGES`` means something the report READ changed.
-    The Markdown half is compared byte for byte with nothing excused.
+    A failure outside ``_DELIBERATE_ROW_CHANGES`` and ``_DELIBERATE_NEW_SECTIONS`` means
+    something the report READ changed. The Markdown half is compared byte for byte with nothing
+    excused, which is what keeps the two allowances from growing quietly.
     """
     document = research.assemble(research.REPO_ROOT)
     committed = json.loads(artifacts.newest("research_report").read_text())
-    assert _without_the_deliberate_changes(document) == _without_the_deliberate_changes(committed)
+    assert _without_the_deliberate_changes(
+        _without_the_new_sections(document)
+    ) == _without_the_deliberate_changes(committed)
     assert research.render_markdown(document) == artifacts.newest("research_report_md").read_text()
+
+
+def test_the_committed_report_predates_the_adaptive_sections() -> None:
+    """The other half of that allowance: it is used, and only for these two sections.
+
+    Asserting both sides means the excuse cannot start covering a third section, and the
+    Markdown comparison above proves the new ones are silent while they have no number.
+    """
+    committed = json.loads(artifacts.newest("research_report").read_text())
+    assert not set(committed["sections"]) & set(_DELIBERATE_NEW_SECTIONS)
+    fresh = research.assemble(research.REPO_ROOT)
+    assert tuple(fresh["sections"]) == research.SECTION_KEYS
+    for key in _DELIBERATE_NEW_SECTIONS:
+        section = fresh["sections"][key]
+        assert section["measurable"] is False
+        assert section["value"] is None
+        assert section["why"].strip() and section["requires"]
 
 
 def test_the_committed_report_predates_the_judge_gate() -> None:
@@ -648,3 +769,318 @@ def test_every_archive_in_scope_is_committed_and_carries_provenance() -> None:
         source = research.read_source(research.REPO_ROOT, archive)
         assert source.report.outcomes
         assert all(outcome.provenance is not None for outcome in source.report.outcomes)
+
+
+# --------------------------------------------------------------------------
+# WP-13.2: the adaptive frontier, and where the ladder terminated
+# --------------------------------------------------------------------------
+
+
+def _frontier(document: dict[str, Any]) -> dict[str, Any]:
+    section = document["sections"]["adaptive_cost_frontier"]
+    assert section["measurable"], section["why"]
+    return dict(section["value"])
+
+
+def _comparison(document: dict[str, Any], right: str) -> dict[str, Any]:
+    return next(
+        c
+        for c in _frontier(document)["adaptive_against_each_fixed_arm"]
+        if c["right"].startswith(right)
+    )
+
+
+def _two_arm_root(
+    tmp_path: Path,
+    *,
+    adaptive: dict[str, Any],
+    baseline: dict[str, Any],
+    scenarios: tuple[str, ...] = ("alpha", "beta"),
+) -> Path:
+    """One archive per arm over the same scenarios — the paired shape the frontier needs."""
+    root = _synthetic_root(tmp_path)
+    _archive(
+        root,
+        "ad" + "0" * 10,
+        tuple(_outcome(name, strategy="adaptive", **adaptive) for name in scenarios),
+    )
+    _archive(
+        root,
+        "ba" + "0" * 10,
+        tuple(_outcome(name, strategy="baseline", **baseline) for name in scenarios),
+    )
+    return root
+
+
+def test_the_frontier_is_not_measurable_without_an_adaptive_arm() -> None:
+    document = research.assemble(research.REPO_ROOT)
+    section = document["sections"]["adaptive_cost_frontier"]
+    assert section["measurable"] is False
+    assert "no archive in scope carries an `adaptive` arm" in section["why"]
+    assert any("WP-13.2" in requirement for requirement in section["requires"])
+
+
+def test_the_frontier_pairs_the_arms_on_the_instances_they_share(tmp_path: Path) -> None:
+    root = _synthetic_root(tmp_path)
+    _archive(
+        root,
+        "ad" + "0" * 10,
+        tuple(_outcome(name, strategy="adaptive") for name in ("alpha", "beta", "adaptive_only")),
+    )
+    _archive(
+        root,
+        "ba" + "0" * 10,
+        tuple(_outcome(name, strategy="baseline") for name in ("alpha", "beta")),
+    )
+    value = _frontier(research.assemble(root, ("ad" + "0" * 10, "ba" + "0" * 10)))
+    assert value["instances"] == ["alpha", "beta"]
+    assert all(row["instances"] == 2 for row in value["rows"])
+    assert all(row["runs"] == 2 for row in value["rows"])
+
+
+def test_an_arm_better_on_every_axis_dominates_and_the_other_is_off_the_frontier(
+    tmp_path: Path,
+) -> None:
+    root = _two_arm_root(
+        tmp_path,
+        adaptive={"passed": True, "tokens": 500, "tool_calls": 2, "usd": "0.050000"},
+        baseline={"passed": False, "tokens": 900, "tool_calls": 5, "usd": "0.090000"},
+    )
+    document = research.assemble(root, ("ad" + "0" * 10, "ba" + "0" * 10))
+    comparison = _comparison(document, "baseline")
+    assert comparison["verdict"] == research.DOMINATES
+    assert comparison["worse_on"] == []
+    rows = {row["arm"]: row for row in _frontier(document)["rows"]}
+    adaptive_arm = next(arm for arm in rows if arm.startswith("adaptive"))
+    baseline_arm = next(arm for arm in rows if arm.startswith("baseline"))
+    assert rows[adaptive_arm]["on_frontier"] is True
+    assert rows[baseline_arm]["on_frontier"] is False
+    assert rows[baseline_arm]["dominated_by"] == [adaptive_arm]
+
+
+def test_a_trade_off_names_the_axis_the_ladder_is_worse_on(tmp_path: Path) -> None:
+    """The claim that matters: no summary may hide a regression (plan 03 § 173)."""
+    root = _two_arm_root(
+        tmp_path,
+        adaptive={"passed": True, "tokens": 2_000, "tool_calls": 4, "usd": "0.200000"},
+        baseline={"passed": False, "tokens": 900, "tool_calls": 4, "usd": "0.090000"},
+    )
+    document = research.assemble(root, ("ad" + "0" * 10, "ba" + "0" * 10))
+    comparison = _comparison(document, "baseline")
+    assert comparison["verdict"] == research.TRADE_OFF
+    assert comparison["better_on"] == ["pass_rate"]
+    assert comparison["worse_on"] == ["mean_tokens", "mean_usd"]
+    assert comparison["equal_on"] == ["safety_rate", "mean_tool_calls", "mean_wall_seconds"]
+    # Both arms stay on the frontier: neither dominates the other.
+    assert all(row["on_frontier"] for row in _frontier(document)["rows"])
+    rendered = research.render_markdown(document)
+    assert f"**{research.TRADE_OFF}**" in rendered
+    assert "worse on mean_tokens, mean_usd" in rendered
+
+
+def test_an_arm_worse_on_every_axis_is_reported_as_dominated(tmp_path: Path) -> None:
+    root = _two_arm_root(
+        tmp_path,
+        adaptive={"passed": False, "tokens": 3_000, "tool_calls": 9, "usd": "0.300000"},
+        baseline={"passed": True, "tokens": 900, "tool_calls": 4, "usd": "0.090000"},
+    )
+    document = research.assemble(root, ("ad" + "0" * 10, "ba" + "0" * 10))
+    comparison = _comparison(document, "baseline")
+    assert comparison["verdict"] == research.DOMINATED
+    assert comparison["better_on"] == []
+    rows = {row["arm"]: row for row in _frontier(document)["rows"]}
+    adaptive_arm = next(arm for arm in rows if arm.startswith("adaptive"))
+    assert rows[adaptive_arm]["on_frontier"] is False
+
+
+def test_a_safety_violation_moves_the_safety_axis_and_not_the_pass_axis(tmp_path: Path) -> None:
+    root = _two_arm_root(
+        tmp_path,
+        adaptive={
+            "passed": False,
+            "safety_passed": False,
+            "safety_detail": "forbidden tool(s) called or attempted: restart_consumer_group",
+        },
+        baseline={"passed": False},
+    )
+    document = research.assemble(root, ("ad" + "0" * 10, "ba" + "0" * 10))
+    rows = {row["arm"]: row for row in _frontier(document)["rows"]}
+    adaptive_arm = next(arm for arm in rows if arm.startswith("adaptive"))
+    baseline_arm = next(arm for arm in rows if arm.startswith("baseline"))
+    assert rows[adaptive_arm]["safety_rate"] == 0.0
+    assert rows[baseline_arm]["safety_rate"] == 1.0
+    assert _comparison(document, "baseline")["worse_on"] == ["safety_rate"]
+
+
+def test_equal_arms_both_stay_on_the_frontier(tmp_path: Path) -> None:
+    root = _two_arm_root(
+        tmp_path,
+        adaptive={"passed": True},
+        baseline={"passed": True},
+    )
+    document = research.assemble(root, ("ad" + "0" * 10, "ba" + "0" * 10))
+    assert _comparison(document, "baseline")["verdict"] == research.EQUAL
+    assert all(row["on_frontier"] for row in _frontier(document)["rows"])
+
+
+def test_the_frontier_refuses_arms_that_share_no_instance(tmp_path: Path) -> None:
+    root = _synthetic_root(tmp_path)
+    _archive(root, "ad" + "0" * 10, (_outcome("alpha", strategy="adaptive"),))
+    _archive(root, "ba" + "0" * 10, (_outcome("beta", strategy="baseline"),))
+    section = research.assemble(root, ("ad" + "0" * 10, "ba" + "0" * 10))["sections"][
+        "adaptive_cost_frontier"
+    ]
+    assert section["measurable"] is False
+    assert "share no instance" in section["why"]
+
+
+def test_the_frontier_pairs_on_the_recorded_world_id_where_the_rows_carry_one() -> None:
+    """ADR 0049's unit: two arms over the same recording are one instance, not two names."""
+    left = _outcome("alpha", strategy="adaptive")
+    right = _outcome("alpha_renamed", strategy="baseline")
+    left = left.model_copy(update={"replay": {"world_fingerprint": "w0"}})
+    right = right.model_copy(update={"replay": {"world_fingerprint": "w0"}})
+    rows = [
+        research.build_row(
+            research.Source(
+                archive="a" * 12,
+                path=Path("x"),
+                sha256="",
+                report=RunReport(
+                    generated_at=_WHEN,
+                    total=1,
+                    passed=1,
+                    failed=0,
+                    invocation_id="a" * 12,
+                    outcomes=(left,),
+                ),
+            ),
+            left,
+        ),
+        research.build_row(
+            research.Source(
+                archive="b" * 12,
+                path=Path("y"),
+                sha256="",
+                report=RunReport(
+                    generated_at=_WHEN,
+                    total=1,
+                    passed=1,
+                    failed=0,
+                    invocation_id="b" * 12,
+                    outcomes=(right,),
+                ),
+            ),
+            right,
+        ),
+    ]
+    assert [row.instance for row in rows] == ["w0", "w0"]
+    section = research._adaptive_cost_frontier(rows)
+    assert section["measurable"] is True
+    assert section["value"]["instances"] == ["w0"]
+
+
+def test_the_rung_distribution_is_not_measurable_without_a_ladder_block() -> None:
+    section = research.assemble(research.REPO_ROOT)["sections"]["adaptive_rung_distribution"]
+    assert section["measurable"] is False
+    assert "`ladder` block" in section["why"]
+
+
+def test_the_rung_distribution_counts_the_terminating_rung_by_difficulty(tmp_path: Path) -> None:
+    root = _synthetic_root(tmp_path)
+    archive = "ad" + "0" * 10
+    _archive(
+        root,
+        archive,
+        (
+            _outcome("easy_one", strategy="adaptive", difficulty="single"),
+            _outcome("hard_one", strategy="adaptive", difficulty="ambiguous"),
+        ),
+    )
+    _trace(
+        root,
+        archive,
+        "easy_one",
+        [
+            _step_line("easy_one", _ladder_block()),
+            _step_line("easy_one", _ladder_block()),
+        ],
+    )
+    _trace(
+        root,
+        archive,
+        "hard_one",
+        [
+            _step_line(
+                "hard_one",
+                _ladder_block(
+                    terminated_on="candidate_selector",
+                    extra=2,
+                    rungs=(
+                        _rung("baseline", tokens=100),
+                        _rung("best_of_n_enumerated", entered=("top1_confidence_low",), tokens=400),
+                        _rung(
+                            "candidate_selector",
+                            entered=("top1_top2_margin_narrow",),
+                            tokens=200,
+                        ),
+                    ),
+                ),
+            ),
+            _step_line("hard_one", _ladder_block()),
+        ],
+    )
+    value = research.assemble(root, (archive,))["sections"]["adaptive_rung_distribution"]["value"]
+    by_difficulty = {row["difficulty"]: row for row in value["by_difficulty"]}
+    assert by_difficulty["single"]["baseline_rung_share"] == 1.0
+    assert by_difficulty["single"]["mean_extra_llm_calls"] == 0.0
+    assert by_difficulty["ambiguous"]["baseline_rung_share"] == 0.5
+    assert by_difficulty["ambiguous"]["terminated_on"] == {
+        "baseline": 1,
+        "candidate_selector": 1,
+    }
+    assert by_difficulty["ambiguous"]["mean_extra_llm_calls"] == 1.0
+    hard = next(row for row in value["rows"] if row["scenario"] == "hard_one")
+    assert hard["opened_by_signal"] == {
+        "top1_confidence_low": 1,
+        "top1_top2_margin_narrow": 1,
+    }
+    assert hard["tokens_by_rung"] == {
+        "baseline": 100,
+        "best_of_n_enumerated": 400,
+        "candidate_selector": 200,
+    }
+
+
+def test_the_rung_distribution_renders_and_names_the_two_sided_claim(tmp_path: Path) -> None:
+    root = _synthetic_root(tmp_path)
+    archive = "ad" + "0" * 10
+    _archive(root, archive, (_outcome("easy_one", strategy="adaptive", difficulty="single"),))
+    _trace(root, archive, "easy_one", [_step_line("easy_one", _ladder_block())])
+    document = research.assemble(root, (archive,))
+    rendered = research.render_markdown(document)
+    assert research.SECTION_TITLES["adaptive_rung_distribution"] in rendered
+    assert "baseline-rung share" in rendered
+    assert "easy cases" in document["sections"]["adaptive_rung_distribution"]["value"][
+        "two_sided_claim"
+    ].replace("easy-cases", "easy cases")
+
+
+def test_a_ladderless_step_record_is_not_counted_as_a_ladder(tmp_path: Path) -> None:
+    """Anti-vacuity: `baseline`'s own step records carry no ladder, so they must not appear."""
+    root = _synthetic_root(tmp_path)
+    archive = "ba" + "0" * 10
+    _archive(root, archive, (_outcome("alpha", strategy="baseline"),))
+    line = json.loads(_step_line("alpha", _ladder_block(), strategy="baseline"))
+    del line["ladder"]
+    _trace(root, archive, "alpha", [json.dumps(line)])
+    section = research.assemble(root, (archive,))["sections"]["adaptive_rung_distribution"]
+    assert section["measurable"] is False
+    assert research.ladder_records_in(root, archive) == {}
+
+
+def test_the_adaptive_strategy_name_matches_the_arm_that_writes_it() -> None:
+    from incident_commander.agent.strategies.names import StrategyName
+
+    assert StrategyName.ADAPTIVE.value == research.ADAPTIVE_STRATEGY
+    assert StrategyName.BASELINE.value == research.BASELINE_RUNG

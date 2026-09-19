@@ -235,6 +235,82 @@ class SearchRecord:
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
+class RungRecord:
+    """One rung of the ``adaptive`` ladder: why it was entered, what it cost, what it left.
+
+    ``entered_because`` is the rung below's fired signals, so a reader can follow the
+    TRANSITIONS rather than infer them from which rungs are present (WP-13.2).
+    """
+
+    #: ``Rung``'s value as a ``str``, for ``SelectorRecord.decision``'s reason.
+    rung: str
+    #: 0-based position in the ladder this step ran.
+    index: int
+    #: Signal values that sent the run to this rung. Empty on the first, which is entered
+    #: unconditionally — the ladder's whole point is that it starts at the control group.
+    entered_because: tuple[str, ...] = ()
+    #: Signals still firing AFTER this rung ran, and the ones nothing here could measure.
+    fired: tuple[str, ...] = ()
+    unmeasured: tuple[str, ...] = ()
+    #: ``FiredSignals.reasons`` — each firing signal in words, with its number.
+    reasons: tuple[str, ...] = ()
+    #: LLM calls this rung made. 0 on the ``escalate`` rung, which buys nothing.
+    llm_calls: int = 0
+    #: This rung's OWN ledger deltas, so "what did the ladder add" is read, not derived.
+    tokens_used: int = 0
+    usd_used: Decimal = Decimal("0")
+    tool_calls_used: int = 0
+    #: Exactly one rung per step emitted the step the loop got; every earlier one climbed.
+    climbed: bool = False
+    emitted: bool = False
+
+    def as_record(self) -> dict[str, Any]:
+        """JSON-safe dict. ``usd_used`` is stringified, as ``LLMCallRecord``'s is."""
+        return {**asdict(self), "usd_used": str(self.usd_used)}
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class LadderRecord:
+    """The ``adaptive`` climb over one step (plan 02 § 15). ``None`` on every other strategy.
+
+    ``terminated_on`` is the claim the Pareto report groups by, and
+    ``extra_llm_calls`` is the cheapness claim as a number: 0 on a step that stayed
+    on the baseline rung.
+    """
+
+    #: The rung order this step ran, resolved: the tail is ``search`` where a branch prober
+    #: exists and ``escalate`` where none does (ADR 0060).
+    ladder: tuple[str, ...]
+    terminated_on: str
+    rungs_used: int
+    #: Calls beyond the baseline rung's one. The falsifiable half of "easy stays cheap".
+    extra_llm_calls: int
+    #: Whether the ``search`` rung was reachable at all, so a run that could not climb to it
+    #: is never read as a run that chose not to.
+    search_available: bool
+    #: Signals still firing at the terminating rung that no rung could have cleared — today the
+    #: failed-remediation one (ADR 0056), which is about the RUN and not about this step. They
+    #: buy the climb and do not decide the tail, so a reader sees why the ladder stopped there.
+    unclearable: tuple[str, ...] = ()
+    #: The live value of every threshold this climb compared against. The splits behind them
+    #: are in the run's ``strategy_config`` (ADR 0061); these are what decided this step.
+    thresholds: dict[str, float] = field(default_factory=dict)
+    rungs: tuple[RungRecord, ...] = ()
+
+    def as_record(self) -> dict[str, Any]:
+        return {
+            "ladder": list(self.ladder),
+            "terminated_on": self.terminated_on,
+            "rungs_used": self.rungs_used,
+            "extra_llm_calls": self.extra_llm_calls,
+            "search_available": self.search_available,
+            "unclearable": list(self.unclearable),
+            "thresholds": dict(self.thresholds),
+            "rungs": [rung.as_record() for rung in self.rungs],
+        }
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
 class LLMCallRecord:
     """What one LLM call inside a planner step billed.
 
@@ -282,6 +358,8 @@ class StepRecord:
     revision: RevisionRecord | None = None
     #: The ``search`` walk over this step, or ``None`` when none ran (WP-12.1).
     search: SearchRecord | None = None
+    #: The ``adaptive`` ladder over this step, or ``None`` when none ran (WP-13.2).
+    ladder: LadderRecord | None = None
     #: The ``InvestigationStep`` handed back to the loop — the one thing in
     #: this record that has consequences for the run.
     emitted_step: InvestigationStep
@@ -315,6 +393,7 @@ class StepRecord:
             "selector": None if self.selector is None else self.selector.as_record(),
             "revision": None if self.revision is None else self.revision.as_record(),
             "search": None if self.search is None else self.search.as_record(),
+            "ladder": None if self.ladder is None else self.ladder.as_record(),
             "emitted_step": self.emitted_step.model_dump(mode="json"),
             "hypothesis_state_before": [
                 hypothesis.model_dump(mode="json") for hypothesis in self.hypothesis_state_before

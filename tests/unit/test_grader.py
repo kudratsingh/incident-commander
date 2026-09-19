@@ -5554,11 +5554,13 @@ class TestTheFinalDiagnosisIsTheTopCandidate:
         ``candidate_selector``, whose write most needs the guard because it emits the
         SELECTED candidate as the whole ranking, ``reflection``, which writes the
         REVISED step's ranking — the one the run acted on, the step it replaced being kept
-        in ``StepRecord.revision`` rather than in ``RunState`` — and ``search``, which writes
+        in ``StepRecord.revision`` rather than in ``RunState`` — ``search``, which writes
         the CHOSEN PATH's ranking, every other node it explored being kept in
-        ``StepRecord.search``). Each writes the field exactly once, in the ``model_copy``
-        that also accrues that call. A write anywhere else fails here, which is the moment
-        the grader would start scoring a different answer.
+        ``StepRecord.search``, and ``adaptive``, which writes the ranking of the RUNG that
+        emitted the step, every rung below it being kept in ``StepRecord.ladder``). Each
+        writes the field exactly once, in the ``model_copy`` that also accrues that call. A
+        write anywhere else fails here, which is the moment the grader would start scoring a
+        different answer.
         """
         package = Path(__file__).resolve().parents[2] / "src" / "incident_commander"
         writers = sorted(
@@ -5568,6 +5570,7 @@ class TestTheFinalDiagnosisIsTheTopCandidate:
         )
         permitted = [
             "agent/investigation.py",
+            "agent/strategies/adaptive.py",
             "agent/strategies/best_of_n_enumerated.py",
             "agent/strategies/best_of_n_sampled.py",
             "agent/strategies/candidate_selector.py",
@@ -5577,7 +5580,8 @@ class TestTheFinalDiagnosisIsTheTopCandidate:
         assert writers == permitted, (
             f"the ranking is now written in {writers}; the final diagnosis can no "
             "longer be read off RunState.hypotheses without checking which write "
-            "came last (WO-R3-191, WO-R3-205, WO-R3-206, WO-R3-209, plan 02 § 11.3)."
+            "came last (WO-R3-191, WO-R3-205, WO-R3-206, WO-R3-209, WO-R3-235, "
+            "plan 02 § 11.3)."
         )
         for writer in writers:
             once = (package / writer).read_text().count('"hypotheses":')

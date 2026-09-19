@@ -33,3 +33,6 @@ class StrategyName(StrEnum):
     #: WP-12.1, plan 02 § 14: a bounded walk over evidence-gathering decisions — depth ≤ 2,
     #: branch ≤ 3, one shared ledger, RECORDED mode only (a live world would move under it).
     SEARCH = "search"
+    #: WP-13.2, plan 02 § 15: the ladder. ``baseline`` on an easy step, and a rung above it for
+    #: each of WP-13.1's escalation signals that fired on the rung below (ADR 0064).
+    ADAPTIVE = "adaptive"

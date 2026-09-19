@@ -36,3 +36,17 @@ class StrategyKnobs:
     #: ``tests/unit/test_search.py::TestTheBoundsAreStructural`` pins the two spellings equal.
     search_depth: int = 2
     search_branch: int = 3
+    #: The ``adaptive`` ladder's escalation thresholds (plan 02 § 15, WP-13.1, WP-13.2), one
+    #: optional override each. ``None`` means the default DECLARED in
+    #: ``strategies/policy.py`` — the only value with a benchmark split behind it (ADR 0061) —
+    #: so this module still declares no number of its own. Spelled out one field per
+    #: threshold rather than taken as a mapping, for ``UncertaintyThresholds.resolve``'s
+    #: reason: a mapping lets a typo become a knob that is silently ignored.
+    uncertainty_top1_confidence_floor: float | None = None
+    uncertainty_top1_top2_margin_floor: float | None = None
+    uncertainty_selector_uncertainty_ceiling: float | None = None
+    uncertainty_candidate_disagreement_ceiling: float | None = None
+    uncertainty_confidence_floor_after_probes: float | None = None
+    uncertainty_contradictory_evidence_count: int | None = None
+    uncertainty_failed_attempt_count: int | None = None
+    uncertainty_probe_count_before_confidence_check: int | None = None

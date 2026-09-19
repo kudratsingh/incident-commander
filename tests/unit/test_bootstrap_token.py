@@ -1,13 +1,8 @@
 """Regression: the promote statement must never carry the email in its SQL text.
 
-`_promote` in scripts/bootstrap_agent_token.py issues a privilege-granting
-UPDATE (is_platform_admin=true) via docker exec + psql. Finding C-14: the
-email used to be f-string-interpolated into that statement, guarded only by
-the _SAFE_EMAIL allowlist — one "helpful" regex widening away from injection.
-These tests pin the replacement contract (WO-C6-01): the email reaches psql
-solely as a `-v email=...` variable, the statement itself is a constant piped
-on stdin with the `:'email'` placeholder, and the regex stays live as a
-defense-in-depth backstop that fires before any subprocess is spawned.
+Finding C-14: `_promote`'s privilege-granting UPDATE used to f-string the email in,
+guarded only by _SAFE_EMAIL. WO-C6-01: the email reaches psql only as `-v email=...`,
+the statement is a constant on stdin with `:'email'`, and the regex is a backstop.
 """
 
 from __future__ import annotations
@@ -108,22 +103,9 @@ def test_unsafe_email_is_rejected_before_subprocess_runs(
 class TestTheDefaultTargetsTheStackTheDocsTellYouToBoot:
     """`make bootstrap-token` with no arguments must hit the demo stack.
 
-    The runbook's live-eval protocol is `make demo` then `make bootstrap-token`,
-    and for the whole life of that protocol the second command could not
-    work: the default named `incident-platform-postgres-1`, a container from
-    the *platform's* dev compose, which `make demo` never starts. The bare
-    invocation died on a CalledProcessError one line after `make demo`
-    reported success.
-
-    CI never caught it because the workflow passes --postgres-container
-    explicitly, so the default was exercised by exactly nobody except a human
-    following the documented path — the one case that matters for a protocol
-    whose whole job is to be followed under time pressure before a paid run.
-
-    Asserting against a literal would just re-pin today's string. These derive
-    the name from demo/compose.yml the way Compose itself does, so renaming
-    the project or the service reds the test instead of silently re-breaking
-    the default.
+    The default named `incident-platform-postgres-1`, a container `make demo` never starts,
+    so the documented protocol died one line after `make demo` reported success. CI passed
+    --postgres-container explicitly. These derive the name from demo/compose.yml.
     """
 
     @staticmethod
@@ -154,17 +136,9 @@ class TestTheDefaultTargetsTheStackTheDocsTellYouToBoot:
 class _FakePlatform:
     """A whole platform in a MockTransport: register, login, SAs, tokens.
 
-    Nothing here touches a running stack. The demo compose stack is a live
-    rehearsal fixture for the coordinator, and a test that registered users
-    or widened a service account against it would be editing someone else's
-    world — so the entire flow is answered in-process.
-
-    ``existing`` pre-loads accounts the script will find already there, which
-    is the state that matters for the token split: the live
-    ``incident-commander`` account HOLDS ``chaos:invoke``, so the interesting
-    path is the 409 + listing + PATCH one, not the create one. ``patched``
-    records what each PATCH asked for, so a test can assert the scope set the
-    account ends up with rather than the set the script was handed.
+    Nothing touches a running stack — the demo stack is the coordinator's rehearsal
+    fixture. ``existing`` pre-loads accounts the script finds already there (the live
+    ``incident-commander`` HOLDS ``chaos:invoke``); ``patched`` records what each PATCH asked.
     """
 
     def __init__(self, existing: dict[str, list[str]] | None = None) -> None:
@@ -237,19 +211,9 @@ def _fake_platform(monkeypatch: pytest.MonkeyPatch) -> _FakePlatform:
 class TestTheScopeFlagThreePlacesDocument:
     """``--scope`` is printed by three files; it must exist (WO-R2-100).
 
-    ``scripts/chaos_setup.py`` says it twice — module docstring and the
-    missing-credential error — ``docs/runbook.md`` prints the fix as
-    copy-pasteable, and ``evals/guards.py`` raises pointing at it. An
-    operator whose chaos run had just refused for lack of scope followed
-    that instruction under time pressure and got ``unrecognized arguments:
-    --scope``. Three documents named one interface and the interface did
-    not exist; the cheap correct fix is to build it.
-
-    What those three documents SAY changed with platform v0.6.5: the remedy
-    for "chaos refused me" is no longer widening the agent account, it is
-    pasting ``PLATFORM_CHAOS_TOKEN``. The flag stays — it is the only way to
-    widen the agent principal at all — and it now refuses the one scope that
-    would undo the split.
+    Three documents named one interface and it did not exist: an operator pasted the fix
+    and got ``unrecognized arguments: --scope``. Since v0.6.5 the remedy is pasting
+    ``PLATFORM_CHAOS_TOKEN``, and the flag now refuses the one scope that undoes the split.
     """
 
     def test_the_flag_repeats(
@@ -267,10 +231,7 @@ class TestTheScopeFlagThreePlacesDocument:
     ) -> None:
         """The footgun this flag must not become.
 
-        If ``--scope`` REPLACED the defaults, an operator adding one scope
-        would mint a token that can do that one thing and read no telemetry —
-        and the eval it was minted for would fail one step later, on a read,
-        for a reason nobody would connect back to this command.
+        If ``--scope`` REPLACED the defaults, the eval would fail a step later on a read.
         """
         platform = _fake_platform(monkeypatch)
         assert main(["--scope", "incidents:read"]) == 0
@@ -280,10 +241,7 @@ class TestTheScopeFlagThreePlacesDocument:
     def test_the_smoke_account_stays_read_only(
         self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
     ) -> None:
-        """--scope widens the AGENT principal only. The smoke twin is
-        read-only by construction (ADR: "read-only smoke" is structurally
-        true, not a property of the scenario list) — a --scope that leaked
-        into it would quietly delete that guarantee."""
+        """--scope widens the AGENT principal only; the smoke twin is read-only by construction."""
         platform = _fake_platform(monkeypatch)
         assert main(["--scope", "actions:execute"]) == 0
         capsys.readouterr()
@@ -301,10 +259,7 @@ class TestTheScopeFlagThreePlacesDocument:
         assert platform.created == {}, "refuse before touching the platform"
 
     def test_the_known_scope_set_comes_from_the_blessed_snapshot(self) -> None:
-        """Not a hardcoded list: the contract job diffs this snapshot against
-        a live platform on every PR, and WO-R2-130 put `required_scope`
-        itself under that diff. That is what makes rejecting an unknown
-        scope safe rather than merely opinionated."""
+        """Not a hardcoded list: the contract job diffs `required_scope` live (WO-R2-130)."""
         assert known_scopes() == {
             "actions:execute",
             "chaos:invoke",
@@ -315,13 +270,8 @@ class TestTheScopeFlagThreePlacesDocument:
     def test_no_doc_tells_you_to_pass_a_scope_the_command_refuses(self) -> None:
         """The other half of the three-documents problem, updated for the split.
 
-        The original failure was docs naming an interface that did not exist.
-        The same failure in the other direction is docs naming a scope the
-        command now refuses: an operator whose chaos hook just 403'd, reading
-        ``--scope chaos:invoke`` under time pressure, gets an exit 2 and no
-        closer to a working credential. Both halves are checked — every
-        documented ``--scope`` value must be a scope the pinned platform
-        declares AND one the agent account may actually hold.
+        Docs naming a scope the command now refuses is the same failure in reverse. Both halves:
+        every documented value must be a declared scope AND one the agent may hold.
         """
         documented: set[str] = set()
         for rel in (
@@ -348,11 +298,8 @@ class TestTheScopeFlagThreePlacesDocument:
 class TestItNeverPrintsAnOverrideBackWrong:
     """The .env snippet must echo what the operator actually set (WO-R2-100).
 
-    The script hardcoded localhost:8000/8001 and printed PLATFORM_MCP_URL
-    in a block headed "Copy into .env". An operator running the platform on
-    a non-default port — two stacks side by side, or 8001 already taken —
-    pasted that block over their correct value and broke a working config
-    by following the instructions.
+    The script hardcoded localhost:8000/8001 under "Copy into .env", so a non-default
+    port got pasted over.
     """
 
     def test_an_exported_mcp_url_is_echoed_not_overwritten(
@@ -399,18 +346,12 @@ class TestItNeverPrintsAnOverrideBackWrong:
 class TestTwoPrincipalsNotOne:
     """The token split (owner decision O-4, platform v0.6.5).
 
-    The commander's bootstrap has to mint the same two accounts the platform's
-    own ``scripts/seed_incident_commander.py`` does, with the same scope
-    tables, because the eval world is seeded by whichever of the two an
-    operator happened to run. Where the tables disagree, one of the two
-    principals is wrong and the failure is silent: the agent either cannot
-    act, or can read the chaos audit stream it is being graded against.
+    The bootstrap must mint the same two accounts with the same scope tables as the
+    platform's own seeder, because either may have seeded the eval world.
     """
 
     def test_the_agent_account_has_no_chaos_scope(self) -> None:
-        # The whole content of the split. The platform hides `chaos.%` audit
-        # rows from principals without this scope, so an agent that holds it
-        # reads the hook name and its arguments seconds before its own alert.
+        # The platform hides `chaos.%` audit rows from principals without this scope.
         assert "chaos:invoke" not in SERVICE_ACCOUNT_SCOPES
         assert set(SERVICE_ACCOUNT_SCOPES) == {
             "telemetry:read",
@@ -419,9 +360,7 @@ class TestTwoPrincipalsNotOne:
         }
 
     def test_the_chaos_account_can_seed_and_verify_but_not_act(self) -> None:
-        # Reads included so the runner can verify the world it seeded;
-        # actions:execute excluded because remediation is what is being
-        # measured and the stager must not be able to do it.
+        # Reads included so the runner can verify what it seeded; actions:execute excluded.
         assert set(CHAOS_SERVICE_ACCOUNT_SCOPES) == {
             "telemetry:read",
             "incidents:read",
@@ -430,9 +369,7 @@ class TestTwoPrincipalsNotOne:
         assert "actions:execute" not in CHAOS_SERVICE_ACCOUNT_SCOPES
 
     def test_the_forbidden_set_is_exactly_the_scope_the_filter_keys_on(self) -> None:
-        # One member, and it must be the one `hidden_audit_action_prefixes`
-        # tests for on the platform side. A second entry here would be a
-        # different decision.
+        # One member, matching the platform's `hidden_audit_action_prefixes`.
         assert set(AGENT_FORBIDDEN_SCOPES) == {"chaos:invoke"}
 
     def test_every_declared_scope_is_one_the_platform_declares(self) -> None:
@@ -462,10 +399,8 @@ class TestTwoPrincipalsNotOne:
     def test_both_env_lines_are_printed_under_their_own_labels(
         self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
     ) -> None:
-        # D-11's shape on the commander side: a banner that prints a name
-        # nothing reads, or one credential an operator pastes into two
-        # variables, gives a runner that cannot seed or an agent that can read
-        # the lab — and neither failure names itself.
+        # D-11 on the commander side: one credential pasted into two variables gives a runner
+        # that cannot seed.
         _fake_platform(monkeypatch)
         assert main([]) == 0
         out = capsys.readouterr().out
@@ -478,10 +413,8 @@ class TestTwoPrincipalsNotOne:
     ) -> None:
         """Refused, not quietly dropped, and refused before the first call.
 
-        An operator asking for this wants a principal the split says cannot
-        exist. Silently narrowing would hand them a token that looks like what
-        they asked for; minting it would reopen the leak. Both are worse than
-        an exit code and a sentence naming PLATFORM_CHAOS_TOKEN.
+        Silent narrowing would hand back a token that looks like what was asked for; minting
+        it would reopen the leak.
         """
         platform = _fake_platform(monkeypatch)
         assert main(["--scope", "chaos:invoke"]) == 2
@@ -496,11 +429,8 @@ class TestTwoPrincipalsNotOne:
     ) -> None:
         """The case a widening-only bootstrap could never reach.
 
-        The live `incident-commander` account HOLDS chaos:invoke — it was
-        minted with it for months — so "union the defaults in" leaves the leak
-        exactly where it was and reports success. This is the one narrowing
-        the script performs by default, and it is announced rather than
-        silent (the platform seeder's D-01 rule).
+        The live `incident-commander` account HOLDS chaos:invoke, so "union the defaults in"
+        leaves the leak and reports success. Announced, not silent.
         """
         platform = _FakePlatform()
         platform.existing = {

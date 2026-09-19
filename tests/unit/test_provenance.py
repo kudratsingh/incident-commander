@@ -1,28 +1,9 @@
 """The per-run provenance record: what produced a number (WP-0.3).
 
-ADR 0013 made provenance part of the eval result and answered one question
-with it — live or canned. It answered no others, and the gap was total: a
-saved run carried no model id, no commander revision, no platform digest and
-none of the four budget meters ``BudgetLedger`` had been tracking all along
-(divergence D3). A Phase 0 baseline written on that report would have been
-un-attributable the day it was written, and every later phase report is built
-on it.
-
-So these tests are about attribution, not about behaviour:
-
-* the record survives a write and a read with every field populated;
-* the platform digest is READ FROM ``demo/compose.yml``, so it cannot drift
-  from the stack that ran;
-* the budgets are the ones the run was SEEDED with, not the ones the
-  configuration documents (they are different numbers — ADR 0019's
-  per-scenario cap, and the paid-run protocol's .env-only ceilings, D7);
-* a report containing a development-role run is marked non-closing, in the
-  artifact and not only on the console (plan 03 § 14);
-* a comparison spanning two ``agent_model`` ids is REFUSED, because a
-  leaderboard row across two models is a model change and a behaviour change
-  added together and the table cannot say which (plan 02 § 9);
-* every archived report still parses. They are locked, append-only evidence
-  that predates all of this, and the reader tolerates its absence.
+ADR 0013 answered only live-vs-canned: a saved run carried no model id, revision, digest
+or budget meters (D3). These tests are about attribution — a fully populated round-trip,
+the digest READ from ``demo/compose.yml``, the SEEDED budgets not the documented ones (D7),
+a development run marking the report non-closing, and a two-model comparison REFUSED.
 """
 
 from __future__ import annotations
@@ -80,8 +61,6 @@ def _settings(**overrides: Any) -> Settings:
         "platform_webhook_secret": SecretStr("eval"),
         "database_url": "postgresql://eval:eval@localhost:5432/eval",
         # _env_file=None disables dotenv, not exported shell variables.
-        # Seed all four budgets here so sibling provenance tests share the
-        # same controlled input; explicit overrides below still win.
         "budget_max_tool_calls": 25,
         "budget_max_tokens": 500_000,
         "budget_max_seconds": 1_800,
@@ -94,10 +73,8 @@ def _settings(**overrides: Any) -> Settings:
 def _scenario(name: str = "provenance_probe", *, max_tool_calls: int = 7) -> Scenario:
     """A scenario that terminates at TRIAGE on an info-severity alert.
 
-    Deliberately the smallest one that still produces a complete run: the
-    record under test is about the run's identity, not about its trajectory,
-    and a scenario with canned queues would put its own failure modes between
-    the assertion and the thing asserted.
+    The smallest one that still produces a complete run: the record is about identity,
+    not trajectory.
     """
     return Scenario(
         name=name,
@@ -201,9 +178,7 @@ class TestTheRecordRoundTrips:
         reread = RunReport.model_validate_json(written.read_text(encoding="utf-8"))
         provenance = _only_provenance(reread)
 
-        # Every string field carries a value. "" is the placeholder this
-        # record exists to eliminate: a reader cannot tell an unset field
-        # from a field whose value happens to be empty.
+        # Every string field carries a value: "" cannot be told from unset.
         for field in (
             provenance.commander_revision,
             provenance.platform_image_digest,
@@ -230,11 +205,8 @@ class TestTheRecordRoundTrips:
     def test_the_recorded_revision_is_this_checkout(self) -> None:
         """The revision is read, not invented — and 'unknown' when unreadable.
 
-        Asserted against ``git`` itself rather than against a regex, so the
-        test states the property ("the record names the code that ran")
-        instead of its shape. Both branches are real: a checkout answers with
-        a sha, and a source tree with no repository answers "unknown", which
-        is the honest form of not knowing.
+        Asserted against ``git`` itself rather than a regex, so the test states the property.
+        Both branches are real.
         """
         completed = subprocess.run(
             ["git", "rev-parse", "HEAD"],  # noqa: S607 - PATH lookup is intended
@@ -305,12 +277,8 @@ class TestThePlatformDigestCannotDrift:
 class TestTheBudgetsAreTheSeededOnes:
     """Requirement 6: the record reports the ledger, not the documentation.
 
-    The distinction is the whole point (divergence D7). The documented
-    defaults are 25 calls / 500 000 tokens / 1800 s / $5.00; a scenario's
-    declared cap overrides the call ceiling (ADR 0019), and the paid-run
-    protocol's budgets live only in the operator's un-committed ``.env``. A
-    record that reported the documented numbers would describe a run that
-    did not happen.
+    A scenario's cap overrides the documented call ceiling (ADR 0019) and the paid-run
+    budgets live only in the operator's ``.env`` (D7).
     """
 
     def test_ambient_budgets_do_not_change_the_test_inputs(
@@ -379,9 +347,7 @@ class TestNonClosingReports:
         assert RunReport.model_validate_json(written.read_text(encoding="utf-8")).closing is False
 
     def test_the_mark_counts_every_run_but_names_only_a_few(self) -> None:
-        # A full-suite offline run is 40 development rows. The count has to be
-        # exact; the list is a sample, because a sentence nobody finishes
-        # reading is a mark nobody acts on.
+        # A full-suite offline run is 40 development rows; the count must be exact.
         outcomes = tuple(
             _outcome(
                 f"scenario_{i}",
@@ -451,10 +417,8 @@ class TestCrossModelRefusal:
         assert regression.cross_model_refusal(baseline, latest) is None
 
     def test_a_report_with_no_record_is_not_a_second_model(self) -> None:
-        # The committed baseline predates the record. Absence is one less
-        # thing known about the same model, not evidence of another one —
-        # treating it as a second model would refuse every comparison until
-        # the next deliberate re-bless.
+        # The committed baseline predates the record: absence is one less thing known, not
+        # evidence of a second model.
         baseline = RunReport(**_report((_outcome(),)))
         latest = RunReport(**_report((_outcome(provenance=_provenance()),)))
         assert regression.cross_model_refusal(baseline, latest) is None
@@ -464,10 +428,8 @@ class TestCrossModelRefusal:
     ) -> None:
         """Exit 2 with no table printed — the gate's output IS the table.
 
-        Pointed at synthetic reports under ``tmp_path``: ``evals/reports/``
-        is append-only evidence and a test never writes there. The
-        newest-wins resolution this relies on is covered by
-        ``test_regression.py``; here the directory holds exactly one report.
+        Pointed at ``tmp_path``: ``evals/reports/`` is append-only evidence and a test
+        never writes there.
         """
         reports = tmp_path / "reports"
         reports.mkdir()
@@ -495,9 +457,7 @@ class TestCrossModelRefusal:
     def test_the_gate_marks_a_development_report_without_gating_on_it(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
-        # Non-closing is a statement about what the report may be USED for.
-        # Development runs are the normal way this gate is exercised, so it
-        # prints and leaves the exit code alone.
+        # Non-closing states what the report may be USED for, so the exit code stands.
         reports = tmp_path / "reports"
         reports.mkdir()
         development = _outcome(provenance=_provenance(model_role=ModelRole.DEVELOPMENT))
@@ -564,9 +524,7 @@ class TestTheModelRoleFlag:
                     model_role=role,
                 )
             )
-            # The pair is the point: either half alone cannot be checked
-            # against the other (LESSONS — shape without provenance catches
-            # truncation, not a plausible wrong value).
+            # The pair is the point: shape without provenance catches truncation only.
             assert (provenance.model_role, provenance.agent_model) == (role, resolved)
 
 
@@ -596,34 +554,19 @@ class TestBuildProvenanceIsTotal:
 class TestArchivedReportsStillParse:
     """Invariant 9: every archive predates these fields and must keep parsing.
 
-    The archives under ``evals/runs/`` are locked, append-only evidence — 37
-    of them at the time of writing, several of them paid live runs. Nothing
-    in this packet may rewrite one, so the reader has to tolerate the absence
-    of every field it adds. A default that made an old artifact assert
-    something false would be the honesty failure ADR 0013 was written about.
-
-    Both halves of that rule are now exercised here: unstamped archives must
-    say they do not know, and the committed baseline — stamped by WO-R3-249's
-    bless — must answer every field it does know.
+    The archives under ``evals/runs/`` are locked, append-only evidence, several of them
+    paid live runs, so the reader tolerates the absence of every field this packet adds.
+    Both halves: unstamped archives say they do not know, stamped ones answer in full.
     """
 
     def test_the_committed_baseline_is_stamped_all_the_way_through(self) -> None:
         """The committed baseline is now a stamped run, so the rule flips sides.
 
-        This asserted that the baseline claimed no role at all, because the
-        committed one predated provenance entirely. That was a fact about the
-        repository on the day it was written — exactly the kind the sibling
-        test below already had to unlearn once — and WO-R3-249's bless ended
-        it. The invariant did not move: no report asserts what it does not
-        know, and a stamped one is stamped ALL the way through. A report where
-        only some rows carry provenance can name a model for one scenario and
-        not the next, which is the half-attributable artifact ADR 0013 exists
-        to prevent.
+        WO-R3-249's bless ended the old fact. The invariant did not move: no report asserts
+        what it does not know, and a stamped one is stamped ALL the way through.
         """
         report = RunReport.model_validate_json(_BASELINE.read_text(encoding="utf-8"))
-        # False, not None: the bless was a development-role run and the
-        # artifact says so. A regression baseline is the right place for one;
-        # a phase-closing number is not.
+        # False, not None: the bless was a development-role run and says so.
         assert report.closing is False
         provenances = [outcome.provenance for outcome in report.outcomes]
         assert provenances and all(p is not None for p in provenances)
@@ -635,23 +578,8 @@ class TestArchivedReportsStillParse:
     def test_every_committed_archive_parses_and_never_claims_what_it_lacks(self) -> None:
         """Every archive git is TRACKING, each held to the rule its own era set.
 
-        Tracked rather than everything on disk: a local offline run writes a
-        fresh, untracked archive into the same directory. Asking git which
-        files are committed is what makes "the evidence this repo ships" a
-        checkable definition rather than "whatever is in this directory
-        today".
-
-        Originally every tracked archive predated provenance, so this asserted
-        that none of them recorded a role. That was a fact about the
-        repository on the day it was written, not the invariant. WO-R3-182
-        commits the offline run its Phase 0 baseline is assembled from, which
-        is stamped, so the fact stopped being true while the invariant did
-        not: **no archive may assert something it does not know.** An
-        unstamped archive must say so rather than let a default speak for it,
-        and a stamped one must be stamped all the way through — a report where
-        only some rows carry provenance can name a model for one scenario and
-        not the next, which is the half-attributable artifact ADR 0013 exists
-        to prevent.
+        Tracked rather than everything on disk, because a local run writes an untracked
+        archive. The invariant: no archive may assert something it does not know.
         """
         listed = subprocess.run(
             ["git", "ls-files", "-z", "evals/runs/*/report.json"],  # noqa: S607

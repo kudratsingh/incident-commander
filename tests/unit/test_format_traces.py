@@ -1,22 +1,9 @@
 """The human trace renderer must honor the append-only tracer (WO-C4-03).
 
-``JsonlTracer`` stopped truncating on 2026-08-07 (study/findings.md F-002):
-a re-run APPENDS a fresh ``invocation_id``-stamped block instead of erasing
-the previous attempt's billed records. ``scripts/format_traces.py`` was never
-updated for that, so it
-
-* rendered a mixed-vintage file as one trajectory, attributing the OLDEST
-  attempt's pass/fail and timestamps to the whole history and inflating step
-  counts across invocations (A-06), and
-* read ``r["output"]`` unconditionally, which ``KeyError``s on the
-  ``parse_failed=True`` records ``LLMClient`` writes for billed-but-
-  unparseable responses (A-05) — and the crash escaped the un-guarded
-  per-file loop in ``main``, so one bad scenario left the whole invocation
-  with zero human reports after the paid runner had already exited.
-
-Every fixture here is synthetic JSONL under ``tmp_path``. No runner executes
-and nothing is written under ``evals/`` (ADR 0011 freeze; study/findings.md
-F-003).
+``JsonlTracer`` stopped truncating on 2026-08-07 (F-002): a re-run APPENDS an
+``invocation_id``-stamped block. ``format_traces.py`` was never updated, so it rendered a
+mixed-vintage file as one trajectory (A-06) and ``KeyError``'d on ``parse_failed`` records
+(A-05), leaving a paid invocation with zero human reports. Fixtures are synthetic JSONL.
 """
 
 from __future__ import annotations
@@ -130,9 +117,7 @@ def _llm(
 def _llm_parse_failed(invocation: str, when: str) -> dict[str, Any]:
     """Shaped exactly like ``dict(trace, parse_failed=True)`` in llm/client.py.
 
-    The billed response is there; there is no ``output`` key, and the cache
-    usage fields come back JSON-null the way the SDK serializes them when the
-    call never reached the cache.
+    The billed response is there; there is no ``output`` key.
     """
     return _stamp(
         {
@@ -458,9 +443,7 @@ def test_one_corrupt_file_does_not_abort_the_rest(
 def test_main_renders_a_partial_archive_trace_slice(tmp_path: Path) -> None:
     """A run directory with NO report.json is still renderable evidence (ADR 0017).
 
-    ``report.json`` absent means the run was killed mid-suite; the per-scenario
-    trace slices under it cost real money and are first-class evidence, so the
-    renderer must never require the completion marker.
+    The trace slices cost real money, so no completion marker is required.
     """
     archive = tmp_path / "runs" / "deadbeefcafe"
     slice_dir = archive / "traces"
@@ -528,12 +511,8 @@ def _txt(out_dir: Path) -> list[str]:
 class TestARunRendersOnlyWhatItRan:
     """The renderer stopped re-rendering the whole corpus on every invocation.
 
-    ``make eval-live ONLY=<one scenario>`` chains this script, and it used to
-    write one report per trace file it could find — 39 for a one-scenario
-    run, 38 of them identical re-renders of trajectories nobody had touched.
-    They are permanent (invariant 9 forbids deleting them), which is how
-    ``evals/reports/human/`` reached 765 files for 56 distinct runs. The rule
-    is now: render an attempt no existing report covers, and nothing else.
+    It wrote one report per trace file it could find — 39 for a one-scenario run, and they
+    are permanent (invariant 9): 765 files for 56 runs. Render what no report covers.
     """
 
     def test_a_one_scenario_run_writes_exactly_one_new_file(self, tmp_path: Path) -> None:
@@ -580,10 +559,8 @@ class TestARunRendersOnlyWhatItRan:
     def test_a_scenario_whose_newest_attempt_is_unrendered_catches_up(self, tmp_path: Path) -> None:
         """The second half of the rule, and the reason it is not "only the last run".
 
-        A render can be missing for reasons that have nothing to do with this
-        invocation — the renderer failed on that file last time (A-05), the
-        report was never produced, the trace was restored from an archive. The
-        test is coverage, not recency, so those catch up on the next sweep.
+        A render can be missing for reasons unrelated to this invocation, so the test is
+        coverage, not recency.
         """
         trace_dir, out_dir = _suite(tmp_path, ("alpha", "beta"))
         assert main(["--trace-dir", str(trace_dir), "--out-dir", str(out_dir), "beta"]) == 0
@@ -708,12 +685,8 @@ def _precondition(
 class TestEveryKindRenders:
     """The renderer's formatter table must cover the tracer's enumeration.
 
-    ``llm_error`` and ``precondition`` were written by the harness for as
-    long as they have existed and rendered as ``STEP N — unknown kind=…``,
-    a one-line JSON dump of the whole record — including, for an
-    ``llm_error``, the entire system prompt. This class is why a new
-    ``TraceKind`` member cannot repeat that: adding one fails here until it
-    has a formatter.
+    ``llm_error`` and ``precondition`` rendered as ``STEP N — unknown kind=…``, a JSON dump
+    of the record, including an ``llm_error``'s system prompt.
     """
 
     def test_the_formatter_table_covers_every_tracer_kind(self) -> None:
@@ -745,10 +718,8 @@ class TestEveryKindRenders:
     def test_trace_records_name_their_kind_through_the_enumeration(self) -> None:
         """No bare ``"kind": "..."`` literal in the two writers.
 
-        The coverage test above is only as good as the enumeration's claim to
-        be complete. A literal written straight into a record bypasses it —
-        which is exactly how ``precondition`` came to exist without the
-        renderer ever hearing about it.
+        A literal bypasses the enumeration — which is how ``precondition`` came to exist
+        unrendered.
         """
         repo_root = Path(__file__).resolve().parents[2]
         offenders = [
@@ -796,9 +767,7 @@ def test_a_retried_llm_error_says_so(tmp_path: Path) -> None:
 def test_llm_errors_count_toward_the_llm_call_total(tmp_path: Path) -> None:
     """The billed-but-failed calls the tracer captures are spend, not gaps.
 
-    ``mcp_error`` was already counted in the tool total; ``llm_error`` was
-    counted nowhere, so a run that burned three 429-exhausted planner calls
-    reported them as zero LLM calls.
+    ``llm_error`` was counted nowhere: burned calls read as zero.
     """
     path = _write_jsonl(
         tmp_path / "redis_saturation.jsonl",
@@ -836,10 +805,8 @@ def test_precondition_renders_its_verdict(tmp_path: Path) -> None:
 def test_an_unverifiable_precondition_is_not_reported_as_not_met(tmp_path: Path) -> None:
     """The two failures send a reader to different halves of the system.
 
-    NOT MET says the fault was never manufactured — look at seeding.
-    UNVERIFIABLE says the platform never answered the deciding attempt —
-    look at the platform. Collapsing them is the bug the record pair exists
-    to prevent, so the report must not collapse them either.
+    NOT MET means seeding; UNVERIFIABLE means the platform never answered. The report
+    must not collapse them.
     """
     path = _write_jsonl(
         tmp_path / "redis_saturation.jsonl",
@@ -885,11 +852,8 @@ def test_a_kind_from_a_newer_harness_is_dumped_not_dropped(tmp_path: Path) -> No
 class TestTheRepairedCallIsLabeled:
     """ADR 0035: a repair re-ask is one logical step, not a second attempt.
 
-    Without the label, run ``779b19a287a7``'s successor would render as two
-    consecutive ``investigation_planner`` calls with no relationship between
-    them — a reader counting planner calls sees a loop that never happened,
-    and a reader auditing spend cannot tell which of the two was billed for
-    the answer that was used.
+    Without the label run ``779b19a287a7``'s successor renders as two consecutive planner
+    calls, and nobody can tell which was billed.
     """
 
     def test_the_repair_re_ask_is_labeled_and_names_its_original(self, tmp_path: Path) -> None:
@@ -933,9 +897,7 @@ class TestTheRepairedCallIsLabeled:
     def test_the_renderers_cap_matches_the_one_the_harness_enforces(self) -> None:
         """The literal in the script is a copy. Copies drift; this one may not.
 
-        ``format_traces.py`` stays stdlib-only so it can render an archived
-        slice from any checkout, which is why the number is not imported
-        there. A test can import both.
+        ``format_traces.py`` stays stdlib-only, so a test imports both.
         """
         from incident_commander.llm.repair import MAX_OUTPUT_REPAIRS
         from scripts.format_traces import _MAX_OUTPUT_REPAIRS
@@ -944,13 +906,8 @@ class TestTheRepairedCallIsLabeled:
 
 
 # ---------------------------------------------------------------------------
-# WP-2.1 — the ``step`` kind.
-#
-# ``TraceKind`` membership is enforced by TestEveryKindRenders above, so the
-# formatter had to land in the same PR as the kind. These are the tests for
-# what it actually says: a reader comparing two strategies reads the planner
-# step, and a record that renders as "unknown kind" is a JSON dump of exactly
-# what they came for.
+# WP-2.1 — the ``step`` kind. ``TraceKind`` membership is enforced by
+# TestEveryKindRenders above; these test what the formatter says.
 
 
 def _step(
@@ -1068,9 +1025,7 @@ def test_a_baseline_step_says_its_selector_is_absent(tmp_path: Path) -> None:
 
 
 def test_a_selected_candidate_is_rendered_with_its_scores(tmp_path: Path) -> None:
-    # Nothing writes a selector yet (the role arrives in Phase 6), so this is
-    # the renderer's forward half: the day one does, it must not land in the
-    # report as a raw dump.
+    # Nothing writes a selector yet (Phase 6), so this is the renderer's forward half.
     path = _write_jsonl(
         tmp_path / "redis_saturation.jsonl",
         [
@@ -1099,10 +1054,7 @@ def test_a_selected_candidate_is_rendered_with_its_scores(tmp_path: Path) -> Non
 def test_a_planner_step_is_not_counted_as_an_llm_or_tool_call(tmp_path: Path) -> None:
     """The header counts calls; a step record is a record ABOUT calls.
 
-    The planner call it describes is already counted through its own ``llm``
-    record, so counting the step too would report one live investigation as
-    twice the LLM calls it made — the same shape of double-count the
-    invocation grouping was written to stop.
+    The planner call is already counted through its own ``llm`` record.
     """
     path = _write_jsonl(
         tmp_path / "redis_saturation.jsonl",

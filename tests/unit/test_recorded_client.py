@@ -1,34 +1,9 @@
 """`RecordedMCPClient` — the replay half of recorded mode (WP-3.2, WO-R3-197).
 
-A recorded run hands the agent a recording instead of a platform. That makes the
-properties pinned here load-bearing in the way ``test_recorder.py``'s are: the
-client is not watched by anyone while it answers, it answers measured runs for
-weeks, and every one of the four failures below looks like a working benchmark
-from the outside.
-
-* **The key is the WIRED call, and it is the recorder's own key function.**
-  ``TestTheKeyIsTheWiredCall`` is red against a lookup on the raw arguments, and
-  it proves it the direct way — it computes the raw key and shows the recording
-  cannot answer it. The failure is not an exception, it is a ``not_recorded``
-  miss on every read (divergence F2, ADR 0043 § 1).
-* **A miss is answered, counted and visible.** Never an empty healthy-looking
-  result: an empty database was indistinguishable from a seeded one for the life
-  of this project (hub ``LESSONS.md``), and a miss that looked like "no rows"
-  would be that failure in a new place.
-* **A Tier-1 call is refused by its tier and the refusal RAISES.** Refused via
-  ``policies.tier_of`` over the whole registry rather than a name list — the
-  thing ``policies.py``'s own comment records the cost of. It raises because the
-  agent escalates on ``is_error``, and a replayed action that came back as a
-  tool error would make a run that could not have remediated anything read as a
-  run that chose to escalate.
-* **The clocks are re-based to the replay clock by a written-down list.** The
-  coverage of that list is DERIVED here from the tool registry, so a time field
-  shipped tomorrow fails this file rather than silently replaying a year-old
-  timestamp to an agent reasoning about how old a row is.
-
-Every test is hermetic: synthetic recordings, the committed ones, and the
-suite-wide outbound-socket block in ``conftest.py``. Nothing here starts a
-platform, and nothing here constructs an LLM client except the canned fake.
+Four properties, each of whose failures looks like a working benchmark: the key is the
+WIRED call through the recorder's own key function (F2, ADR 0043 § 1); a miss is answered,
+counted and visible, never an empty healthy-looking result; a Tier-1 call is refused by
+``policies.tier_of`` and RAISES; and the clocks re-base by a registry-derived list.
 """
 
 from __future__ import annotations
@@ -199,13 +174,9 @@ def _committed() -> list[Path]:
 class TestTheKeyIsTheWiredCall:
     """Divergence F2 on the lookup side — the property the whole mode rests on.
 
-    RED BEFORE: replace ``replay_key``'s ``wire_arguments(spec, arguments)`` with
-    ``dict(arguments)`` and ``test_the_agents_own_wired_call_is_answered`` and
-    ``test_the_raw_key_cannot_find_the_answer`` both fail —
-    ``list_dlq_messages({})`` hashes to something no recording holds, and the
-    client answers ``not_recorded`` to every read while the run looks like it
-    happened. ``test_the_raw_key_cannot_find_the_answer`` is that failure written
-    down as an assertion, so it cannot be argued about.
+    RED BEFORE: replace ``replay_key``'s ``wire_arguments`` with ``dict(arguments)`` and both
+    tests fail — ``list_dlq_messages({})`` hashes to something no recording holds, so the
+    client answers ``not_recorded`` to every read.
     """
 
     def test_an_omitted_optional_is_answered_because_the_lookup_wires_first(self) -> None:
@@ -234,9 +205,7 @@ class TestTheKeyIsTheWiredCall:
     def test_the_raw_key_cannot_find_the_answer(self) -> None:
         """The red-before, stated as a fact about the two keys.
 
-        A lookup keyed on what the planner wrote (``{}``) computes a different
-        hash from the one the recording stores, so a replay client that skipped
-        the wiring would miss on every read.
+        A lookup keyed on what the planner wrote computes a different hash.
         """
         world = _world(_recorded_call("list_dlq_messages", {}, _DLQ_PAYLOAD))
         raw_key = recorder.call_key("list_dlq_messages", {})
@@ -246,9 +215,7 @@ class TestTheKeyIsTheWiredCall:
     def test_the_key_function_is_the_recorders_own(self) -> None:
         """One function computes the key on both sides (ADR 0043 § 1).
 
-        Read off the syntax tree: what matters is that the replay module
-        IMPORTS the recorder's key function and defines no second one of its
-        own, which an identity check on a rebound name would not settle.
+        Read off the syntax tree: the replay module IMPORTS it and defines no second one.
         """
         tree = ast.parse((_REPO_ROOT / "evals" / "recorded_client.py").read_text())
         imported = {
@@ -414,10 +381,8 @@ class TestTier1IsRefusedByItsTier:
 class TestTheClockIsRebased:
     """The recording is the world as it was, NOW.
 
-    RED BEFORE: drop the ``rebase_result`` call from ``replay_answers`` and
-    ``test_an_absolute_clock_moves_to_the_replay_timeline`` fails with a
-    ``measured_at`` eleven days behind the replay clock, which is an agent
-    reading a lag sample it would call ancient.
+    RED BEFORE: drop ``rebase_result`` and ``measured_at`` comes back eleven days
+    behind the replay clock.
     """
 
     def _lag_client(self, replay_clock: datetime = _REPLAY_AT) -> RecordedMCPClient:
@@ -513,9 +478,7 @@ class TestTheClockIsRebased:
     def test_the_written_down_list_covers_every_time_field_the_registry_declares(self) -> None:
         """Derived here, written down there — so a new field fails this test.
 
-        The point of the split: the module states which fields move and why,
-        because "is this a clock of the world" is a judgement. This test states
-        that no *modelled* time field was left out of that judgement.
+        The module states which fields move and why; this states that none was left out.
         """
         expected_clocks: dict[str, set[str]] = {}
         expected_durations: dict[str, set[str]] = {}
@@ -538,13 +501,8 @@ class TestTheClockIsRebased:
 def _is_duration_name(name: str) -> bool:
     """Does this field name say "a number of seconds"?
 
-    Three spellings, all of them the platform's: ``ttl_seconds`` and
-    ``age_seconds`` (v0.6.0 onward), ``relay_heartbeat_age_s`` and
-    ``relay_tick_interval_s`` (v0.6.9's outbox reading), and
-    ``seconds_since_last_publish`` (same tool, the quantity in front). The
-    suffix ``_seconds`` alone was the original rule and it left five real
-    durations on ``get_outbox_status`` invisible to the coverage check below,
-    which is the one thing this test exists to prevent.
+    Three spellings, all the platform's: ``_seconds``, ``_s`` (v0.6.9's outbox reading) and
+    ``seconds_since_last_publish``. ``_seconds`` alone missed five real durations.
     """
     return name.endswith(("_seconds", "_s")) or name.startswith("seconds_")
 
@@ -552,9 +510,7 @@ def _is_duration_name(name: str) -> bool:
 def _time_fields(model: type[BaseModel], prefix: str = "") -> tuple[set[str], set[str]]:
     """Every datetime path and every duration-named number path in one output model.
 
-    A local walk rather than an import: what is being checked is the module's
-    hand-written table, and a shared helper would make the test and the table
-    two views of one derivation instead of a check on it.
+    A local walk, not an import: the hand-written table is the subject.
     """
     clocks: set[str] = set()
     durations: set[str] = set()
@@ -611,9 +567,7 @@ class TestItRefusesToConstructWithoutARecording:
     def test_nothing_in_this_module_could_reach_a_real_platform(self) -> None:
         """The structural half of "never falls back to a real client" (ADR 0013).
 
-        Read off the module's own syntax tree rather than its text, so the prose
-        may discuss ``make_client`` — it has to, that refusal is the precedent —
-        while the code may not name it.
+        Read off the syntax tree, so prose may name ``make_client``.
         """
         tree = ast.parse((_REPO_ROOT / "evals" / "recorded_client.py").read_text())
         modules: set[str] = set()
@@ -642,15 +596,9 @@ class TestItRefusesToConstructWithoutARecording:
 class TestARecordedTrajectoryMatchesTheCannedOne:
     """The acceptance from the order: a replay reproduces a canned-equivalent run.
 
-    ``dlq_backlog`` is the scenario that has both forms and no action leg, so
-    the comparison is about the trajectory rather than about a remediation. What
-    "equivalent" means here is stated exactly, because the loose reading is
-    wrong: the two worlds hold DIFFERENT VALUES — the canned fixture is a
-    hand-recorded world and the recording is the live stack as it stood — and
-    that is the point of a recording, not a defect in it. What must match is the
-    SHAPE of the run: the same probe, with the same wired arguments, in the same
-    order, reaching the same terminal state, with the same number of tool calls
-    and no miss.
+    ``dlq_backlog`` has both forms and no action leg. The two worlds hold DIFFERENT VALUES —
+    that is the point of a recording — so what must match is the SHAPE: same probe, same
+    wired arguments, same order, same terminal state, same tool-call count, no miss.
     """
 
     def _run(self, scenario: Scenario, client: Any, run_state: RunState, now: datetime) -> RunState:
@@ -705,11 +653,8 @@ def _newest_recording(scenario: str) -> Path:
 class TestTheCommittedRecordingsAllReplay:
     """Every recording this repo carries, exercised through the client that replays it.
 
-    ``test_recorder.py`` holds them to loading and to answering their own calls
-    through ``RecordedWorld.answer``. This is the other side: the client an
-    actual run is handed, at a replay clock that is not the recording's, which
-    is the only way the re-basing walk is exercised against real platform
-    payloads rather than against the ones a test author thought of.
+    ``test_recorder.py`` holds them to loading and answering; this is the client a run is
+    handed, at a replay clock that is not the recording's.
     """
 
     def test_every_recording_serves_every_call_it_holds(self) -> None:

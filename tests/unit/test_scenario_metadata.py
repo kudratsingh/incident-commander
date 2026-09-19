@@ -1,22 +1,9 @@
 """Benchmark metadata: family, difficulty, split, template id and seed (WP-1.4).
 
-Three claims, and they fail in three different places on purpose.
-
-1. **A template belongs to exactly one split** — refused by the LOADER, over
-   the whole directory, because a straddling ``template_id`` is invisible in
-   either scenario's own file. Plan 03 § 4 puts the enforcement there
-   ("the loader refuses") rather than in a report, because by the time a
-   report footnote is read the number it footnotes has been quoted.
-2. **Every scenario in the corpus is classified** — a parameterised sweep
-   over ``evals/scenarios/``, so a new scenario fails here, by name, until
-   somebody gives it a family and a difficulty. Not a required field on the
-   model: thirteen inline ``Scenario(...)`` fixtures and a dozen inline YAML
-   blobs in this suite have no opinion about family, and a required field
-   they all have to fill is a field they all fill with whatever loads.
-3. **The promotion is reconciled, not asserted** — every authoritative value
-   either equals what WO-R3-179's provisional rule produced or is a recorded
-   exception with a reason. "We promoted the provisional values" is then a
-   checkable claim rather than a sentence in a PR body.
+Three claims, failing in three places: a template belongs to exactly one split (refused
+by the LOADER, since a straddling ``template_id`` is invisible in either file — plan 03
+§ 4); every scenario in the corpus is classified (a parameterised sweep, not a required
+model field); and the promotion is reconciled against WO-R3-179's provisional rule.
 """
 
 from __future__ import annotations
@@ -81,9 +68,7 @@ class TestLegacyDefaults:
     def test_family_and_difficulty_are_genuinely_optional(self, tmp_path: Path) -> None:
         """Undeclared is a state the model permits and the CORPUS does not.
 
-        The corpus sweep below is what makes a real scenario carry them. A
-        fixture that has no opinion says so by omission rather than by
-        picking a family at random to satisfy a constructor.
+        A fixture with no opinion says so by omission.
         """
         _write(tmp_path, "solo")
         (scenario,) = load_scenarios(tmp_path)
@@ -101,9 +86,7 @@ class TestLegacyDefaults:
     ) -> None:
         """``template_id: ''`` is "unset", not "the empty template".
 
-        Left as ``""`` it would make every such scenario one template in
-        every report, and would make the loader's split check compare two
-        unrelated scenarios.
+        Left as ``""`` they would all be one template in every report.
         """
         _write(tmp_path, "solo", extra="template_id: ''\n")
         (scenario,) = load_scenarios(tmp_path)
@@ -132,8 +115,6 @@ class TestSplitsAreByTemplate:
             load_scenarios(tmp_path)
         message = str(err.value)
         # Both scenarios, both splits, and the template they collide on.
-        # Neither file is wrong on its own, so an error naming one of them
-        # sends the reader to a file that looks fine.
         assert "chain_seed_0" in message
         assert "chain_seed_1" in message
         assert "'dev'" in message
@@ -157,21 +138,16 @@ class TestSplitsAreByTemplate:
     def test_the_shipped_corpus_loads(self) -> None:
         """49 scenarios, no straddle. The check is inert until it is not.
 
-        41 until WO-R3-202 (WP-4.3) added the four `jobs_not_progressing`
-        worlds, and 45 until WO-R3-214 (WP-7.2) added the four `workflow_stuck`
-        ones. The number is a pin rather than a derivation on purpose: a
-        scenario that appears without anybody noticing is the thing this
-        catches.
+        41 until WO-R3-202 added four `jobs_not_progressing`, 45 until WO-R3-214 added four
+        `workflow_stuck`. A pin, not a derivation.
         """
         assert len(CORPUS) == 49
 
 
 class TestClosedVocabularies:
     def test_family_outside_the_enum_is_a_load_error(self, tmp_path: Path) -> None:
-        # Was `jobs_not_progressing`, which WO-R3-202 made real, then
-        # `workflow_stuck`, which WO-R3-214 (WP-7.2) did. `api_latency` is the
-        # last of plan 01 § 7's future families, so it is what stands here now;
-        # the test below is what forces the swap when its packet lands.
+        # Was `jobs_not_progressing`, then `workflow_stuck`; `api_latency` is the last of plan
+        # 01 § 7's future families.
         _write(tmp_path, "solo", extra="family: api_latency\n")
         with pytest.raises(ScenarioLoadError, match="family"):
             load_scenarios(tmp_path)
@@ -206,27 +182,8 @@ class TestClosedVocabularies:
     def test_no_family_for_a_world_nobody_has_built(self) -> None:
         """Plan 01 § 7's future families arrive with their own packets.
 
-        An empty group in a report reads as a measured zero, which is worse
-        than an absent one.
-
-        REWRITTEN BY WO-R3-214 (WP-7.2), because its premise was that
-        `workflow_stuck` was one of those worlds and it now is not. The rule the
-        test was protecting has not moved: a family member lands in the SAME
-        change as the scenarios that fill it, never before. So the assertion is
-        now the rule itself, in both directions —
-
-        * the families that have arrived (`jobs_not_progressing` in WO-R3-202,
-          `workflow_stuck` in WO-R3-214) are in the enum AND populated, which
-          `test_the_family_that_arrived_brought_its_scenarios_with_it` below
-          checks over the whole enum; and
-        * `api_latency`, the one world of plan 01 § 7 nobody has built, is in
-          neither.
-
-        Deleting this test when `workflow_stuck` landed would have removed the
-        second half with nothing left to keep an unpopulated member out. Naming
-        the remaining witness is what keeps it a real check rather than a
-        tautology: when `api_latency` ships, this list empties and the test's own
-        docstring says so out loud.
+        An empty group reads as a measured zero. The rule (rewritten by WO-R3-214): a family
+        member lands with the scenarios that fill it, and `api_latency` is the last unbuilt one.
         """
         remaining_future_worlds = {"api_latency"}
         members = {member.value for member in ScenarioFamily}
@@ -246,9 +203,7 @@ class TestClosedVocabularies:
     def test_the_family_that_arrived_brought_its_scenarios_with_it(self) -> None:
         """The other direction, and the one that makes the rule above a rule.
 
-        A member removed from the list above is only legitimate while something
-        in the corpus actually manufactures that world — otherwise the exemption
-        was just deleted and the empty group is back.
+        A removal is only legitimate while the corpus manufactures that world.
         """
         populated = {s.family.value for s in CORPUS if s.family is not None}
         unpopulated = sorted({m.value for m in ScenarioFamily} - populated)
@@ -295,10 +250,7 @@ class TestNothingIsHeldOutWithoutADecision:
     def test_no_shipped_scenario_is_in_the_holdout(self) -> None:
         """A holdout is a promise, and making it is the user's call.
 
-        Plan 03 § 4: holdout means *never tuned against*. Assigning a
-        template to it commits every future session to leaving it alone, and
-        that is a scope decision rather than a builder's default. WP-1.4
-        builds the mechanism and assigns nothing to it.
+        Plan 03 § 4: holdout means *never tuned against*. WP-1.4 assigns nothing to it.
         """
         held_out = sorted(s.name for s in CORPUS if s.benchmark_split is BenchmarkSplit.HOLDOUT)
         assert not held_out, (
@@ -321,9 +273,7 @@ class TestPromotionIsReconciled:
 
     #: scenario -> (provisional family, authoritative family, why)
     FAMILY_EXCEPTIONS = {
-        # The substring rule had no needle for these five and answered
-        # `uncategorized`, which is not a family — it is the rule saying it
-        # could not tell.
+        # No needle for these five, so the rule answered `uncategorized`.
         "incidents_overview": ("uncategorized", "incidents", "alert scope, probed via incidents"),
         "multi_probe_billing": ("uncategorized", "consumer_lag", "alert IS consumer lag"),
         "multi_probe_hypothesis_evolution": (
@@ -337,10 +287,8 @@ class TestPromotionIsReconciled:
             "no world; the planner's own stop path",
         ),
         "remediate_verify_fails": ("uncategorized", "consumer_lag", "alert IS consumer lag"),
-        # WO-R3-202 (WP-4.3). The substring rule has no needle for an outbox or
-        # a dispatch pipeline, so it answers `uncategorized` for three of the
-        # four — the rule saying it cannot tell, which is exactly what it should
-        # say about a world that did not exist when it was written.
+        # WO-R3-202 (WP-4.3). No needle for an outbox or a dispatch pipeline, so the rule
+        # answers `uncategorized` for three of the four.
         "jobs_not_progressing_dispatcher_stall": (
             "uncategorized",
             "jobs_not_progressing",
@@ -356,25 +304,15 @@ class TestPromotionIsReconciled:
             "jobs_not_progressing",
             "same family, the level-0 control where nothing is wrong",
         ),
-        # This one the rule DID answer, and answered wrongly in the most
-        # instructive way available: the name carries `deploy_noise`, the
-        # `deploy` needle matched, and the rule classified the scenario as the
-        # family of its own distractor. The noise is the point of the scenario
-        # and not its subject.
+        # The rule DID answer here, and wrongly: the `deploy` needle matched `deploy_noise`
+        # and classified the scenario as its own distractor's family.
         "jobs_not_progressing_outbox_stall_deploy_noise": (
             "deploy",
             "jobs_not_progressing",
             "the deploy in the name is the distractor, not the family",
         ),
-        # WO-R3-214 (WP-7.2). The rule DID answer for all four, and answered
-        # `workflow` — the family that groups the saga/chain scenarios written
-        # one at a time before families existed. It is not wrong about the
-        # subject, it is one word short of the distinction: `workflow_stuck` is
-        # the family of FOUR worlds sharing one alert, and folding them into
-        # `workflow` would average a family's per-world numbers into a grouping
-        # that is not one. The substring `workflow` is a prefix of
-        # `workflow_stuck`, so the rule will keep answering this way for every
-        # future member.
+        # WO-R3-214 (WP-7.2). The rule answered `workflow` for all four — right about the subject,
+        # one word short: `workflow_stuck` is FOUR worlds sharing one alert, and it is a prefix.
         "workflow_stuck_dead_lettered_root": (
             "workflow",
             "workflow_stuck",
@@ -423,9 +361,7 @@ class TestPromotionIsReconciled:
             "multi_hop",
             "dag state -> the root's own DLQ row -> replay",
         ),
-        # WO-R3-202 (WP-4.3). Same miss as `no_fault_healthy_cache`: the
-        # provisional rule reads the NAME for `noise_`, so a control and a noise
-        # variant that spell themselves otherwise both come back `single`.
+        # WO-R3-202: the provisional rule reads the NAME for `noise_`, so both come back `single`.
         "jobs_not_progressing_healthy_backlog_spike": (
             "single",
             "control",
@@ -436,9 +372,7 @@ class TestPromotionIsReconciled:
             "noisy",
             "a real but unrelated release named in the alert is the variable",
         ),
-        # WO-R3-214 (WP-7.2). Two of the four move, and each for a reason the
-        # provisional rule cannot see from a name: one is a control, and one
-        # takes three reads to answer.
+        # WO-R3-214: two of the four move — one is a control, one takes three reads.
         "workflow_stuck_healthy_chain": (
             "single",
             "control",
@@ -568,8 +502,6 @@ class TestTheReportCanGroupWithoutASchemaChange:
     def test_the_key_defaults_to_none_so_archived_reports_still_parse(self, field: str) -> None:
         """Archived reports and the committed baseline predate this record.
 
-        They are append-only evidence and are never rewritten, so the reader
-        tolerates the absence — the same precedent ADR 0013 set for
-        ``live_mcp`` / ``live_llm``, and ``provenance`` after it.
+        Append-only evidence, so the reader tolerates absence (ADR 0013).
         """
         assert ScenarioOutcome.model_fields[field].default is None

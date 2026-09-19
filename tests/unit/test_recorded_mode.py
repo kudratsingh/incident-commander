@@ -1,28 +1,9 @@
 """`--mode recorded` and `make world-drift` (WP-3.3, WO-R3-198).
 
-Recorded mode is the mode every later phase actually runs in: a real model
-against a replayed platform, so a paired comparison costs one seeding instead of
-one world per run. That makes two properties load-bearing, and both of them are
-about what a recorded row is allowed to CLAIM.
-
-* **A recorded run makes no outcome, action or safety claim.** Safety is graded
-  from the platform's audit log as ground truth (invariant 6) and a recording has
-  none; nothing is executed, so there is no action; and the run is stopped by the
-  harness at the ``PLANNING`` handoff, so its terminal state is not the agent's
-  outcome. Those three dimensions are reported ``applicable=False`` with a reason.
-  RED BEFORE: drop the ``not_applicable`` argument from the runner's ``grade()``
-  call and ``TestRecordedModeMakesNoSafetyClaim`` fails on an ordinary green
-  SAFETY — a run that could not have taken an unauthorized action reporting that
-  it took none.
-* **A recorded result is only evidence while the world it came from still
-  matches.** ``make world-drift`` is the check, and the runbook step that says to
-  run it before reporting a recorded number is asserted here, because a check
-  nobody runs is a check that does not exist.
-
-Everything here is hermetic and costs nothing: the recordings are the committed
-ones, the planner is the canned client, and the suite-wide outbound-socket block
-in ``conftest.py`` is what proves a recorded run reaches no platform. A recorded
-run with a REAL model is a paid run and is not exercised anywhere in this file.
+Recorded mode is what every later phase runs in: a real model against a replayed platform.
+Two properties are load-bearing — a recorded run makes no outcome, action or safety claim
+(invariant 6: the three report ``applicable=False``), and a recorded result is evidence
+only while `make world-drift` still matches. Everything here is hermetic and free.
 """
 
 from __future__ import annotations
@@ -74,12 +55,8 @@ def scenarios() -> dict[str, Scenario]:
 def offline_settings() -> Settings:
     """Placeholder settings — the canned planner, so nothing is spent.
 
-    This is the seam that makes recorded mode provable for free: the PLATFORM
-    leg is a replay either way, and the MODEL leg degrades to the canned client
-    under a placeholder key exactly as it does in every other mode. The runner's
-    CLI refuses that combination outright (a canned planner under a recorded
-    label would be a fabricated row), which is why these tests call
-    ``run_scenario`` directly and never ``main``.
+    The PLATFORM leg is a replay either way and the MODEL leg degrades to the canned client.
+    The CLI refuses that combination, so these tests call ``run_scenario`` directly.
     """
     return runner._eval_defaults()
 
@@ -159,14 +136,8 @@ class TestARecordedRunIsStampedAsOne:
     ) -> None:
         """The guard that matters, exercised where it actually bites.
 
-        The two tests above run under the placeholder platform URL, so the live
-        MCP leg is off whatever recorded mode does — they prove the row, not the
-        guard. This one hands the runner a REAL-looking URL, which is what an
-        operator's ``.env`` holds: ``--mode recorded`` reads the real environment
-        precisely because the MODEL leg has to be real. Without recorded mode
-        forcing the platform leg off, this run would fire the scenario's chaos
-        hooks into the shared world and read it live while the row claimed to be
-        a replay.
+        The tests above run under the placeholder URL, so they prove the row, not the guard.
+        Without recorded mode forcing the platform leg off, this run would fire the chaos hooks.
         """
         seeded: list[str] = []
 
@@ -209,11 +180,8 @@ class TestARecordedRunIsStampedAsOne:
 class TestRecordedModeMakesNoSafetyClaim:
     """The three dimensions a replayed world cannot support.
 
-    RED BEFORE: remove ``not_applicable=`` from the runner's ``grade()`` call and
-    every test in this class fails — SAFETY comes back an ordinary green with the
-    detail "no forbidden action tools set", i.e. a run that could not have taken
-    an unauthorized action reporting that it took none. That is the number that
-    would end up in a phase-close report.
+    RED BEFORE: remove ``not_applicable=`` from the runner's ``grade()`` call and SAFETY
+    comes back an ordinary green, and that number lands in a close report.
     """
 
     @pytest.mark.parametrize(
@@ -245,9 +213,7 @@ class TestRecordedModeMakesNoSafetyClaim:
     ) -> None:
         """A recorded report gated against a canned baseline must fire, not pass.
 
-        The gate's vacated-assertion check is what would otherwise let a recorded
-        run be blessed as a baseline: by every count it has (scenario pass/fail,
-        dimension pass/fail, dimension count) nothing changed.
+        By every count the gate has, nothing changed — hence the vacated-assertion check.
         """
         result = _run(scenarios[_ACTING], offline_settings)
         assert is_vacuous_detail(_dimension(result, GradeDimension.SAFETY).detail)
@@ -276,11 +242,8 @@ class TestRecordedModeMakesNoSafetyClaim:
     ) -> None:
         """ADR 0040/INC-003, read off the recording rather than off the live flags.
 
-        ``dlq_backlog``'s committed recording is of an UNSEEDED world, so its
-        answer key is not about it and ROOT_CAUSE reports not-graded — the same
-        verdict the sibling truth file states. The acting scenario's recording IS
-        seeded, so its diagnosis is graded. Both come from the recording's label,
-        which is the only place that fact survives a replay.
+        ``dlq_backlog``'s recording is of an UNSEEDED world, so ROOT_CAUSE reports not-graded;
+        the acting scenario's recording IS seeded. Both come from the label.
         """
         unseeded = _dimension(
             _run(scenarios[_READ_ONLY], offline_settings), GradeDimension.ROOT_CAUSE
@@ -360,12 +323,8 @@ class TestTheRunStopsAtThePlanningHandoff:
 class TestTwoRecordedRunsOfOneWorldDoNotInterfere:
     """Parallel-safety, asserted by actually running them at the same time.
 
-    The reason the mode exists at all: ADR 0020 (one mutating scenario per live
-    invocation) serialises live mutating scenarios, so a paired comparison
-    across two live runs is a comparison across two worlds. A replay has no world
-    to serialise over — unless something in the replay path is mutable, in which
-    case the two runs quietly become one shared thing again. Running them
-    concurrently is the only test that can tell.
+    ADR 0020 serialises live mutating scenarios, so a paired comparison across two live runs
+    spans two worlds. A replay has no world to serialise over unless the path is mutable.
     """
 
     def test_two_concurrent_runs_produce_the_same_row(
@@ -656,12 +615,7 @@ class TestTheDriftCheck:
 # --------------------------------------------------------------------------
 # History is not state (WO-R3-271, ADR 0050)
 # --------------------------------------------------------------------------
-#
-# The payloads below are the committed recordings' own shapes, trimmed to one
-# row. ``_LATER_*`` is the same live stack read again after the harness has
-# made a few hundred more reads and the world has been reset: the audit total
-# has grown, the 50-row page holds different rows, and every job and trace id
-# has been re-minted. Nothing about the scenario's fault moved.
+# ``_LATER_*`` is the same stack re-read after a reset: totals grown, ids re-minted.
 
 _AUDIT: Final[dict[str, Any]] = {
     "total": 3770,
@@ -763,10 +717,7 @@ def _drift(
 def _model_paths(model: type[Any], prefix: str = "") -> set[str]:
     """Every field path of one output model, lists flattened, nested models descended.
 
-    A local walk rather than an import, for the reason
-    ``test_recorded_client.py::_time_fields`` gives: what is under test is the
-    module's hand-written table, and a shared derivation would make the test and
-    the table two views of one function instead of a check on it.
+    A local walk rather than an import: the module's hand-written table is what is tested.
     """
     paths: set[str] = set()
     for name, field in model.model_fields.items():
@@ -794,18 +745,9 @@ def _unwrap_annotation(annotation: Any) -> list[Any]:
 class TestHistoryIsNotState:
     """WO-R3-271 — a recorded audit log and recorded ids are HISTORY, not state.
 
-    `make world-drift` exited 1 on all four committed recordings two hours after
-    they were taken, on a freshly reset world, 217–262 disagreements each, and
-    every one of them inside `list_audit_events` (its `total` grows with every
-    harness read, because reads ARE audit events) or `search_traces` (ids are
-    re-minted by every reset). No reset undoes history, so under ADR 0047 § 5 no
-    recording could ever pass its own drift check — and a check that can only
-    ever fail is a check nobody will read.
-
-    RED BEFORE: `git stash` the `_HISTORY` table and the `shape_only` argument
-    and every test in this class that asserts "not drift" fails with the counts
-    the re-pin builder saw; the four that assert "still drift" pass before and
-    after, which is what makes them the safety net rather than decoration.
+    `make world-drift` exited 1 on all four committed recordings two hours after they were
+    taken, 217–262 disagreements each, every one inside `list_audit_events` (reads ARE audit
+    events) or `search_traces` (ids re-minted by every reset). A check that can only fail.
     """
 
     # -- the noise that made the check unpassable ---------------------------
@@ -825,11 +767,8 @@ class TestHistoryIsNotState:
     def test_the_committed_recordings_history_churn_is_forgiven(self) -> None:
         """The real measurement, offline: two honest reads of one live stack.
 
-        `remediate_dlq_backlog_success` and `dlq_backlog` were recorded five
-        minutes apart against the same platform, so their shared calls are two
-        observations whose only *history* difference is the 293 reads in
-        between. Before this change the walk reported 164 disagreements inside
-        `list_audit_events` and 94 inside `search_traces`' two id columns.
+        The two scenarios were recorded five minutes apart against the same platform, so their
+        shared calls differ only by the 293 reads in between.
         """
         recorded = recorder.load_recording(_recording("remediate_dlq_backlog_success"))
         later = recorder.load_recording(_recording("dlq_backlog"))
@@ -955,9 +894,7 @@ class TestHistoryIsNotState:
     def test_the_canned_fixture_walk_is_untouched(self) -> None:
         """`make test-drift` compares canned fixtures and must not be widened.
 
-        The history table lives in `world_drift`, and `fixture_drift.compare`'s
-        new argument defaults to nothing, so the canned walk sees exactly what
-        it saw before: a grown audit total is still drift over there.
+        `fixture_drift.compare`'s new argument defaults to nothing.
         """
         call = fixture_drift.CannedCall(
             scenario="synthetic", tool="list_audit_events", arguments={}, payload=_AUDIT

@@ -1,37 +1,9 @@
 """A phase-close report is resolvable, complete, honest about its runs, and checkable.
 
-Four claims, from WO-R3-189's test requirement:
-
-* the report is a versioned artifact the resolver finds;
-* it carries all seven sections of plan 03 § 14 and none of them is empty;
-* the leak hunt is a real grep over the trajectories the phase produced, and
-  re-running it here reproduces what the committed report recorded;
-* a ``development``-role run anywhere in scope marks the report NON-CLOSING.
-
-The last one is the red-before: ``closing_verdict`` is the guard, and the test
-below hands it a scope with one development run to prove the mark is derived
-from the rows rather than asserted by whoever ran the assembler.
-
-WO-R3-195 (WP-2.6) adds three, because there are now two phases in one
-assembler:
-
-* EVERY committed document regenerates byte for byte, not just the newest.
-  Phase 1's document is committed evidence and generalising the assembler must
-  not move a byte of it — and so is Phase 2's DRAFT, now that the FINAL has
-  superseded it. ``close.committed_documents()`` pairs each one with the scope
-  it was written from, and this module walks that list;
-* the DRAFT mark is derived from the scope. A scope that still declares a
-  pending re-run assembles a DRAFT; the same scope with those archives in
-  ``live_legs`` assembles a FINAL. There is no argument that sets it;
-* each phase's artifact is resolved by ITS OWN sweep id. ``artifacts.newest``
-  now answers "phase 2", which is right for a reader and wrong for a test
-  about phase 1.
-
-The FINAL half of that second point is no longer hypothetical: the owner
-released both re-runs, both came back green, and the two documents differ in
-the way the draft said they would. So the draft-vs-final pair is checked on
-both sides — the draft still says what it owed, the final says it owes nothing,
-and neither one's bytes moved to make the other exist.
+WO-R3-189: a versioned artifact the resolver finds, all seven sections of plan 03 § 14
+non-empty, a real leak-hunt grep reproduced here, and a ``development`` run in scope
+marking it NON-CLOSING. WO-R3-195 adds byte-for-byte regeneration of every committed
+document, a DRAFT mark derived from the scope, and per-phase sweep-id resolution.
 """
 
 from __future__ import annotations
@@ -60,19 +32,15 @@ pytestmark = pytest.mark.skipif(
     shutil.which("grep") is None, reason="the leak hunt shells out to grep"
 )
 
-#: Every phase this assembler declares. Tests that are about the PROTOCOL run
-#: over all of them, so a third phase inherits the checks instead of needing
-#: its own copies.
+#: Every phase this assembler declares; protocol tests run over all of them.
 PHASES: list[int] = sorted(close.SCOPES)
 
 
 def _document_cases() -> list[tuple[close.PhaseScope, Path, Path]]:
     """Every committed document beside the scope that produced it.
 
-    Three today: Phase 1, Phase 2's DRAFT and the FINAL that supersedes it.
-    Parametrizing on this rather than on the phase number is what keeps a
-    superseded document under test — the whole point of invariant 9 is that it
-    is still evidence after something newer exists.
+    Parametrizing on this keeps a superseded document under test — invariant 9 says it
+    is still evidence.
     """
     return [(scope, halves[0], halves[1]) for scope, halves in close.committed_documents()]
 
@@ -89,10 +57,8 @@ _ASSEMBLY_TIME_FACTS: Final[tuple[tuple[str, str], ...]] = ()
 def _unexplained_drift(committed: str, regenerated: str) -> list[str]:
     """Every differing line that is NOT an assembly-time fact.
 
-    Line-level rather than a normalising rewrite of both sides, because a
-    normaliser hides what it touched: this reports the offending line, which is
-    what a reader needs in order to decide whether a committed document just
-    lost its meaning or whether one more derived value needs recording above.
+    Line-level rather than a normalising rewrite: a normaliser hides what it touched,
+    and the offending line is what a reader needs.
     """
     changed = [
         line
@@ -196,10 +162,8 @@ def test_each_phase_resolves_its_own_artifact_by_its_own_sweep(phase: int) -> No
 def test_every_committed_document_has_a_declared_scope_and_vice_versa() -> None:
     """The registry that keeps a superseded document regenerable.
 
-    Red before ``COMMITTED_SCOPES``: writing the FINAL left the DRAFT's bytes
-    with nothing in the module that could reproduce them, because ``SCOPES[2]``
-    had moved on. The pairing is asserted rather than assumed, so publishing a
-    version without declaring the scope behind it fails here.
+    Red before ``COMMITTED_SCOPES``: writing the FINAL left the DRAFT's bytes with
+    nothing able to reproduce them.
     """
     cases = _document_cases()
     assert len(cases) == len(close.COMMITTED_SCOPES) == 3
@@ -251,9 +215,7 @@ def test_writing_twice_refuses_rather_than_replacing(tmp_path: Path) -> None:
 def test_rendering_a_document_against_another_phases_scope_is_refused() -> None:
     """The markdown carries prose the JSON does not, so the pairing matters.
 
-    Red before ``render_markdown`` took the scope as an argument: it looked the
-    scope up by phase number, which quietly rendered Phase 2's DRAFT with the
-    FINAL's closing paragraph once ``SCOPES[2]`` moved on.
+    A phase-number lookup rendered the DRAFT with the FINAL's paragraph.
     """
     draft = close.assemble(close.REPO_ROOT, close.PHASE2_DRAFT)
     with pytest.raises(ValueError, match="phase 1"):
@@ -305,9 +267,7 @@ def test_an_empty_section_is_refused(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_a_development_role_run_in_scope_marks_the_report_non_closing() -> None:
     """Plan 03 § 14: any development run in a phase report makes it non-closing.
 
-    Red before ``closing_verdict`` existed: the assembler would have written
-    ``closing`` from the canned sweep's own flag, which is ``True``, and a
-    development live leg beside it would have gone unremarked.
+    Red before ``closing_verdict``: the sweep's own flag says ``True``.
     """
     benchmark = _report("32ae38f6b38b", ModelRole.BENCHMARK)
     development = _report("deadbeefcafe", ModelRole.DEVELOPMENT)
@@ -353,9 +313,7 @@ def test_the_committed_report_is_closing_and_says_why(phase: int) -> None:
 def test_the_gating_grep_is_reproducible_and_still_finds_nothing(phase: int) -> None:
     """The committed command is re-run here, against the committed evidence.
 
-    A grep whose output is pasted into a document is a claim; a grep the test
-    suite re-runs is a check. If a later commit puts ``chaos`` into a
-    trajectory either phase produced, this goes red.
+    A pasted grep is a claim; one the suite re-runs is a check.
     """
     document = _committed(phase)
     recorded = document["sections"]["leak_hunt"]["committed_commands"]["trajectories"]
@@ -402,9 +360,7 @@ def test_the_chaos_mentions_are_ours_and_the_harness_s_and_none_are_the_platform
 def test_the_last_chaos_token_on_our_own_side_is_gone_by_phase_2() -> None:
     """The one bucket that moved between the two closes.
 
-    Phase 1 found `chaos` in our own `remediation_planner.md` and filed
-    WO-R3-255 for it. cmd #258 removed it. This is where that removal is
-    checked against live traces rather than against the diff that made it.
+    Phase 1 found `chaos` in `remediation_planner.md` (WO-R3-255); cmd #258 removed it.
     """
     assert (
         _committed(1)["sections"]["leak_hunt"]["traces_by_author"]["totals"]["commander_prompt"][
@@ -600,9 +556,7 @@ def test_the_baseline_delta_cites_the_phase_0_artifact_by_id_and_blocks_on_nothi
 def test_row_movement_is_classified_rather_than_asserted_away() -> None:
     """Phase 1 saw zero differing rows; Phase 2 sees all 41 and must explain them.
 
-    Red before ``_classify_row_differences``: the section printed "41 differing
-    rows" beside a paragraph saying nothing had moved, and a reader had no way
-    to tell an added dimension from a changed verdict.
+    Red before ``_classify_row_differences``: a bare count.
     """
     for comparison in _committed(1)["sections"]["baseline_delta"]["comparisons"]:
         assert comparison["row_level_differences"] == []
@@ -642,10 +596,8 @@ def test_the_spend_line_is_the_archives_own_ledgers_not_an_estimate(
 def test_the_bill_separates_the_agents_spend_from_the_evaluators() -> None:
     """Two real numbers, and the difference between them is checkable.
 
-    The agent's ledger is what invariant 7 caps; the eval harness's briefing
-    judge is real money that would fail the ledger reconciliation if it were
-    folded in. Phase 1's archives carry no per-role record, so it reports one
-    total and the key is absent rather than equal to the other.
+    Invariant 7 caps the agent's ledger; the harness's briefing judge is separate real
+    money.
     """
     assert "live_total_usd_including_evaluator" not in _committed(1)["sections"]["spend_line"]
 
@@ -687,24 +639,8 @@ def test_every_committed_report_regenerates_byte_for_byte(
 ) -> None:
     """Every input is committed, so each document is a function of the repo.
 
-    If this fails, something the report READ has changed — a judge prompt, the
-    blessed baseline, an archive. That is worth a look rather than a re-write:
-    the report's claims are about the state those inputs were in.
-
-    Phase 1 is the load-bearing case for WO-R3-195: generalising the assembler
-    for a second phase must not move one byte of a document that is already
-    committed evidence. Phase 2's DRAFT is the second such case — a report that
-    has been superseded is still evidence, and the FINAL was not allowed to
-    reach back and change what the draft said about the runs it had.
-
-    The look WO-R3-263 took, recorded here because the next one will be the
-    same: two values in these documents are derived from the source tree at
-    ASSEMBLY TIME and nothing can freeze them — the leak-hunt vocabulary (every
-    ``HypothesisCategory`` value) and the judge-prompt digests. Adding a
-    category and putting a shared rule into the briefing judge moved exactly
-    those and nothing else. They are enumerated in ``_ASSEMBLY_TIME_FACTS``
-    with their reasons; every other line of every committed document is still
-    pinned to the byte, and the failure below names the line.
+    A failure means something the report READ has changed — a judge prompt, the
+    baseline, an archive. ``_ASSEMBLY_TIME_FACTS`` is empty: nothing is exempt.
     """
     document = close.assemble(close.REPO_ROOT, scope)
     for regenerated, committed in (
@@ -777,10 +713,8 @@ def test_each_phase_names_its_own_scope_decision_and_incident_answer() -> None:
 def test_the_draft_mark_is_derived_from_the_scope_not_hand_set() -> None:
     """A status field anyone can type is one that will be typed wrong.
 
-    The only way to reach FINAL is to hold the evidence: put the pending
-    archives in ``live_legs`` and the ``PendingRerun`` entries go away with
-    them. There is no argument to ``assemble`` or ``draft_status`` that says
-    "this one is final".
+    The only way to reach FINAL is to hold the evidence: put the pending archives in
+    ``live_legs``.
     """
     drafted = close.draft_status(close.PHASE2_DRAFT)
     assert drafted["status"] == "DRAFT"
@@ -832,9 +766,7 @@ def test_the_current_phase_2_report_is_final_and_owes_nothing() -> None:
 def test_a_rerun_leg_names_the_leg_it_re_runs_and_the_red_stays_in_the_record() -> None:
     """Both halves of the same rule.
 
-    A close that replaced its reds with their re-runs would be a selected
-    sample of itself, so the reds stay; and a table with five rows over three
-    scenarios is unreadable unless each re-run says which run it answers.
+    The reds stay, and each re-run says which run it answers.
     """
     legs = _committed(2)["sections"]["sweep_results"]["live_legs"]
     assert [leg["archive"] for leg in legs] == [
@@ -867,13 +799,8 @@ def test_a_rerun_leg_names_the_leg_it_re_runs_and_the_red_stays_in_the_record() 
 def test_the_final_version_was_written_beside_the_draft_not_over_it(tmp_path: Path) -> None:
     """Invariant 9: adding the re-runs did not aim at the draft's own path.
 
-    The stamp is the newest moment any evidence in scope was written, so the
-    scope with two newer archives in it landed on a new filename. Both files
-    are on disk, they carry the same canned-sweep id and different timestamps,
-    and the draft's bytes are the ones the draft's own scope produces — up to
-    the assembly-time values nothing can freeze, which is the same allowance
-    ``test_every_committed_report_regenerates_byte_for_byte`` documents and
-    which is why the comparison goes through the same function.
+    The stamp is the newest moment any evidence in scope was written, so the newer
+    scope landed on a new filename; both files are on disk with the draft's bytes intact.
     """
     (draft_json, draft_md), (final_json, final_md) = close.committed_versions(2)
     assert draft_json != final_json and draft_md != final_md

@@ -1,54 +1,19 @@
 """The hand-built trap sets: the shapes plan 03 § 107 enumerates, one per case.
 
-A trap case is a judge-shaped question whose right answer the evaluator knows
-before asking, and states. That is what makes this the one leg of the calibration
-that cannot go circular: the answer comes from a person reading the case, not from
-a run, a grader or another judge.
+A trap case is a judge-shaped question whose right answer the evaluator knows before
+asking, and states — which is what makes this the one leg that cannot go circular.
 
-**Committed data, so deterministic data.** Every id, uuid and timestamp below is
-fixed. Two reasons, and the second is the load-bearing one: a report has to be
-reproducible, and the scripted fake judge is keyed on the judge's *rendered
-context* — so a freshly minted ``evidence_id`` would change the question and the
-script would stop matching it. ``uuid4`` defaults are therefore overridden
-everywhere.
+Every id, uuid and timestamp is FIXED: a report has to be reproducible, and the
+scripted fake is keyed on the judge's rendered context, so a freshly minted
+``evidence_id`` would change the question and the script would stop matching.
 
-**Six cases per judge, which is one more than the five § 107 asks for.** Each
-extra is a regression: the ``action_verifier``'s reported-effect trap is the
-`wait_and_replay` failure ADR 0035's neighbourhood produced, and the
-``briefing_judge``'s filtered-read trap is INC-002 itself, in the bytes that
-scored 0.0. A calibration that could not fail on a known past failure would not
-be worth running.
-
-**No lab vocabulary anywhere in a case** (ADR 0012). A judge reads tool results
-and a briefing, so a trap has to be made of the things a judge really sees:
-readings, arguments, errors, prose. Nothing here names a hook, a cause label or
-the word the injection machinery is called by.
-
-**The shapes, and where each comes from.**
-
-``candidate_selector`` (§ 107, verbatim): correct candidate with thin evidence;
-wrong candidate with plausible evidence; two near-duplicates, one correct; all
-wrong (so ``probe_more`` or ``escalate``); plus a candidate contradicted by a
-reading in the trail (ADR 0048's check 2, which scores at or near zero whatever
-confidence it stated); plus a set the trail cannot separate where one more read
-would (``probe_more``, not a confident guess).
-
-``plan_approval_judge`` (§ 107 asks for four): **no cases, because the judge does
-not exist** (divergence B6). ``roles.ABSENT_ROLES`` carries the reason. Writing
-its trap set would be writing a test for code nobody may write without amending
-CLAUDE.md invariant 4.
-
-``action_verifier`` (not in § 107 — divergence J6 puts it in the set): the read
-shows recovery; the read shows the value unchanged; the action REPORTED its effect
-and the world cannot have moved yet; the read carries an error; the read is
-filtered and proves only its slice; and a read of a different resource than the
-one the action touched.
-
-``briefing_judge`` (§ 107, verbatim): grounded but useless; useful but carrying an
-invented fact; a stabilizer reported as a resolution; plus the INC-002 case (an
-honest briefing after a filtered read, which is grounded), plus one clean
-briefing, plus one that is wrong on both dimensions — a trap set with no case that
-should pass on both cannot tell a strict judge from a broken one.
+Six cases per judge, one more than § 107's five, and each extra is a REGRESSION: the
+``action_verifier``'s reported-effect trap is ADR 0035's neighbourhood, and the
+``briefing_judge``'s filtered-read trap is INC-002 in the bytes that scored 0.0. No lab
+vocabulary anywhere (ADR 0012): a trap is made of readings, arguments, errors and prose,
+the things a judge really sees. ``plan_approval_judge`` has NO cases because the judge
+does not exist (divergence B6, ``roles.ABSENT_ROLES``); ``action_verifier`` has a set
+though § 107 omits it (divergence J6).
 """
 
 from __future__ import annotations
@@ -97,14 +62,10 @@ _E3: Final[UUID] = UUID("aaaaaaa1-0000-4000-8000-000000000003")
 class TrapCase:
     """One question, the verdict it asserts, and why that is the right answer.
 
-    ``asserts`` is the verdict string in the role's own verdict space
-    (``roles.ROLES[judge].verdicts``) — not a score and not an adjective, so
-    "did the judge agree" is a string comparison and not a judgement of its own.
-
-    ``why`` is the worked example plan 03 § 9.1 asks the rubric for, stored beside
-    the case rather than in the prompt: it is the argument a reviewer has to
-    accept before the case may be used as ground truth, and a report that printed
-    an accuracy without it would be asking a reader to trust an unstated label.
+    ``asserts`` is a verdict string in the role's own space, not a score, so "did the
+    judge agree" is a comparison rather than a judgement of its own. ``why`` is § 9.1's
+    worked example, stored beside the case: the argument a reviewer accepts before the
+    case may be ground truth.
     """
 
     case_id: str
@@ -531,11 +492,9 @@ def _selection(
 ) -> SelectionSubject:
     """Build one selector question, with its candidates validated in place.
 
-    Validated inside ``grounded_in`` rather than after it, so a citation that
-    does not resolve against this trap's own trail raises at import — the same
-    seam the strategies bind at (ADR 0042). A trap that cites a reading it did
-    not include is a broken trap, and it should be impossible to commit rather
-    than merely wrong.
+    Validated inside ``grounded_in``, so a citation that does not resolve against this
+    trap's own trail raises AT IMPORT (ADR 0042's seam): a trap citing a reading it did
+    not include should be impossible to commit rather than merely wrong.
     """
     run_state = _selector_run_state(evidence)
     with grounded_in(run_state.evidence):

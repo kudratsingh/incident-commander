@@ -1,64 +1,22 @@
 """Judge calibration: what a judge's number is worth, measured before it is quoted.
 
-Plan 03 § 9 (WP-6.3). A judge whose number has never been checked is an opinion
-presented as a measurement. This package is the check, and its output is the
-artefact a report has to name before it may print a judge's number at all.
+Plan 03 § 9 (WP-6.3): a judge whose number has never been checked is an opinion
+presented as a measurement, and a report must name this artefact before printing one.
 
-**Three judges, not the three the plan names.** Plan 03 § 104 lists
-``candidate_selector``, ``plan_approval_judge`` and ``briefing_judge``. Two
-corrections, both recorded as divergences and both narrowing rather than widening:
+Three judges, not plan 03 § 104's three. ``plan_approval_judge`` DOES NOT EXIST
+(divergence B6) — every approve/refuse on a plan is deterministic guard code, because
+invariant 4 forbids deriving a control from model output — and ``action_verifier`` IS
+calibrated though § 104 omits it (divergence J6), because its verdict is the one that
+gates a live OUTCOME. ``roles.ABSENT_ROLES`` says so in the report.
 
-* ``plan_approval_judge`` **does not exist**, in any form (divergence B6). Every
-  approve/refuse decision on a remediation plan is deterministic guard code
-  (ADRs 0024, 0025, 0027, 0028, 0030, 0032) because CLAUDE.md invariant 4 forbids
-  deriving a control from model output. There is nothing to calibrate, and
-  ``roles.ABSENT_ROLES`` says so in the report rather than leaving a reader to
-  wonder which judge was skipped.
-* ``action_verifier`` **is** calibrated, though § 104 omits it (divergence J6).
-  It is the one judge whose verdict gates a live OUTCOME — ``verified`` resolves
-  the incident, ``not_verified`` escalates it — and the only one with a live
-  track record. Leaving the judge with consequences out of the calibration set
-  and keeping the two without would be the wrong half.
-
-So: ``action_verifier``, ``briefing_judge``, ``candidate_selector``.
-
-**Four legs, and each says which it is.**
-
-1. ``traps`` — a hand-built trap set, at least five cases per judge, the shapes
-   plan 03 § 107 enumerates. Each case ASSERTS a verdict and says why. This is
-   ground truth that belongs to the evaluator and depends on no run, which is
-   what makes it the leg that cannot go circular.
-2. ``self-agreement at N = 5`` — the same input asked five times, reporting the
-   fraction of identical verdicts. This is the leg that replaces plan 03 § 9.1's
-   "temperature 0": ADR 0048 and owner decision O-24 say nothing built here may
-   REQUIRE a sampling parameter, and no judge call in this repo sends one. A
-   setting is a claim about stability; five identical verdicts are a measurement
-   of it. See ADR 0052.
-3. ``track record`` — for ``action_verifier`` only, and free: the verdicts it
-   already gave in the committed archives, beside the verdict each scenario's own
-   expectation called for. Costs nothing and spends nothing; the evidence is on
-   disk. It is a BOUND rather than an accuracy, its pairing is narrow, and it
-   cannot reach the false-approve direction at all — ``track_record.py`` says why
-   for each, because those limits are the leg's most useful output.
-4. ``refusals`` — where a leg cannot be measured, the report says so, says why,
-   and says what it needs. Two of those refusals are structural rather than
-   temporary, and they are the interesting part: the selector's recorded-run
-   agreement would be ``selected@k`` under a second name, which is the number
-   this calibration exists to unlock (circular); and the briefing judge's
-   usefulness has no deterministic label anywhere in the system.
-
-**Nothing here is a gate on the agent.** Judge scores are informational
-(``evals/graders/llm_judge.py``'s module docstring), and this packet does not
-change that: no run passes or fails on a calibration. What it gates is a
-REPORT — ``evals/research_report.py`` withholds a judge number until that judge
-has an id in ``JUDGE_CALIBRATION_REPORTS``, the same shape and the same argument
-as the selector gate beside it (plan 02:243, plan 04:169).
-
-**Running it costs money, so the default does not.** ``python -m
-evals.judge_calibration`` runs against the scripted fake judge and writes
-nothing unless asked. ``--live`` is the paid leg and refuses without an explicit
-``--yes-spend``; see ``__main__.py`` and PROTOCOL's rule that readiness is not
-authorization.
+Four legs, each naming itself: a hand-built ``traps`` set, which is the only leg that
+cannot go circular; ``self-agreement at N = 5``, which replaces § 9.1's "temperature 0"
+because no call here may REQUIRE a sampling parameter (ADR 0048, O-24, ADR 0052) and
+five identical verdicts MEASURE what a setting only claims; the free ``track record``,
+read off committed archives and honest about being a BOUND; and ``refusals``, where a
+leg says why it cannot be measured. Nothing gates the AGENT — what it gates is a
+REPORT (``research_report.JUDGE_CALIBRATION_REPORTS``). The default path uses the
+scripted fake and spends nothing; ``--live`` needs an explicit ``--yes-spend``.
 """
 
 from __future__ import annotations

@@ -1,61 +1,25 @@
 """The judge roles, by their normative names, and how each one is asked.
 
-Plan 02 § 3 is normative about the vocabulary and says why: ``candidate_selector``
-selects among diagnoses, ``plan_approval_judge`` approves a tool plus its
-arguments, ``action_verifier`` decides whether an executed action worked.
-"Anything in code, prompts, docs or trajectories that says *verifier* without one
-of these three prefixes is a bug in the packet that introduced it" (02:25).
+Plan 02 § 3 is normative about the vocabulary: ``candidate_selector`` selects among
+diagnoses, ``plan_approval_judge`` approves a tool plus arguments, ``action_verifier``
+decides whether an executed action worked, and an unprefixed *verifier* in that space is
+a bug (02:25). The rule is about JUDGE vocabulary only — the webhook signature verifier,
+the redaction verifier and ADR 0022's pool verifier are all correctly named — so
+``TestTheRoleWordIsAlwaysPrefixed`` is scoped to the judge surfaces and allows three
+shapes: an ``action_`` prefix, one of those three declared nouns, or the bare word in
+quotes (a sentence ABOUT the word is not a use of it).
 
-That rule is about the JUDGE vocabulary and nothing else, which is worth stating
-because this repo holds three other things the word correctly names, none of them
-a judge: the webhook signature verifier (`api/hmac_verify.py`, ADRs 0014 and
-0023), the transcript-redaction verifier (`context/pack.sh`), and the
-connection-pool verifier in ADR 0022. "signature verifier" is the ordinary
-English for the first, and a repo-wide ban on the word would rename three
-unrelated things to satisfy a rule about a fourth.
+Each role has a SUBJECT: a frozen carrier of one question that renders its own context
+and calls the same function a real run calls, so the calibration measures the prompt,
+the renderer, the schema and the bounded repair. A second copy of a judge's context
+inside ``evals/`` would be INC-002 exactly.
 
-``tests/unit/test_judge_calibration.py::TestTheRoleWordIsAlwaysPrefixed`` is therefore
-scoped rather than repo-wide: it sweeps the judge-role surfaces — this package,
-the judge prompts, the judge call sites and a rendered calibration report — and
-allows exactly three shapes. An occurrence is prefixed with ``action_``; or it is
-qualified by one of the three nouns above (``signature``, ``redaction``,
-``pool``), which is the declared list and the whole reason this paragraph exists;
-or the bare word is in quotes, because a sentence ABOUT the word — like the one
-from 02:25 above — is not a use of it. Anything else fails.
-
-**How a judge is asked, and why through the run's own code.** Each role has a
-*subject*: a small frozen carrier of one judge-shaped question that knows how to
-render its own context and how to put it. Every subject calls the same function
-the agent or the eval runner calls — ``judge_verification``, ``judge_briefing``,
-``select_candidate`` — so the calibration measures the prompt, the context
-renderer, the schema and the bounded repair a real run gets. A second copy of a
-judge's context inside ``evals/`` would be the INC-002 failure exactly: one rule
-about how evidence may be read, given to one reader of it and not the other.
-
-**A verdict is a string, and the projection is the decision.** Accuracy,
-false-approve and false-reject only mean something over a categorical answer, and
-two of these three judges emit numbers. So each role declares how its structured
-output projects onto a verdict string, and each projection is a choice worth
-seeing:
-
-* ``action_verifier`` already emits one — ``verified`` / ``not_verified``.
-* ``briefing_judge`` emits two floats. The verdict reads
-  ``grounded=yes actionable=no``, each half thresholded at ``USEFUL_THRESHOLD``
-  (0.7), which is the only threshold the grader has and the one it already
-  reports "N of M useful" against. Per-dimension rather than on the mean,
-  because the mean hides the case the trap set exists to catch: grounded and
-  useless and invented-but-actionable are different failures with the same
-  average, and INC-002 was a groundedness error specifically.
-* ``candidate_selector`` emits a decision plus an id. The verdict reads
-  ``select:c1``, ``probe_more`` or ``escalate`` — the id included, because a
-  selector that commits to a different candidate on every rep is not stable, and
-  a verdict that dropped the id would call that agreement.
-
-**An approval is a prefix.** One rule, so ``false_approve`` means the same thing
-for all three: a verdict is an approval when it starts with the role's approval
-prefix. ``verified`` approves and ``not_verified`` does not; ``grounded=yes
-actionable=yes`` approves and every other pair does not; ``select:…`` approves
-(the run acts on it) and ``probe_more`` / ``escalate`` do not.
+A VERDICT is a string, because accuracy and the two error rates only mean something over
+a categorical answer: ``action_verifier`` already emits one, ``briefing_judge``'s two
+floats project per dimension at ``USEFUL_THRESHOLD`` (the mean hides the failures the
+trap set exists to catch), and ``candidate_selector``'s carries the id, because a
+selector that picks differently each rep is not stable. An APPROVAL is a prefix, one
+rule, so ``false_approve`` means the same thing for all three.
 """
 
 from __future__ import annotations
@@ -96,24 +60,18 @@ BRIEFING_JUDGE: Final[str] = "briefing_judge"
 CANDIDATE_SELECTOR: Final[str] = SELECTOR_ROLE
 PLAN_APPROVAL_JUDGE: Final[str] = "plan_approval_judge"
 
-#: The judges this harness calibrates, in the order a report lists them:
-#: consequence first. ``action_verifier``'s verdict resolves or escalates a live
-#: incident; ``briefing_judge``'s is a soft column on an already-graded run;
-#: ``candidate_selector``'s decides which diagnosis a run acts on and is the role
-#: the buildout's headline number is about.
+#: The judges this harness calibrates, consequence first: ``action_verifier`` resolves
+#: or escalates a live incident, ``briefing_judge`` is a soft column on a graded run,
+#: and ``candidate_selector`` decides which diagnosis a run acts on.
 CALIBRATED_ROLES: Final[tuple[str, ...]] = (
     ACTION_VERIFIER,
     BRIEFING_JUDGE,
     CANDIDATE_SELECTOR,
 )
 
-#: Roles plan 03 § 9 asks for that do not exist, and what is there instead.
-#:
-#: Divergence B6. This is a register rather than an omission because a reader of
-#: a calibration report that simply lacked a ``plan_approval_judge`` section
-#: cannot tell "not calibrated" from "not a judge", and plan 02:22's own table
-#: says "Exists today? Yes" — so the next reader will go looking. The answer is
-#: in the report, once, with the ADRs that made it deterministic.
+#: Roles plan 03 § 9 asks for that do not exist, and what is there instead (divergence
+#: B6). A REGISTER rather than an omission: a missing section cannot say "not calibrated"
+#: apart from "not a judge", and plan 02:22's table says "Exists today? Yes".
 ABSENT_ROLES: Final[Mapping[str, str]] = MappingProxyType(
     {
         PLAN_APPROVAL_JUDGE: (

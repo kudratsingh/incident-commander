@@ -1,41 +1,21 @@
 """One calibration: ask the trap set N times, read the track record, write a report.
 
-Plan 03 § 9 in code. The whole sweep is one pass — each trap case is asked ``reps``
-times, rep 1 is the agreement measurement and all ``reps`` are the self-agreement
-measurement — because two passes over the same inputs would double the bill for a
-number the first pass already contains.
+Plan 03 § 9 in code, as ONE pass: each case is asked ``reps`` times, rep 1 measures
+agreement and all ``reps`` measure stability, because a second pass would double the
+bill for a number the first already contains.
 
-**Self-agreement is the determinism measurement, and it replaces a setting.** Plan
-03 § 9.1 asks for temperature 0. No judge call in this repo sends a temperature and
-none may be made to require one: owner decision O-24 and ADR 0048 (written for the
-selector, and the same argument here) refuse it, because Anthropic's newer model
-families reject the parameter with a 400 and a calibration that 400s on the first
-re-pin is not a calibration. A setting is a claim that a judge is stable; five
-identical verdicts are a measurement that it is. The report says which of the two it
-has, in ``determinism``, so nobody reads the absence of the field as an oversight.
-ADR 0052.
+Self-agreement REPLACES § 9.1's temperature 0: no judge call here sends a temperature
+and none may require one (O-24, ADR 0048 — the newer model families 400 on it), and
+five identical verdicts measure what a setting only claims. ``determinism`` says which
+of the two the report has, so the absent field does not read as an oversight (ADR 0052).
 
-**A judge that cannot answer is not a judge that answered wrongly.** A case whose
-output fails validation twice raises ``OutputRepairExhausted`` (ADR 0035's cap of
-1 — the repair WO-R2-174 gave both judges is what makes calibrating them possible
-at all). That case is recorded as an ``error``, counted in neither the numerator
-nor the denominator of accuracy, and listed. Absorbing it as a disagreement would
-put a harness event into a measurement of judgement, which is the mistake
-``failure_class: planner_output_invalid`` exists to prevent one layer down.
-
-**The rubric is identified, not described.** Every report carries the sha256 and
-the line count of the exact prompt bytes it calibrated. That is what makes plan 03
-§ 110's rule operational: rubric edits go in one line at a time, and a delta
-between two calibrations is attributable only if each names the rubric it measured.
-The convention itself is in ``docs/eval-methodology.md`` and in ADR 0052; this is
-the field that lets a reviewer check it after the fact rather than take it on
-trust.
-
-**Writing is a separate act.** ``calibrate`` returns a report; ``write_report``
-persists it through ``evals/artifacts.py`` under its own kind, exclusive-create,
-versioned, never overwriting a previous calibration of the same judge (invariant
-9). Two calibrations of one rubric are two facts, and the older one is the record
-of what the number was when somebody quoted it.
+A judge that CANNOT answer is not one that answered wrongly: a case exhausting
+ADR 0035's repair is recorded as an ``error``, in neither side of the accuracy
+fraction, because absorbing it would put a harness event into a measurement of
+judgement. Every report carries the sha256 and line count of the prompt bytes it
+calibrated, which is what makes § 110's one-line-at-a-time rubric rule checkable.
+Writing is a separate act: ``write_report`` is versioned and exclusive-create, because
+two calibrations of one rubric are two facts (invariant 9).
 """
 
 from __future__ import annotations
@@ -61,20 +41,18 @@ from evals.judge_calibration.track_record import ground_truth_agreement
 from evals.judge_calibration.traps import MINIMUM_TRAPS_PER_JUDGE, TrapCase, traps_for
 from incident_commander.llm.client import LLMClientProtocol, LLMError
 
-#: The artifact family a calibration report is filed under. One name, read by the
-#: writer here, by the Makefile target's help text and by the test that asserts
-#: the kind is registered — an unregistered family cannot be resolved by
-#: ``newest()`` and its writes would not be exclusive-create (divergence D2).
+#: The artifact family a calibration report is filed under, read by the writer, the
+#: Makefile's help text and the test that asserts the kind is REGISTERED — an
+#: unregistered family resolves through no ``newest()`` and writes non-exclusively (D2).
 ARTIFACT_KIND: Final[str] = "judge_calibration"
 
 #: Plan 03 § 109's N. Declared rather than defaulted inline so the report can say
 #: what N it used and a caller cannot change it by accident.
 SELF_AGREEMENT_REPS: Final[int] = 5
 
-#: What ``judge_client`` reads as. ``fake`` is the free path and the default;
-#: ``live`` is the paid one. In the report rather than inferred from a model id,
-#: because a number produced by a scripted fake must never be mistaken for a
-#: measurement of a model, and a reader should not have to know which ids are real.
+#: What ``judge_client`` reads as: ``fake`` is the free default, ``live`` the paid path.
+#: In the report rather than inferred from a model id, because a reader should not have
+#: to know which ids are real to tell a script from a measurement.
 FAKE_CLIENT: Final[str] = "fake"
 LIVE_CLIENT: Final[str] = "live"
 
@@ -97,10 +75,9 @@ class TrapOutcome:
     def agrees(self) -> bool:
         """Did the FIRST ask match the asserted verdict?
 
-        The first ask, not a majority of the reps: a judge is called once in a
-        run, so "would it be right if you asked it five times and voted" is a
-        different system from the one being measured. The reps answer stability,
-        and stability is reported beside accuracy rather than folded into it.
+        Not a majority of the reps: a judge is called once in a run, so "right if you
+        asked five times and voted" is a different system. The reps answer stability,
+        which is reported BESIDE accuracy rather than folded into it.
         """
         return self.answered and self.observed[0] == self.asserts
 
@@ -163,17 +140,15 @@ class CalibrationReport:
     def is_a_measurement(self) -> bool:
         """Was this produced by a real judge?
 
-        ``False`` for a fake-client report, which exists to prove the harness end
-        to end and must never be quoted as a calibration or entered in
-        ``research_report.JUDGE_CALIBRATION_REPORTS``. Stated as a property so the
-        distinction is checkable rather than a convention about filenames.
+        ``False`` for a fake-client report, which proves the harness end to end and must
+        never be quoted or entered in the register. A property, so the distinction is
+        checkable rather than a convention about filenames.
         """
         return self.judge_client == LIVE_CLIENT
 
 
-#: The protocol this report implements, in the report, in its own words. A reader
-#: who finds a number here should be able to see what it is a number about
-#: without opening the plan.
+#: The protocol this report implements, in the report, in its own words: a reader who
+#: finds a number here can see what it is about without opening the plan.
 PROTOCOL: Final[str] = (
     "plan 03 § 9 (WP-6.3). Four legs: a hand-built trap set whose verdicts the "
     "evaluator asserts; self-agreement over N identical asks; an independent "
@@ -196,11 +171,8 @@ def ask(
 ) -> TrapOutcome:
     """Put one trap case ``reps`` times and record every verdict.
 
-    An ``LLMError`` — which ``OutputRepairExhausted`` is — ends this case and is
-    recorded rather than raised: one judge that cannot produce a valid score for
-    one trap should not throw away the other cases' measurements, and a
-    calibration that reported nothing because case 3 of 6 malformed would be the
-    least useful possible answer.
+    An ``LLMError`` (``OutputRepairExhausted`` included) ends this case and is RECORDED
+    rather than raised: one malformed case must not throw away the others' measurements.
     """
     observed: list[str] = []
     for _ in range(reps):
@@ -222,12 +194,9 @@ def ask(
 def _trap_agreement(judge: str, outcomes: Sequence[TrapOutcome]) -> dict[str, Any]:
     """Accuracy and the two error rates over the trap set.
 
-    ``wrong_approval`` is a third number and it is only meaningful for the
-    selector: a verdict can be an approval, and the asserted verdict an approval
-    too, and still be the wrong one — ``select:c2`` where ``select:c1`` was right.
-    That is neither a false approve nor a false reject, and folding it into either
-    would hide the selector's most interesting error. Zero by construction for the
-    other two judges, whose approval verdict is a single string.
+    ``wrong_approval`` is a third number, meaningful only for the selector:
+    ``select:c2`` where ``select:c1`` was right is neither a false approve nor a false
+    reject, and folding it into either would hide the selector's most interesting error.
     """
     answered = [outcome for outcome in outcomes if outcome.answered]
     errors = [outcome for outcome in outcomes if not outcome.answered]
@@ -277,11 +246,9 @@ def _trap_agreement(judge: str, outcomes: Sequence[TrapOutcome]) -> dict[str, An
 def _self_agreement(outcomes: Sequence[TrapOutcome], *, reps: int) -> dict[str, Any]:
     """The fraction of cases whose ``reps`` asks all produced one verdict.
 
-    Plan 03 § 109's reading of the two numbers together, restated here because it
-    is the whole point of the leg: low stability means the rubric is ambiguous;
-    high stability with low accuracy means the rubric is wrong. One tells you to
-    write a clearer check, the other tells you the check is checking for the wrong
-    thing, and without this number a low accuracy cannot be told apart from noise.
+    Plan 03 § 109's reading of the pair, which is the point of the leg: low stability
+    means an ambiguous rubric, high stability with low accuracy means a WRONG one — and
+    without this number a low accuracy cannot be told apart from noise.
     """
     answered = [outcome for outcome in outcomes if outcome.answered]
     stable = [outcome for outcome in answered if outcome.stable]
@@ -352,13 +319,9 @@ def calibrate(
 ) -> CalibrationReport:
     """Calibrate one judge and return its report. Writes nothing.
 
-    ``client_kind`` is declared by the caller rather than sniffed from the client,
-    on the same principle as the register in ``research_report``: a fact that
-    decides whether a number may be quoted should be stated by whoever is in a
-    position to know it, not derived from something that could coincide.
-
-    ``reps`` below 1 is refused rather than clamped — a calibration with no asks
-    is a document with an accuracy field and no measurement in it.
+    ``client_kind`` is DECLARED by the caller, not sniffed, on the register's principle:
+    a fact deciding whether a number may be quoted is stated by whoever knows it.
+    ``reps`` below 1 is refused rather than clamped.
     """
     if reps < 1:
         raise ValueError(f"reps must be at least 1; got {reps}")
@@ -415,11 +378,9 @@ def write_report(
 ) -> Path:
     """Persist one calibration, versioned and exclusive-create.
 
-    One artifact per judge, resolvable as ``artifacts.newest("judge_calibration",
-    <judge>)``. Filed per judge rather than per run because plan 03 § 112 says
-    "one per judge" and because the register that reads them is keyed by judge: a
-    single combined document would make "is briefing_judge calibrated?" a question
-    about a file that also contains two other answers.
+    One artifact per JUDGE (plan 03 § 112), because the register that reads them is keyed
+    by judge: a combined document would make "is briefing_judge calibrated?" a question
+    about a file holding two other answers.
     """
     return artifacts.write_versioned(
         ARTIFACT_KIND,

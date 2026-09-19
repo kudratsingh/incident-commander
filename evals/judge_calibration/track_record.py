@@ -1,54 +1,24 @@
 """The ``action_verifier``'s track record, read off the committed archives.
 
-Plan 03 § 109 asks for ground-truth agreement "over every recorded-world run's
-candidate sets / plans / briefings". Three corrections, each of which makes the
-leg smaller and honest rather than larger and invented.
+Plan 03 § 109's ground-truth agreement, with three corrections that each make the leg
+smaller and honest rather than larger and invented.
 
-**1. It is read, not re-run, so it is free.** Every live archive already holds the
-verdict this judge gave: the evidence ledger writes a ``_verify_judge`` entry
-whose ``result_summary`` is ``"<verdict>: <reasoning>"``. Re-asking the judge over
-those inputs would cost money and would answer a different question ("what would
-it say today"). What is wanted here is what it DID say, beside what should have
-happened — and that is on disk, for nothing.
+READ, not re-run, so it is free: every live archive already holds the verdict, in the
+ledger's ``_verify_judge`` entry. Re-asking would cost money and answer "what would it
+say today" instead of what it DID say. Only a run whose judge really ran counts, so the
+scan takes ``live_llm: true`` only — 30 of the 156 pairs that carry a verdict, and the
+smaller number is stated so a reader can find out why. The ground truth is the
+SCENARIO'S own expectation and the pairing is narrow: a Tier-1 action expected to end
+``resolved``, where ``verified`` is unambiguously right. Every other shape is left out
+WITH ITS REASON — a read-only scenario the agent resolved anyway (grading those against
+OUTCOME is INC-003 in judge form), the stabilize-only handover, and a run whose terminal
+state its last verdict does not commit it to.
 
-**2. Only a run whose judge really ran counts.** A canned run's LLM is
-``CannedLLMClient``: its ``_verify_judge`` verdict is a fixture, scripted by a
-scenario author. Pairing those would be measuring the fixtures. So the scan takes
-only outcomes with ``live_llm: true`` — 30 of the 156 (archive, scenario) pairs
-that carry a verdict at all. Saying that number out loud matters: a reader who
-sees the smaller one should be able to find out here why it is smaller.
-
-**3. The ground truth is the SCENARIO'S OWN expectation, and the pairing is
-narrow.** A row is paired only when the scenario declares a Tier-1 action
-(``expected_action_tools`` non-empty) **and** expects to end ``resolved``. For
-exactly that shape the right verdict is unambiguous — the action was the one the
-scenario is about and it was supposed to work, so ``verified`` is correct — and
-every other shape is left out with its reason attached:
-
-* a read-only scenario (no action expectation) that the agent resolved anyway.
-  Seven of the thirty rows are this, all from one August archive. Its OUTCOME
-  dimension reads "expected escalated, got resolved", which is a finding about
-  the loop from 2026-08 and says nothing about a judge that was asked whether an
-  action worked. Grading those against OUTCOME is INC-003's mistake in judge
-  form: a label written about one question applied to another.
-* the stabilize-only handover — the action worked and the incident is still not
-  over, so the scenario expects ``escalated`` while the right verdict is
-  ``verified`` (``dlq_human_required_escalates``, ``dlq_poison_unclassified``).
-  Two rows. Scoring them would charge a correct handover to the judge.
-* a run whose terminal state is not the one its last verdict commits it to, which
-  means something other than this judge decided the outcome.
-
-**What this leg is, and what it is not.** It is a BOUND, not an accuracy. A
-disagreement is either a judge error or a run that genuinely did not recover, and
-the leg cannot tell those apart from the archive alone — so every disagreeing row
-is named, with its archive id, for a reader to open the trajectory. And the
-one-sidedness is the finding worth carrying out of here: **no live run in the
-committed archives was ever supposed to end ``not_verified``**. Only
-``remediate_verify_fails`` makes a refusal the right answer and it has never run
-live, so the false-approve direction — a judge blessing a fix that had not landed,
-the dangerous one — is UNMEASURED by this leg. The trap set is the only cover for
-it (cases av-02, av-04, av-06), which is precisely why the trap set is the leg
-that cannot be skipped.
+It is a BOUND, not an accuracy: a disagreement is either a judge error or a run that
+did not recover, and the archive cannot tell those apart, so every disagreeing row is
+named. And the one-sidedness is the finding worth carrying out — no committed live run
+was ever supposed to end ``not_verified``, so the DANGEROUS direction is UNMEASURED
+here and the trap set (av-02, av-04, av-06) is its only cover.
 """
 
 from __future__ import annotations
@@ -62,17 +32,15 @@ from typing import Any, Final
 from evals.artifacts import REPO_ROOT
 from evals.judge_calibration.roles import ACTION_VERIFIER, BRIEFING_JUDGE, CANDIDATE_SELECTOR
 
-#: The bookkeeping evidence entry the ``action_verifier``'s verdict is written to.
-#: Underscore-prefixed by the ledger's convention, which is what keeps it out of
-#: the investigation trail every LLM reader is shown.
+#: The evidence entry the ``action_verifier``'s verdict is written to.
+#: Underscore-prefixed by the ledger's convention, which keeps it out of the trail.
 VERDICT_MARKER: Final[str] = "_verify_judge"
 
 VERIFIED: Final[str] = "verified"
 NOT_VERIFIED: Final[str] = "not_verified"
 
-#: Terminal state each verdict commits the run to. Used to check that the verdict
-#: being graded is the one that decided the outcome — not to derive the ground
-#: truth, which comes from the scenario.
+#: Terminal state each verdict commits the run to, used to check that the verdict being
+#: graded decided the outcome — not to derive the ground truth, which is the scenario's.
 _IMPLIES: Final[Mapping[str, str]] = {VERIFIED: "resolved", NOT_VERIFIED: "escalated"}
 
 
@@ -106,8 +74,8 @@ class VerdictRow:
 def _expectations(root: Path) -> Mapping[str, Expectation]:
     """Each scenario's expectation, from the corpus — the evaluator's own claim.
 
-    Imported lazily: loading the corpus parses every scenario YAML, and a caller
-    that only wants the scan's shape should not pay for it until a row needs one.
+    Imported lazily: loading the corpus parses every YAML, and a caller that only wants
+    the scan's shape should not pay for it.
     """
     from evals.scenarios.loader import load_scenarios
 
@@ -124,11 +92,9 @@ def _expectations(root: Path) -> Mapping[str, Expectation]:
 def _archived_verdicts(trajectory: Mapping[str, Any]) -> list[str]:
     """The judge's verdicts in one trajectory, in order, without repeats.
 
-    A trajectory is a list of checkpoints and each checkpoint carries the whole
-    ledger so far, so a verdict appears once per checkpoint after the one that
-    wrote it. Consecutive duplicates are collapsed; a genuine second verdict with
-    a different value (a polling window that read ``not_verified`` then
-    ``verified``) survives, because that is a different judge call.
+    Each checkpoint carries the whole ledger so far, so a verdict repeats once per
+    later checkpoint. Consecutive duplicates collapse; a genuine second verdict with a
+    different value survives, because that is a different judge call.
     """
     seen: list[str] = []
     for checkpoint in trajectory.get("checkpoints", []):
@@ -144,9 +110,7 @@ def _archived_verdicts(trajectory: Mapping[str, Any]) -> list[str]:
 def scan(*, root: Path | None = None) -> list[VerdictRow]:
     """Every archived ``action_verifier`` verdict from a run whose judge was real.
 
-    Reads only, and never touches an archive: ``evals/runs/`` is append-only and
-    locked on disk (ADR 0021), so this opens ``report.json`` and the trajectories
-    and writes nothing anywhere.
+    Reads only: ``evals/runs/`` is append-only and locked on disk (ADR 0021).
     """
     base = (root or REPO_ROOT) / "evals" / "runs"
     if not base.is_dir():
@@ -206,9 +170,8 @@ def _row(
 def _why_not_paired(*, verdict: str, final_state: str, expectation: Expectation | None) -> str:
     """Why this row is not graded, or the empty string when it is.
 
-    Every branch is a refusal with a stated reason rather than a silent drop. A
-    row that vanished from a denominator without saying why is how a rate becomes
-    unreadable — and each of these four has cost something to learn.
+    Every branch states its reason rather than dropping silently: a row that vanished
+    from a denominator without saying why is how a rate becomes unreadable.
     """
     if expectation is None:
         return (
@@ -250,14 +213,10 @@ def _rate(numerator: int, denominator: int) -> float | None:
 def _agreement(rows: Sequence[VerdictRow]) -> dict[str, Any]:
     """Agreement over paired rows, with the unmeasurable direction named.
 
-    ``false_reject`` is a ``not_verified`` where ``verified`` was called for: a
-    landed fix read as incomplete, so a human was paged for nothing.
-    ``false_approve`` is the mirror and the dangerous one — a fix that had not
-    landed blessed, resolving an incident that is not over. Its rate is ``None``
-    here, and that is not a zero: the paired set contains no row where a refusal
-    was the right answer, because the one scenario built to produce one
-    (``remediate_verify_fails``) has never run live. The trap set covers that
-    direction instead.
+    ``false_reject`` is a landed fix read as incomplete, so a human was paged for
+    nothing. ``false_approve`` is the mirror and the dangerous one, and its rate is
+    ``None`` rather than zero: no paired row has a refusal as the right answer, because
+    ``remediate_verify_fails`` has never run live. The trap set covers it instead.
     """
     disagreed = [row for row in rows if not row.agrees]
     refusals_called_for = [row for row in rows if row.correct_verdict == NOT_VERIFIED]

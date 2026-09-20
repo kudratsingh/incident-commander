@@ -49,8 +49,14 @@ _EXPECTED_READ_TOOLS: Final[frozenset[str]] = frozenset(
 #: expected reading for a lab-only pin: its whole delta is one new chaos hook plus one
 #: chaos hook's widened schema, and the `[chaos:` filter keeps every hook out of the
 #: typed registry this block is assembled from. A hash that does not move is a result.
+#: v0.6.13 was byte-identical too, for the OTHER reason: its two new tools are ones the
+#: agent's own token CAN call, so scope kept nothing out — `[commander:` did.
+#: v0.6.14 moves it, 28,323 → 29,125 chars, on ONE cause and the plainest one there is:
+#: no tool joined or left the read surface (still 16) and no tier moved; the platform
+#: re-described `get_postgres_health` around its new `pools` group. Every character of
+#: the growth is that one description.
 _EXPECTED_TOOL_BLOCK_HASH: Final[str] = (
-    "04a49645172ffae0ef2a00b073713e5e229c3bc86a08b8bed6a46dd5c1b801c8"
+    "a9e03919b9c733d5ec619fa1b235d3e60c60d6117d2ad4067a0fbb12633ccdf0"
 )
 
 

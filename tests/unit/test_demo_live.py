@@ -15,6 +15,7 @@ from typing import Any
 
 import pytest
 
+from evals.runner import REHEARSAL_MODE
 from evals.scenarios.loader import load_scenarios
 from scripts import demo_live
 
@@ -108,10 +109,14 @@ class TestTheSpendGate:
         assert demo_live.main(["--mode", "dlq_backlog", "--auto"]) == 0
 
         assert "eval-live" not in stack.make_targets()
-        # The rehearsal runs the runner directly, without --live, with the key blanked.
+        # The rehearsal runs the runner directly, in the mode that keeps the PLATFORM leg
+        # real and scripts the planner (ADR 0069). Named here rather than left to "no
+        # --live", because "no --live" is exactly what made the first attempt fully canned.
         runner = [argv for argv in stack.commands if "evals.runner" in argv]
         assert len(runner) == 1
         assert "--live" not in runner[0]
+        assert "--mode" in runner[0]
+        assert REHEARSAL_MODE in runner[0]
 
     def test_both_flags_together_take_the_paid_path(self, stack: _FakeStack) -> None:
         assert demo_live.main(["--mode", "dlq_backlog", "--live", "--yes-spend", "--auto"]) == 0
@@ -199,6 +204,68 @@ class TestTrafficBelongsToOneModeOnly:
         assert demo_live.main(["--mode", "dlq_backlog", "--auto"]) == 0
 
         assert stack.traffic_started == 0
+
+
+class TestTheAuditWaitsForTheMetricInATrafficMode:
+    """Measured on the first `consumer_outage` rehearsal, not anticipated.
+
+    `make world-audit` two seconds after the reset printed `[FAIL] worker-dispatcher lag: 33
+    (want 0)` over a world that was already clean: the producer's ~35 jobs had drained in
+    seconds, but the platform recomputes that metric every 60 s and the reset clears its
+    sample history, so the audit was served the value taken while the consumer was dead.
+    """
+
+    def test_a_traffic_mode_waits_for_a_fresh_zero_before_auditing(
+        self, stack: _FakeStack, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        # The first reading is step 2's baseline (healthy, or the demo never starts); the
+        # stale ones are step 6's, after the reset.
+        readings = iter([(0, True), (33, True), (33, True), (0, True)])
+        seen: list[tuple[int | None, bool]] = []
+
+        def _lag() -> tuple[int | None, bool]:
+            value = next(readings, (0, True))
+            seen.append(value)
+            return value
+
+        monkeypatch.setattr(demo_live, "_lag_reading", _lag)
+        assert demo_live.main(["--mode", "consumer_outage", "--auto"]) == 0
+
+        out = capsys.readouterr().out
+        assert "waiting for the backlog to drain (lag 33" in out
+        assert "backlog drained" in out
+        # The stale readings were not accepted, and the audit came after the fresh one.
+        assert (0, True) in seen
+        assert out.index("backlog drained") < out.rindex("world audit PASS")
+
+    def test_a_timeout_warns_and_audits_anyway(
+        self, stack: _FakeStack, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """The wait must not become a way to declare the world fine by waiting."""
+        readings = iter([(0, True)])  # step 2's baseline; every later read is stale
+
+        monkeypatch.setattr(demo_live, "_lag_reading", lambda: next(readings, (33, True)))
+        monkeypatch.setattr(demo_live, "_DRAIN_TIMEOUT_SECONDS", 0)
+
+        assert demo_live.main(["--mode", "consumer_outage", "--auto"]) == 0
+
+        out = capsys.readouterr().out
+        assert "has not read 0" in out
+        assert "world-audit" in stack.make_targets()
+
+    def test_the_quiet_mode_does_not_wait_at_all(
+        self, stack: _FakeStack, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        def _boom() -> tuple[int | None, bool]:
+            raise AssertionError("dlq_backlog has no producer, so there is nothing to read")
+
+        monkeypatch.setattr(demo_live, "_lag_reading", _boom)
+        assert demo_live.main(["--mode", "dlq_backlog", "--auto"]) == 0
+        # The exploding reader is the real assertion; this one is that the wait's own lines
+        # never appear ("backlog" alone is in this mode's story, so match the wait's words).
+        out = capsys.readouterr().out
+        assert "waiting for the backlog to drain" not in out
+        assert "backlog drained" not in out
 
 
 class TestEveryFailurePathResetsAndAudits:

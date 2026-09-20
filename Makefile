@@ -692,10 +692,12 @@ demo-destroy:
 #   make demo-live MODE=… LIVE=1 YES_SPEND=1        # the one PAID take
 #
 # The default path is FREE: the real platform, the real hooks, the real Tier-1 action,
-# and a scripted planner. LIVE=1 alone REFUSES (exit 2) — spending needs YES_SPEND=1 as
-# well, and the owner's explicit yes for that scenario, every time (PROTOCOL step 0).
-# YES_SPEND is deliberately NOT set by any target here: a make target that could grant
-# its own spending authorization is the thing the two-flag gate exists to prevent.
+# and a scripted planner — step 5 runs `evals.runner --mode rehearsal` (ADR 0069), which
+# is the only invocation that combines those two halves. LIVE=1 alone REFUSES (exit 2) —
+# spending needs YES_SPEND=1 as well, and the owner's explicit yes for that scenario,
+# every time (PROTOCOL step 0). YES_SPEND is deliberately NOT set by any target here: a
+# make target that could grant its own spending authorization is the thing the two-flag
+# gate exists to prevent.
 #
 # Same parse-time refusal shape as eval-live's ONLY guard, so a missing MODE fails before
 # anything is started, seeded or spent rather than inside the script.

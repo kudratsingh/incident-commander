@@ -1766,6 +1766,8 @@ def split_for_bless(
     observed: Collection[DriftKey],
     prior: Collection[DriftKey],
     checked: Collection[tuple[str, str]],
+    *,
+    stack_context: str = "unknown",
 ) -> tuple[tuple[DriftKey, ...], tuple[DriftKey, ...]]:
     """``(carried, disproved)`` for the prior entries this run did not observe.
 
@@ -1777,8 +1779,20 @@ def split_for_bless(
     reached = set(checked)
     seen = set(observed)
     unobserved = [key for key in prior if key not in seen]
-    carried = tuple(sorted(key for key in unobserved if (key[0], key[1]) not in reached))
-    disproved = tuple(sorted(key for key in unobserved if (key[0], key[1]) in reached))
+
+    def observable_here(key: DriftKey) -> bool:
+        context = context_of(key)[0]
+        return context not in {COLD_STACK, WARM_STACK, TRAFFIC_STACK} or (
+            context.removesuffix("-stack") == stack_context
+        )
+
+    def should_carry(key: DriftKey) -> bool:
+        return (key[0], key[1]) not in reached or not observable_here(key)
+
+    carried = tuple(sorted(key for key in unobserved if should_carry(key)))
+    disproved = tuple(
+        sorted(key for key in unobserved if (key[0], key[1]) in reached and observable_here(key))
+    )
     return carried, disproved
 
 
@@ -1787,6 +1801,7 @@ def dump_ledger(
     path: Path | None = None,
     *,
     checked: Collection[tuple[str, str]] = (),
+    stack_context: str = "unknown",
 ) -> int:
     """Write the ledger from an observed drift set. Returns the entry count.
 
@@ -1803,7 +1818,10 @@ def dump_ledger(
             existing = loaded
     observed = {drift.key for drift in drifts}
     carried, _disproved = split_for_bless(
-        observed, [entry.key for entry in load_entries(target)], checked
+        observed,
+        [entry.key for entry in load_entries(target)],
+        checked,
+        stack_context=stack_context,
     )
     keys = sorted(
         observed | set(carried), key=lambda key: (*key[:4], -1 if len(key) == 4 else key[4])

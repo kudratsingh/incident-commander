@@ -19,12 +19,15 @@ name only repeat-safe hooks, so a mode added over a hook without that property f
 instead of failing on camera.
 
 **Spend.** The default path is FREE and is the rehearsal path: the real platform, the real
-hooks, the real Tier-1 action, and a SCRIPTED planner. There is no new scenario variant for
-it — the runner is invoked without ``--live`` and with the API key blanked for the
-subprocess, which is what makes the model leg canned while the platform leg stays real. The
-row that comes out reads ``degraded=True``, correctly and by design: it is not a measurement
-of the agent, it is a rehearsal of the demo. ``LIVE=1`` is the paid take and REFUSES without
-``YES_SPEND=1`` (PROTOCOL step 0: readiness is not authorization).
+hooks, the real Tier-1 action, and a SCRIPTED planner. It is the runner's own
+``--mode rehearsal`` (ADR 0069), not a scenario variant and not an environment trick: the
+first attempt at this blanked ``ANTHROPIC_API_KEY`` for the subprocess, and that made the
+whole run canned — the PLATFORM leg included, because the runner's offline settings hardcode
+``eval.local``, so no hook fired and nothing was rehearsed. The row that comes out reads
+``degraded=True`` with a ``rehearsal`` provenance flag, correctly and by design: it is not a
+measurement of the agent, it is a rehearsal of the demo, and no report will count it.
+``LIVE=1`` is the paid take and REFUSES without ``YES_SPEND=1`` (PROTOCOL step 0: readiness
+is not authorization).
 """
 
 from __future__ import annotations
@@ -40,6 +43,12 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Final
+
+# The one import from the harness at MODULE level, and deliberately: every other `evals`
+# import here is inside the function that needs it, and that is why the first rehearsal died
+# at step 3 with a ModuleNotFoundError — after the ten-second countdown had run. A missing
+# PYTHONPATH now fails before the first line of output instead of on camera.
+from evals.runner import REHEARSAL_MODE
 
 _REPO_ROOT: Final = Path(__file__).resolve().parents[1]
 
@@ -83,6 +92,10 @@ _BASELINE_POLL_SECONDS: Final = 5.0
 #: A baseline lag at or under this reads as healthy. Not 0: the producer is already
 #: running by the time this is asked, so a job or two in flight is the normal case.
 _BASELINE_MAX_LAG: Final = 5
+#: How long to wait for the backlog to read a fresh 0 after a traffic mode's reset. Longer
+#: than the platform's 60-second measurement interval, because the wait is for the METRIC to
+#: refresh and the drain itself takes seconds (see ``_wait_for_a_drained_backlog``).
+_DRAIN_TIMEOUT_SECONDS: Final = 150
 
 
 class DemoFailed(RuntimeError):
@@ -300,14 +313,14 @@ def main(argv: list[str] | None = None) -> int:
         console.say()
         console.say(f"FAILED: {err}")
         traffic.stop(console)
-        _put_the_world_back(console)
+        _put_the_world_back(console, drained=bool(MODES[args.mode]["needs_traffic"]))
         console.say(console.timings())
         return 1
     except KeyboardInterrupt:
         console.say()
         console.say("INTERRUPTED by the operator.")
         traffic.stop(console)
-        _put_the_world_back(console)
+        _put_the_world_back(console, drained=bool(MODES[args.mode]["needs_traffic"]))
         console.say(console.timings())
         return 130
     except Exception as err:  # noqa: BLE001 - see below; a bare traceback is the bug
@@ -321,7 +334,7 @@ def main(argv: list[str] | None = None) -> int:
         console.say(f"UNEXPECTED FAILURE: {type(err).__name__}: {err}")
         console.say("  (this is a bug in the demo machine, not a finding about the agent)")
         traffic.stop(console)
-        _put_the_world_back(console)
+        _put_the_world_back(console, drained=bool(MODES[args.mode]["needs_traffic"]))
         console.say(console.timings())
         return 1
     console.say(console.timings())
@@ -408,16 +421,20 @@ def _walk(
             env={"AGENT_RUN_REPORTING": "true"},
         )
     else:
-        console.note(step, "free: the real platform, a scripted planner, row stamped degraded=True")
+        console.note(
+            step,
+            "free: the real platform, a scripted planner, row stamped degraded=True "
+            "with a rehearsal provenance flag",
+        )
         _must(
-            [sys.executable, "-m", "evals.runner", "--only", scenario],
+            # `--mode rehearsal` is what keeps the PLATFORM leg real while the model leg is
+            # the scenario's script (ADR 0069). Without it there is no such run: dropping
+            # `--live` puts the runner on its offline settings, which hardcode `eval.local`,
+            # and blanking the key on top only made that fully canned run quieter.
+            [sys.executable, "-m", "evals.runner", "--mode", REHEARSAL_MODE, "--only", scenario],
             "rehearsal agent run",
             env={
                 "AGENT_RUN_REPORTING": "true",
-                # THIS is what makes the model leg canned while the platform leg stays
-                # real: the runner reads the key and falls back to its scripted planner
-                # when it is blank. No new scenario variant, no --live.
-                "ANTHROPIC_API_KEY": "",
                 "EVAL_TRACE_DIR": "evals/traces",
             },
         )
@@ -436,7 +453,7 @@ def _walk(
     traffic.stop(console)
     for line in _artifacts(scenario):
         console.note(step, line)
-    _put_the_world_back(console)
+    _put_the_world_back(console, drained=bool(mode["needs_traffic"]))
     console.say()
     console.say("  *** DONE — STOP RECORDING ***")
     console.end(step)
@@ -568,11 +585,45 @@ def _artifacts(scenario: str) -> list[str]:
     return lines
 
 
-def _put_the_world_back(console: Console) -> None:
+def _wait_for_a_drained_backlog(console: Console) -> None:
+    """Hold until `worker-dispatcher` reads a FRESH zero, before the audit asks.
+
+    Measured, not anticipated: the first `consumer_outage` rehearsal ended with
+    `make world-audit` printing `[FAIL] worker-dispatcher lag: 33 (want 0)` two seconds
+    after the reset — and the world was already clean. `make traffic` had produced ~35 jobs
+    while the consumer was dead, the agent's restart drained them in seconds, but the
+    platform recomputes this metric on a 60-second interval and the reset clears the sample
+    history (`lag_samples_cleared: 1`), so the audit was served the last value taken while
+    the consumer was still dead. Twenty seconds later the same read was 0.
+
+    So the wait is for a reading, not for the world: only a `0` proceeds, a stale number
+    keeps polling, and a timeout WARNS and audits anyway — a demo must not be able to
+    convert "the operator waited long enough" into "the world is fine".
+    """
+    deadline = time.monotonic() + _DRAIN_TIMEOUT_SECONDS
+    while time.monotonic() < deadline:
+        lag, known = _lag_reading()
+        if known and lag == 0:
+            console.say("  backlog drained: worker-dispatcher lag reads a fresh 0")
+            return
+        console.say(f"  waiting for the backlog to drain (lag {lag}, lag_known {known})…")
+        time.sleep(_BASELINE_POLL_SECONDS)
+    console.say(
+        f"  WARNING: worker-dispatcher lag has not read 0 within {_DRAIN_TIMEOUT_SECONDS}s. "
+        "Auditing anyway — read its lag line as a reading, and re-audit in a minute before "
+        "trusting a FAIL."
+    )
+
+
+def _put_the_world_back(console: Console, *, drained: bool = False) -> None:
     """Reset and re-audit, on EVERY path out of this script including the failing ones.
 
     Reported rather than raised: a reset that fails after a failed demo must not hide the
     first failure, and the chaos-teardown latch already refuses the next live run.
+
+    ``drained`` is the traffic modes' extra wait (see ``_wait_for_a_drained_backlog``). It
+    is passed from the MODE rather than inferred here, because "this world had a producer
+    in it" is a fact about the mode and this function is called from four places.
     """
     console.say("  resetting the world")
     reset = _run(["make", "eval-reset", "PURGE_IDEMPOTENCY=1"])
@@ -582,6 +633,8 @@ def _put_the_world_back(console: Console) -> None:
             "be dirty — do not run another scenario until it is clean."
         )
         return
+    if drained:
+        _wait_for_a_drained_backlog(console)
     audit = _run(["make", "world-audit"])
     if audit.returncode != 0:
         console.say(

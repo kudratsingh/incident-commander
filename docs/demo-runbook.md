@@ -7,8 +7,15 @@ is what to have open beside it.
 make demo-live MODE=consumer_outage           # a consumer stops, the backlog climbs
 make demo-live MODE=dlq_backlog               # one replayable row, one poisoned row
 make demo-live MODE=… AUTO=1                  # rehearsal: no pauses
+make demo-live MODE=… RECORD_FROM=baseline    # record from the healthy world, not the fault
 make demo-live MODE=… LIVE=1 YES_SPEND=1      # the ONE paid take
 ```
+
+**You start recording at step 4, not step 2.** The first take began at the baseline and the
+usable footage began ninety seconds later: `consumer_outage`'s backlog is a measurement the
+platform recomputes every 60 s, so there is nothing on the chart until a sample crosses the
+threshold. The prompt now comes once the fault is on screen. `RECORD_FROM=baseline` restores
+the old order for a take where the healthy world is the point.
 
 The default path is **free**: the real platform, the real fault, the real Tier-1 action, and
 a scripted planner. Step 5 runs `evals.runner --mode rehearsal` ([ADR 0069](ADR/0069-a-rehearsal-is-a-third-provenance-not-a-live-run.md)),
@@ -30,9 +37,12 @@ scenario, every time. No make target sets `YES_SPEND`.
 - [ ] Console open at `http://localhost:3000/demo?mode=<mode>`, logged in as the demo
       operator (the `DEFAULT_EMAIL` / `DEFAULT_PASSWORD` constants in
       `scripts/bootstrap_agent_token.py` — never typed into a file that gets committed).
+      **Reload it after step 1's reset**: the reset writes the page's own boundary row, and a
+      page loaded before it is still showing the previous run.
 - [ ] Nothing else running: no `make traffic`, no `evals.runner`, no merge in flight. Step 1
       audits for exactly this and stops if it finds one.
-- [ ] Screen recorder ready but **not started** — step 2 tells you when.
+- [ ] Screen recorder ready but **not started** — step 4 tells you when (step 2 with
+      `RECORD_FROM=baseline`).
 
 ## What to say, per phase
 
@@ -49,34 +59,90 @@ scenario, every time. No make target sets `YES_SPEND`.
 The DLQ mode's best moment is the **poisoned row it does not touch**: the briefing names it
 as remaining work. That is the one to slow down for.
 
+## What the console is sent during a run
+
+The reporter sends the whole run, not just its phase (ADR 0068 as amended by WO-R3-329). Per
+report: the **state**, the **ranked hypotheses** with a reasoning excerpt each, the
+**current hypothesis**, the **plan** (tool, arguments, target hypothesis, rationale) once it
+exists, one **verification** per verify poll with its verdict and `{attempt, of}`, the
+**budget** (calls used/max, tokens, dollars, wall seconds), and one **step** per tool call —
+its wired arguments, an excerpt of what came back, the outcome (`ok` / `refused` /
+`error: …`) and the latency in milliseconds.
+
+Two things to know before you read the page:
+
+- **The steps come from the agent's own client, not from the audit log.** An
+  `agent.tool_invoked` audit row carries the tool, the arguments and the latency but *not the
+  result*, so "what did the agent see" only exists in the run record.
+- **A report is still never a tool call.** None of this counts against `max_tool_calls`, none
+  of it reaches the evidence ledger, and a platform that refuses every report changes nothing
+  about the run.
+
+The panels that draw all of this are the console's half (WO-R3-330), and the fields only
+reach the platform once the commander is pinned to a platform that declares them (v0.6.16).
+Before that pin the reporter **narrows** — see the next section.
+
+## Reporting against a platform that does not know the new fields
+
+`report_agent_run`'s input model forbids unknown fields, so on platform **v0.6.15** a widened
+report is refused whole — state included. Measured on the 2026-09-20 rehearsal, and the shape
+of the refusal is the part worth writing down: it arrives as a **JSON-RPC error**
+(`MCP error -32602: invalid tool arguments`), not as a 200 carrying `isError`. The first
+attempt at this read only the second route, and every report of that rehearsal was lost:
+
+```
+run fe15d750-…: agent-run reporting failed (the run is unaffected): report_agent_run: MCPError: MCP error -32602: invalid tool arguments
+  (× 8, then) report_agent_briefing: MCPError: MCP error -32011: no run fe15d750-… to attach a briefing to; report its state first
+  agent-run reporting: run fe15d750-…, 0 report(s) accepted, 0 step(s), 0 verification(s), briefing NOT sent, 9 FAILED
+```
+
+With the fallback, the same rehearsal reports the state to the same old platform, once per
+refusal rather than once per call:
+
+```
+run c4d5aa39-…: the platform refused the widened report: MCP error -32602: invalid tool arguments. Falling back to the fields platform v0.6.15 accepts …
+  agent-run reporting: run c4d5aa39-…, 6 report(s) accepted, 0 step(s), 0 verification(s), briefing sent, NARROWED to the pre-v0.6.16 fields (see the log), 1 FAILED
+```
+
+So on v0.6.15 the console shows exactly what it showed before — phase strip, hypothesis, last
+step — and says in the log why the rest is missing. **A 403 does not narrow**: a token minted
+without `agent_runs:write` is a re-mint (see the checklist above), not an old schema, and
+hiding it behind a thinner console is the wrong repair.
+
 ## Timings, measured
 
-Both modes rehearsed end to end on live platform v0.6.13, 2026-09-20, `AUTO=1` (so no operator
-pauses). `make world-audit` PASSed before and after each.
+Both modes rehearsed end to end on live platform **v0.6.15**, 2026-09-20, `AUTO=1` (so no
+operator pauses), both PASS, `make world-audit` PASSed before and after each.
 
 | Step | | `dlq_backlog` | `consumer_outage` |
 |---|---|---|---|
-| 1 | stack check, reset, world audit, console URL | 2.1 s | 2.4 s |
+| 1 | stack check, reset, world audit, console URL | 3.4 s | 3.4 s |
 | 2 | baseline (`consumer_outage` also starts `make traffic`) | 0.0 s | 0.0 s |
-| 3 | inject the fault (10 s of it is the countdown) | 10.5 s | 10.4 s |
-| 4 | wait for the fault to become visible | 0.4 s | 75.5 s |
-| 5 | run the agent (scripted planner) | 1.0 s | 1.0 s |
-| 6 | wind down: stop traffic, reset, re-audit | 2.1 s | 57.9 s |
-| | **total** | **16.0 s** | **147.2 s** |
+| 3 | inject the fault (10 s countdown) **and wait for the platform to show it** | 10.6 s | 106.3 s |
+| 4 | prove the premise the scenario grades against | 0.5 s | 0.5 s |
+| 5 | run the agent (scripted planner) | 1.6 s | 1.3 s |
+| 6 | wind down: run id, deep link, paths, stop traffic, reset, re-audit | 3.4 s | 58.9 s |
+| | **total** | **19.4 s** | **170.5 s** |
 
 Read those as the machine's own overhead, not as the demo's length: the pauses are where you
-talk, and `LIVE=1` replaces step 5's one second with a real model's minutes.
+talk, and `LIVE=1` replaces step 5's second with a real model's minutes.
 
 **`consumer_outage`'s two long steps are one fact about the platform, not slack.** It
-recomputes consumer lag on a **60-second interval**, and the scenario's premise is
-`lag >= 20`, so step 4 can only end on a sample taken late enough to see it: the readings ran
-`0 → 3 (age 1 s) → 23 (age 0 s)`, and the third one crossed the bar 75 s in. Step 6 is the
-same clock in reverse — the agent's restart drains ~23 jobs in seconds, but the next sample is
-up to a minute away, so the machine **waits for a fresh `0` before auditing** and only then
-runs `make world-audit`. Without that wait the audit reads the value taken while the consumer
-was still dead: the first rehearsal ended on `[FAIL] worker-dispatcher lag: 33 (want 0)` over
-a world that was already clean, and the same read was `0` twenty seconds later. A timeout
-(150 s) warns and audits anyway — waiting must never be a way to declare the world fine.
+recomputes consumer lag on a **60-second interval**, and the fault is not on the page until a
+sample crosses the threshold, so step 3 now waits for that sample rather than leaving it to
+the precondition: the readings ran `0 (× 7) → 11 (× 12) → 30`, and the 11 is the reason the
+wait exists — it is a real sample of a real backlog that is still under the bar, and a page
+showing `11` against a threshold of `20` shows an audience nothing. Step 4 then passes in
+half a second, because the premise was already true when it asked.
+
+Step 6 is the same clock in reverse — the agent's restart drains the backlog in seconds, but
+the next sample is up to a minute away, so the machine **waits for a fresh `0` before
+auditing** and only then runs `make world-audit`. Without that wait the audit reads the value
+taken while the consumer was still dead: an early rehearsal ended on
+`[FAIL] worker-dispatcher lag: 33 (want 0)` over a world that was already clean, and the same
+read was `0` twenty seconds later. A timeout (150 s) warns and audits anyway — waiting must
+never be a way to declare the world fine. The fault watch in step 3 has the same rule for the
+same reason: a timeout (180 s) WARNS, and the precondition below it is the gate.
 
 ## What the operator endpoints showed, per phase
 

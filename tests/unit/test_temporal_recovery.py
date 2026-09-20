@@ -261,7 +261,12 @@ class TestTheAttributionGrade:
         """One spelling of the ledger entry, across every reader of it.
 
         INC-002's rule in constant form: the grader's record of what the judge said and the
-        judge's own track record read the same entry, and two literals would drift.
+        judge's own track record read the same entry, and two literals would drift. Since
+        WO-R3-329 there is exactly ONE literal — the writer's own constant, in
+        ``agent/planner_context.py`` beside the other ledger markers — and both readers here
+        take it from there, so the equality below holds by construction rather than by
+        agreement. The source check moved with it: what the verify loop must still do is
+        write the entry under THAT constant.
         """
         from evals.judge_calibration.track_record import VERDICT_MARKER
 
@@ -273,7 +278,7 @@ class TestTheAttributionGrade:
             / "agent"
             / "remediation.py"
         ).read_text(encoding="utf-8")
-        assert f'tool_name="{VERIFY_JUDGE_MARKER}"' in written, (
+        assert "tool_name=VERIFY_JUDGE_MARKER" in written, (
             "the verify loop no longer writes this entry name, so every ATTRIBUTION detail "
             "would report 'verify verdicts: none' on a run that had one"
         )

@@ -69,7 +69,7 @@ from incident_commander.agent.planner_context import (
     VERIFY_JUDGE_MARKER,
 )
 from incident_commander.agent.state import EvidenceEntry, RunState
-from incident_commander.tools.mcp_client import MCPClientProtocol
+from incident_commander.tools.mcp_client import MCPClientProtocol, MCPError
 from incident_commander.tools.policies import Tier, tier_of
 
 _LOG: Final = logging.getLogger(__name__)
@@ -102,6 +102,24 @@ _MAX_EXCERPT_CHARS: Final = 280
 #: limit because this is the thing the owner's first take could not show at all — the audit
 #: row records that a read happened and never what it returned.
 _MAX_RESULT_EXCERPT_CHARS: Final = 400
+
+#: The platform's own caps on the short identifying fields. They are REFUSED over the limit
+#: rather than truncated there (plat #230), and a refusal is not a small loss: it costs the
+#: whole report, and this module would read it as an older platform and narrow for the rest
+#: of the run. ``Hypothesis.name`` is free-form model output, so this is a real path — an
+#: over-long name would silently thin the console for a run that was reporting fine.
+_MAX_NAME_CHARS: Final = 128
+_MAX_CATEGORY_CHARS: Final = 64
+#: Same reasoning, for a verdict string the platform leaves open.
+_MAX_VERDICT_CHARS: Final = 64
+
+#: JSON-RPC's "Invalid params". MEASURED on platform v0.6.15 (the 2026-09-20 rehearsal):
+#: a report carrying a field its input model does not declare comes back as a JSON-RPC
+#: ERROR with this code — ``MCP error -32602: invalid tool arguments`` — and not as a 200
+#: carrying ``isError``, which is how the platform refuses things it understood. Reading
+#: only the ``isError`` path left every report of that rehearsal failing and the console
+#: empty, which is the whole failure the fallback below exists to prevent.
+_INVALID_PARAMS: Final = -32602
 
 #: What a refusal has to name before it is read as "this run cannot be reported", rather
 #: than as "this platform does not know these fields yet". Everything else narrows the
@@ -179,7 +197,8 @@ class _Step(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    seq: int = Field(ge=1)
+    #: The contract's bound is ``>= 0``; this reporter's own first step is 1.
+    seq: int = Field(ge=0)
     # ``report`` is in the platform's enum and this module never sends one: a report step
     # could only describe filing the briefing, which happens after the terminal report has
     # closed the run. Accepted here so the mirror matches the contract it mirrors.
@@ -220,7 +239,9 @@ class _Budget(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     tool_calls_used: int = Field(ge=0)
-    tool_calls_max: int = Field(ge=0)
+    #: ``null`` is the contract's "no limit" (plat #230), which this reporter never sends:
+    #: invariant 7 gives every run an explicit ceiling, so there is always a number.
+    tool_calls_max: int | None = Field(default=None, ge=0)
     tokens_used: int = Field(ge=0)
     usd_used: float = Field(ge=0.0)
     wall_seconds: float = Field(ge=0.0)
@@ -384,7 +405,11 @@ def _latency_ms(duration_seconds: object) -> int | None:
 
 
 def _excerpt(text: str | None, limit: int) -> str | None:
-    """``text`` cut to ``limit`` characters, with the cut made visible."""
+    """``text`` cut to ``limit`` characters, with the cut made visible.
+
+    ``None`` for nothing and for whitespace: an empty excerpt is not an excerpt, and the
+    tool reads absence as "the caller did not say" rather than as an empty reading.
+    """
     if text is None:
         return None
     collapsed = text.strip()
@@ -393,6 +418,17 @@ def _excerpt(text: str | None, limit: int) -> str | None:
     if len(collapsed) <= limit:
         return collapsed
     return f"{collapsed[: limit - 1]}…"
+
+
+def _capped(text: str, limit: int) -> str:
+    """``text`` cut to ``limit``, keeping a value where the platform requires one.
+
+    Unlike ``_excerpt`` this never answers ``None``: these are the REQUIRED short fields —
+    a hypothesis name, a category, a tool, a verdict — and the platform refuses the whole
+    report if one is over its cap. Truncating a name shows a person slightly less; a
+    refusal shows them nothing and narrows every later report of the run.
+    """
+    return text if len(text) <= limit else f"{text[: limit - 1]}…"
 
 
 # ---------------------------------------------------------------------------
@@ -411,8 +447,8 @@ def top_hypothesis(run_state: RunState) -> dict[str, Any] | None:
         return None
     top = run_state.hypotheses[0]
     return {
-        "name": top.name,
-        "category": top.category.value,
+        "name": _capped(top.name, _MAX_NAME_CHARS),
+        "category": _capped(top.category.value, _MAX_CATEGORY_CHARS),
         "confidence": top.confidence,
     }
 
@@ -423,15 +459,20 @@ def ranked_hypotheses(run_state: RunState) -> list[dict[str, Any]] | None:
     The whole ranking and not just the top entry: "what else did it consider, and how
     confident was it" is the question a person watching an investigation actually has, and
     the run's own ordering (confidence descending, normalized in ``InvestigationStep``) is
-    the answer. ``None`` before the first planner call — never an empty list, which reads
-    as "it considered nothing".
+    the answer. **The ORDER is the ranking** — the platform stores it as sent and never
+    re-sorts (plat #230) — so best-first here is best-first on the page.
+
+    ``None`` before the first planner call, which the tool reads as "the caller did not say"
+    and which never clears a ranking an earlier report supplied. An empty LIST would mean
+    "it considered nothing", a claim no run makes: hypotheses carry over across a
+    reinvestigation (ADR 0056), so a run that has a ranking never goes back to having none.
     """
     if not run_state.hypotheses:
         return None
     return [
         {
-            "name": hypothesis.name,
-            "category": hypothesis.category.value,
+            "name": _capped(hypothesis.name, _MAX_NAME_CHARS),
+            "category": _capped(hypothesis.category.value, _MAX_CATEGORY_CHARS),
             "confidence": hypothesis.confidence,
             "reasoning_excerpt": _excerpt(hypothesis.reasoning, _MAX_EXCERPT_CHARS),
         }
@@ -489,9 +530,10 @@ def plan_payload(run_state: RunState) -> dict[str, Any] | None:
     target = plan.get("target_hypothesis")
     rationale = plan.get("action_rationale")
     return {
-        "action_tool": action_tool,
+        "action_tool": _capped(action_tool, _MAX_NAME_CHARS),
         "action_arguments": dict(arguments) if isinstance(arguments, Mapping) else {},
-        "target_hypothesis": target if isinstance(target, str) else None,
+        # The hypothesis NAME, so it is free-form model output and capped like one.
+        "target_hypothesis": _capped(target, _MAX_NAME_CHARS) if isinstance(target, str) else None,
         "rationale_excerpt": _excerpt(
             rationale if isinstance(rationale, str) else None, _MAX_EXCERPT_CHARS
         ),
@@ -507,6 +549,9 @@ def budget_payload(run_state: RunState) -> dict[str, Any]:
     budget = run_state.budget
     return {
         "tool_calls_used": budget.tool_calls_used,
+        # The run's real ceiling, always a number: ``null`` is the contract's "no limit" and
+        # invariant 7 says no run has one. The scenario's declared cap is what arrives here
+        # (ADR 0019), not the fleet default.
         "tool_calls_max": budget.max_tool_calls,
         "tokens_used": budget.tokens_used,
         "usd_used": round(float(budget.usd_used), 6),
@@ -523,7 +568,7 @@ def _verification_from_judge(entry: EvidenceEntry) -> dict[str, Any]:
     """
     verdict, separator, reasoning = entry.result_summary.partition(": ")
     return {
-        "verdict": verdict[:64] if separator else "unknown",
+        "verdict": _capped(verdict, _MAX_VERDICT_CHARS) if separator else "unknown",
         "reasoning_excerpt": _excerpt(reasoning or entry.result_summary, _MAX_EXCERPT_CHARS),
         "attempt": _ordinal(entry.arguments.get("attempt")),
         "of": _ordinal(entry.arguments.get("of")),
@@ -540,7 +585,9 @@ def _verification_from_attempt(entry: EvidenceEntry) -> dict[str, Any]:
     """
     verdict = entry.arguments.get("verdict")
     return {
-        "verdict": str(verdict)[:64] if isinstance(verdict, str) else "not_verified",
+        "verdict": _capped(verdict, _MAX_VERDICT_CHARS)
+        if isinstance(verdict, str)
+        else "not_verified",
         "reasoning_excerpt": _excerpt(entry.result_summary, _MAX_EXCERPT_CHARS),
         "attempt": _ordinal(entry.arguments.get("attempt")),
         "of": _ordinal(entry.arguments.get("of")),
@@ -563,12 +610,15 @@ class _Pending(NamedTuple):
 
 
 class Delivery(NamedTuple):
-    """What one attempted report did: whether it landed, and the refusal if it did not."""
+    """What one attempted report did: whether it landed, and why it did not."""
 
     ok: bool
-    #: The platform's own words when it refused (a 200 carrying ``isError``); ``None`` when
-    #: the call never landed at all, which is a different thing and never a shape problem.
+    #: The platform's own words when it refused, either as a 200 carrying ``isError`` or as
+    #: a JSON-RPC error. ``None`` when the call never landed at all.
     refusal: str | None
+    #: Whether narrowing the payload could plausibly help — i.e. whether the platform
+    #: rejected these ARGUMENTS rather than the run, the principal or the connection.
+    shape_refusal: bool = False
 
 
 class RunReporter:
@@ -614,6 +664,10 @@ class RunReporter:
         #: changes nothing about the run and exists so "the console was empty" has an
         #: answer other than "the frontend is broken".
         self.failures: list[str] = []
+        #: Why the widened fields were dropped, once. NOT in ``failures``: one refused
+        #: report that then landed narrow is one failure, and counting the fallback as a
+        #: second made the summary line read as two lost reports.
+        self.narrowed_because: str | None = None
         self.reports_sent = 0
         self.steps_sent = 0
         self.verifications_sent = 0
@@ -740,9 +794,11 @@ class RunReporter:
         return _Pending(
             {
                 "step": {
+                    # Monotonic across the run, and the platform treats a REPEATED seq as a
+                    # no-op (plat #230) — so a retried report cannot double a row.
                     "seq": self._seq,
                     "kind": _step_kind(tool),
-                    "tool": tool,
+                    "tool": _capped(tool, _MAX_NAME_CHARS),
                     "arguments": arguments,
                     "result_excerpt": result_excerpt,
                     "outcome": outcome,
@@ -796,7 +852,7 @@ class RunReporter:
         # Sent on every report, not just the first: the tool fills them in once and never
         # clears them, so repeating costs nothing and a dropped first report is recoverable.
         if self._run_label is not None:
-            payload["run_label"] = self._run_label
+            payload["run_label"] = _capped(self._run_label, _MAX_NAME_CHARS)
         if self._alert_id is not None:
             payload["alert_id"] = self._alert_id
         return payload
@@ -817,9 +873,9 @@ class RunReporter:
                 if delivery.ok:
                     self._accept(body)
                     return
-                if delivery.refusal is None or not _is_shape_refusal(delivery.refusal):
-                    # A transport failure or a run-level refusal. Already logged, and
-                    # neither is a reason to stop sending what this platform accepts.
+                if not delivery.shape_refusal:
+                    # A transport failure, a scope refusal or a run-level one. Already
+                    # logged, and none of them is helped by sending fewer fields.
                     return
                 self._narrow(f"the platform refused the widened report: {delivery.refusal}")
             else:
@@ -863,7 +919,7 @@ class RunReporter:
         if not self._widened:
             return
         self._widened = False
-        self.failures.append(f"widened report refused ({why})")
+        self.narrowed_because = why
         _LOG.warning(
             "run %s: %s. Falling back to the fields platform v0.6.15 accepts "
             "(state, hypothesis, last step) for the rest of this run; the console's agent "
@@ -876,6 +932,12 @@ class RunReporter:
     def _call(self, tool: str, arguments: Mapping[str, Any]) -> Delivery:
         """One report. Says whether it landed and how it did not; never raises.
 
+        A refusal reaches us by TWO routes and both are read, because the platform uses
+        both: a 200 carrying ``isError`` for something it understood and declined, and a
+        JSON-RPC error for arguments its input model will not accept. The second is the one
+        an older platform answers a widened report with (``_INVALID_PARAMS``), so reading
+        only the first is how every report of the 2026-09-20 rehearsal was lost.
+
         ``Exception`` and not ``BaseException``: a ``KeyboardInterrupt`` or a
         ``SystemExit`` arriving mid-report is the operator stopping the run, and swallowing
         that would make the run unkillable during its own telemetry.
@@ -884,6 +946,13 @@ class RunReporter:
             result = self._client.call_tool(
                 tool, arguments, timeout_seconds=_REPORT_TIMEOUT_SECONDS
             )
+        except MCPError as err:
+            self._note(f"{tool}: MCPError: {err}")
+            # Only "invalid params" is a shape refusal. An HTTP 403 (a token minted without
+            # `agent_runs:write`) and a transport failure arrive as ``MCPError`` too, and
+            # sending fewer fields fixes neither — it would only hide a missing scope
+            # behind a thinner console.
+            return Delivery(False, str(err), err.code == _INVALID_PARAMS)
         except Exception as err:  # noqa: BLE001 - fail-open is the whole contract
             self._note(f"{tool}: {type(err).__name__}: {err}")
             return Delivery(False, None)
@@ -892,7 +961,7 @@ class RunReporter:
             # would count a refused report as delivered — the `chaos_hooks` C-02 lesson.
             refusal = _error_text(result)
             self._note(f"{tool}: platform refused the report: {refusal}")
-            return Delivery(False, refusal)
+            return Delivery(False, refusal, _is_shape_refusal(refusal))
         return Delivery(True, None)
 
     def _note(self, detail: str) -> None:

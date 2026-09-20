@@ -26,6 +26,7 @@ from uuid import UUID, uuid4
 import httpx
 import pytest
 
+from incident_commander.agent.attribution import AttributionRead, AttributionVerdict
 from incident_commander.agent.briefing import render_briefing
 from incident_commander.agent.hypothesis import Hypothesis, HypothesisCategory
 from incident_commander.agent.loop import run_to_completion
@@ -139,11 +140,15 @@ class _OldPlatformClient:
     """Platform v0.6.15: its input model forbids unknown fields, so a widened report is
     refused whole — state included, which is the failure the fallback exists for.
 
-    Refuses in the platform's own shape (a 200 carrying ``isError``) and accepts anything
-    built from ``NARROW_FIELDS`` alone.
+    Refuses the way that platform ACTUALLY refuses, which the 2026-09-20 rehearsal
+    measured: a JSON-RPC error carrying ``-32602: invalid tool arguments``, not a 200
+    carrying ``isError``. ``as_tool_error=True`` is the other shape, kept because the
+    platform uses it for things it understood and declined and a future version could
+    validate either way. Anything built from ``NARROW_FIELDS`` alone is accepted.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, *, as_tool_error: bool = False) -> None:
+        self.as_tool_error = as_tool_error
         self.calls: list[tuple[str, dict[str, Any]]] = []
         self.accepted: list[dict[str, Any]] = []
 
@@ -157,18 +162,13 @@ class _OldPlatformClient:
         self.calls.append((name, dict(arguments)))
         unknown = sorted(set(arguments) - set(NARROW_FIELDS))
         if name == REPORT_RUN_TOOL and unknown:
-            return ToolResult(
-                content=[
-                    {
-                        "type": "text",
-                        "text": (
-                            "Input validation failed for ReportAgentRunInput: "
-                            f"extra_forbidden ({', '.join(unknown)})"
-                        ),
-                    }
-                ],
-                is_error=True,
+            detail = (
+                f"Input validation failed for ReportAgentRunInput: "
+                f"extra_forbidden ({', '.join(unknown)})"
             )
+            if self.as_tool_error:
+                return ToolResult(content=[{"type": "text", "text": detail}], is_error=True)
+            raise MCPError(-32602, "invalid tool arguments", {"detail": detail})
         self.accepted.append(dict(arguments))
         return ToolResult(content=[{"type": "text", "text": "{}"}], is_error=False)
 
@@ -339,6 +339,43 @@ class TestTheBriefingGoesOnce:
         # It must be JSON the wire can carry: a datetime left in place would raise inside
         # httpx rather than at the seam, which is a crash the fail-open guard never sees.
         json.dumps(sent)
+
+    def test_the_attribution_verdict_and_the_incident_slots_both_travel(
+        self, run_state: RunState
+    ) -> None:
+        """The briefing card renders both from the record, so a trimmed dump blanks it.
+
+        The console reads ADR 0071's verdict out of `briefing.attribution` by these exact
+        five field names and ADR 0065's remainder out of `briefing.incidents`. Pinned here
+        because the whole-object dump is what carries them: nothing in this module names
+        either field, so nothing but a test would notice them going missing.
+        """
+        client = _RecordingClient()
+        escalated = run_state.with_state(IncidentState.ESCALATED, run_state.updated_at)
+        briefing = render_briefing(escalated).model_copy(
+            update={
+                "attribution": AttributionRead(
+                    verdict=AttributionVerdict.ATTRIBUTED,
+                    resource="worker-dispatcher",
+                    probe_tool="get_consumer_lag",
+                    acted=True,
+                    detail="lag 42 before the restart, 0 after it",
+                )
+            }
+        )
+
+        _reporter(client).report_briefing(briefing)
+
+        sent = client.arguments_for(REPORT_BRIEFING_TOOL)[0]["briefing"]
+        assert set(sent["attribution"]) == {
+            "verdict",
+            "resource",
+            "probe_tool",
+            "acted",
+            "detail",
+        }
+        assert sent["attribution"]["verdict"] == AttributionVerdict.ATTRIBUTED.value
+        assert "incidents" in sent
 
     def test_prose_is_absent_rather_than_empty_on_an_unenriched_run(
         self, run_state: RunState
@@ -941,6 +978,26 @@ class TestTheRankedHypothesesTravel:
 
         assert len(excerpt) == 280 and excerpt.endswith("…")
 
+    def test_an_over_long_hypothesis_name_is_capped_rather_than_refused(
+        self, run_state: RunState
+    ) -> None:
+        """`Hypothesis.name` is free-form model output and the platform caps it at 128.
+
+        Over the cap the platform refuses the WHOLE report as invalid params (plat #230) —
+        which this module would read as an older platform and answer by narrowing every
+        later report of the run. So a long name costs a truncation, never the console.
+        """
+        client = _RecordingClient()
+        wordy = _with(run_state, hypotheses=(_hypothesis("saturation " * 40, 0.5),))
+
+        _reporter(client).report(wordy)
+
+        sent = client.arguments_for(REPORT_RUN_TOOL)[0]
+        assert len(sent["current_hypothesis"]["name"]) == 128
+        assert sent["current_hypothesis"]["name"].endswith("…")
+        assert len(sent["hypotheses"][0]["name"]) == 128
+        assert len(sent["hypotheses"][0]["category"]) <= 64
+
 
 class TestThePlanTravelsOnce:
     def test_the_plan_is_reported_when_the_run_enters_remediating(
@@ -983,6 +1040,19 @@ class TestThePlanTravelsOnce:
             "worker-dispatcher",
             "worker-dispatcher-2",
         ]
+
+    def test_an_over_long_target_hypothesis_is_capped(self, run_state: RunState) -> None:
+        """It is a hypothesis NAME, so it is free-form too, and capped at the same 128."""
+        client = _RecordingClient()
+        wordy = _with(
+            run_state,
+            state=IncidentState.REMEDIATING,
+            remediation_plan={**_PLAN, "target_hypothesis": "saturation " * 40},
+        )
+
+        _reporter(client).report(wordy)
+
+        assert len(client.arguments_for(REPORT_RUN_TOOL)[0]["plan"]["target_hypothesis"]) == 128
 
     def test_no_plan_yet_sends_no_plan_field(self, run_state: RunState) -> None:
         client = _RecordingClient()
@@ -1116,6 +1186,49 @@ class TestTheBudgetMeter:
 class TestAnOlderPlatformNarrowsOnceAndKeepsTheOldFields:
     """The re-pin is the coordinator's, so the reporter meets both platforms."""
 
+    @pytest.mark.parametrize(
+        "as_tool_error",
+        [False, True],
+        ids=["json-rpc-error-32602", "200-with-isError"],
+    )
+    def test_either_refusal_shape_narrows_and_the_old_fields_land(
+        self, run_state: RunState, now: datetime, as_tool_error: bool
+    ) -> None:
+        """Both routes, because the MEASURED one was the route the code did not read.
+
+        On 2026-09-20 the whole rehearsal reported nothing: v0.6.15 answers a report
+        carrying an undeclared field with a JSON-RPC ``-32602``, which arrives as an
+        ``MCPError`` and not as the 200-with-``isError`` the refusal path was reading.
+        """
+        platform = _OldPlatformClient(as_tool_error=as_tool_error)
+        log = ToolCallLog(clock=_make_clock(now))
+        log.observe(_traced("get_consumer_lag", text='{"lag": 42}'))
+        reporter = _reporter(platform, tool_log=log, run_label="demo")
+        moved = _with(
+            run_state,
+            state=IncidentState.INVESTIGATING,
+            hypotheses=(_hypothesis("consumer_saturation", 0.85),),
+            evidence=(_entry("get_consumer_lag", now, '{"lag": 42}'),),
+        )
+
+        reporter.report(moved)
+
+        assert reporter.widened is False
+        assert [args["state"] for args in platform.accepted] == ["investigating"]
+        assert set(platform.accepted[0]) <= set(NARROW_FIELDS)
+
+    def test_a_missing_scope_does_not_narrow_anything(self, run_state: RunState) -> None:
+        # An HTTP 403 arrives as an `MCPError` too — a token minted before
+        # `agent_runs:write` existed. Narrowing would not help and would hide the real
+        # cause behind a thinner console; the runbook's re-mint line is the fix.
+        client = _RaisingClient()
+        reporter = _reporter(client, tool_log=ToolCallLog())
+
+        reporter.report(run_state)
+
+        assert reporter.widened is True
+        assert client.attempts == 1, "no retry: the scope is missing, not the schema old"
+
     def test_the_old_fields_still_land_when_the_widened_ones_are_refused(
         self, run_state: RunState, now: datetime
     ) -> None:
@@ -1194,6 +1307,10 @@ class TestAnOlderPlatformNarrowsOnceAndKeepsTheOldFields:
 
         assert final.state is IncidentState.ESCALATED
         assert "NARROWED" in summarize(reporter)
+        # One refused report that then landed narrow is ONE failure. Counting the fallback
+        # as a second made the rehearsal's summary line read as two lost reports.
+        assert len(reporter.failures) == 1
+        assert reporter.narrowed_because is not None
 
 
 class TestNothingLeaksASecret:

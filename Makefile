@@ -87,7 +87,9 @@ help:
 	@echo "  demo-live        drive the recorded demo as six printed steps;"
 	@echo "                   MODE=consumer_outage|dlq_backlog REQUIRED. FREE by default"
 	@echo "                   (real platform, real fault, scripted planner). AUTO=1 skips the"
-	@echo "                   pauses. LIVE=1 is the PAID take and also needs YES_SPEND=1"
+	@echo "                   pauses. RECORD_FROM=fault|baseline picks where the recording"
+	@echo "                   starts (default fault). LIVE=1 is the PAID take and also needs"
+	@echo "                   YES_SPEND=1"
 	@echo "  demo-down        stop demo compose services"
 	@echo "  bootstrap-token  mint a service-account token against a running platform"
 	@echo "  snapshot         regenerate contracts/platform-tools.snapshot.json from live"
@@ -711,7 +713,8 @@ else
 # dies at step 3 with ModuleNotFoundError, AFTER the countdown has run on camera.
 demo-live:
 	PYTHONPATH=. uv run python scripts/demo_live.py --mode $(MODE) \
-		$(if $(LIVE),--live) $(if $(YES_SPEND),--yes-spend) $(if $(AUTO),--auto)
+		$(if $(LIVE),--live) $(if $(YES_SPEND),--yes-spend) $(if $(AUTO),--auto) \
+		$(if $(RECORD_FROM),--record-from $(RECORD_FROM))
 endif
 
 bootstrap-token:

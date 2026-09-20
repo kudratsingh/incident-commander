@@ -28,11 +28,25 @@ whole run canned — the PLATFORM leg included, because the runner's offline set
 measurement of the agent, it is a rehearsal of the demo, and no report will count it.
 ``LIVE=1`` is the paid take and REFUSES without ``YES_SPEND=1`` (PROTOCOL step 0: readiness
 is not authorization).
+
+**Where the recording starts (WO-R3-329).** The owner's first take began at the baseline and
+the usable footage began a minute and a half later, because ``consumer_outage``'s metric is
+recomputed on a 60-second interval and the fault is not on screen until a sample crosses the
+threshold. So the default prompt to start recording is now AFTER the fault is visible, and
+``--record-from baseline`` asks for the old order when the baseline itself is the point.
+
+**Visible to whom.** Step 3 waits for the PLATFORM's own reading of the fault, not only for
+the scenario's precondition. They are different claims: the precondition says the world
+satisfies the premise the grader will assume, and this says the source the console draws
+from is showing a breach — which is what decides whether the page an audience is looking at
+has anything on it. The reading is taken over MCP under the read-scoped principal; the
+console reads the REST twin of the same measurement (platform ADR 0035).
 """
 
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import shlex
 import subprocess
@@ -62,6 +76,9 @@ MODES: Final[dict[str, dict[str, Any]]] = {
         # producer the backlog stays 0 however long you wait and the precondition
         # correctly refuses the run. This is the mode's whole operational difference.
         "needs_traffic": True,
+        # Which platform reading tells the operator the page will show the fault. A closed
+        # set for the same reason the modes are: this decides what is polled.
+        "fault": "consumer_lag",
         "story": (
             "worker-dispatcher stops consuming while jobs keep arriving, so the backlog "
             "climbs. The agent restarts the group and watches the backlog drain."
@@ -72,12 +89,20 @@ MODES: Final[dict[str, dict[str, Any]]] = {
         # The world is seeded at boot and the hook adds the poison row. Nothing arrives,
         # nothing drains, so no traffic is needed or wanted.
         "needs_traffic": False,
+        "fault": "dlq_depth",
         "story": (
             "a dead-letter queue holding one replayable row and one poisoned row that no "
             "replay can fix. The agent replays exactly the safe one and names the other."
         ),
     },
 }
+
+#: The two answers to "when does the operator start recording". ``fault`` is the default and
+#: the owner's finding: the baseline is a minute and a half of nothing on ``consumer_outage``.
+RECORD_FROM: Final[tuple[str, ...]] = ("fault", "baseline")
+
+#: Every fault signal a mode may declare, and what each one polls.
+FAULT_SIGNALS: Final[frozenset[str]] = frozenset({"consumer_lag", "dlq_depth"})
 
 #: Hooks whose repeat firing is safe, measured on platform v0.6.13 (see the module
 #: docstring). A mode may only use these, because this script fires the plan and the
@@ -96,6 +121,13 @@ _BASELINE_MAX_LAG: Final = 5
 #: than the platform's 60-second measurement interval, because the wait is for the METRIC to
 #: refresh and the drain itself takes seconds (see ``_wait_for_a_drained_backlog``).
 _DRAIN_TIMEOUT_SECONDS: Final = 150
+#: A backlog at or above this reads as the fault, in the platform's own measurement. It is
+#: the scenario's premise (``lag >= 20``) on purpose: a smaller number is a breach nobody
+#: watching a chart would see, and the console's threshold band is drawn at the same place.
+_FAULT_MIN_LAG: Final = 20
+#: How long to wait for that reading. Three minutes: the metric is recomputed on a
+#: 60-second interval and the first post-fault sample can be a whole interval away.
+_FAULT_VISIBLE_TIMEOUT_SECONDS: Final = 180
 
 
 class DemoFailed(RuntimeError):
@@ -137,6 +169,50 @@ class TrafficHandle:
             process.kill()
             process.wait(timeout=15)
         self.process = None
+
+
+class WindDown:
+    """Stop the traffic, reset the world, audit it — once, on every path out of the script.
+
+    A single object instead of the same three calls at five call sites, because the five
+    were not the same: an interrupt arriving DURING the wind-down (the operator pressing
+    ctrl-C twice, which is what a person does when a script seems stuck) escaped the
+    handler, left `make traffic` running and the world dirty. So the work is idempotent,
+    runs from a ``finally``, and survives one further interrupt.
+
+    ``drained`` is the traffic modes' extra wait. It is a fact about the MODE, decided once
+    by the caller, so no call site has to remember it.
+    """
+
+    def __init__(self, traffic: TrafficHandle, *, drained: bool) -> None:
+        self.traffic = traffic
+        self.drained = drained
+        self.done = False
+
+    def run(self, console: Console) -> None:
+        """Put the world back. Never raises, and never does it twice."""
+        if self.done:
+            return
+        # Latched BEFORE the work, not after: a wind-down that dies mid-way must not be
+        # retried from the `finally` on top of whatever state it left.
+        self.done = True
+        for attempt in (1, 2):
+            try:
+                self.traffic.stop(console)
+                _put_the_world_back(console, drained=self.drained)
+                return
+            except KeyboardInterrupt:
+                if attempt == 1:
+                    console.say()
+                    console.say(
+                        "  (interrupted during the wind-down — the world still has to go "
+                        "back; trying once more, then giving up loudly)"
+                    )
+        console.say(
+            "  WARNING: interrupted twice during the wind-down. `make traffic` may still "
+            "be running and the world may be dirty: run `make eval-reset "
+            "PURGE_IDEMPOTENCY=1` and `make world-audit` before anything else."
+        )
 
 
 @dataclass
@@ -251,10 +327,16 @@ def _stack_is_up() -> bool:
     return len([line for line in result.stdout.splitlines() if line.strip()]) >= 6
 
 
-def _console_url(mode: str) -> str:
-    """Where the operator watches. The port is the compose default unless overridden."""
+def _console_url(mode: str, run_id: str | None = None) -> str:
+    """Where the operator watches. The port is the compose default unless overridden.
+
+    With ``run_id`` it is the deep link to one run's record, which is what makes a finished
+    demo re-openable: the page defaults to the newest run since the reset boundary, and
+    "the newest" stops being the right run the moment anything else runs.
+    """
     port = os.environ.get("DEMO_CONSOLE_HOST_PORT", "3000")
-    return f"http://localhost:{port}/demo?mode={mode}"
+    url = f"http://localhost:{port}/demo?mode={mode}"
+    return url if run_id is None else f"{url}&run={run_id}"
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -275,6 +357,15 @@ def main(argv: list[str] | None = None) -> int:
         "--auto",
         action="store_true",
         help="do not wait for Enter between steps (for a rehearsal, not for a take).",
+    )
+    parser.add_argument(
+        "--record-from",
+        choices=RECORD_FROM,
+        default=RECORD_FROM[0],
+        help=(
+            "when to start recording: `fault` (default — the prompt comes once the fault is "
+            "on screen) or `baseline` (the old order, when the healthy world is the point)."
+        ),
     )
     args = parser.parse_args(argv)
 
@@ -298,6 +389,7 @@ def main(argv: list[str] | None = None) -> int:
     mode = MODES[args.mode]
     scenario = str(mode["scenario"])
     traffic = TrafficHandle()
+    wind_down = WindDown(traffic, drained=bool(mode["needs_traffic"]))
 
     console.say(f"LIVE DEMO — mode {args.mode}, scenario {scenario}")
     console.say(f"  the story: {mode['story']}")
@@ -306,23 +398,19 @@ def main(argv: list[str] | None = None) -> int:
         + ("a REAL model — THIS RUN SPENDS MONEY" if args.live else "a scripted planner (free)")
     )
     console.say("  the platform: real, and so are the fault and the remediation")
+    console.say(f"  recording from: {args.record_from}")
 
+    code = 0
     try:
-        _walk(console, args, scenario, traffic)
+        _walk(console, args, scenario, traffic, wind_down)
     except DemoFailed as err:
         console.say()
         console.say(f"FAILED: {err}")
-        traffic.stop(console)
-        _put_the_world_back(console, drained=bool(MODES[args.mode]["needs_traffic"]))
-        console.say(console.timings())
-        return 1
+        code = 1
     except KeyboardInterrupt:
         console.say()
         console.say("INTERRUPTED by the operator.")
-        traffic.stop(console)
-        _put_the_world_back(console, drained=bool(MODES[args.mode]["needs_traffic"]))
-        console.say(console.timings())
-        return 130
+        code = 130
     except Exception as err:  # noqa: BLE001 - see below; a bare traceback is the bug
         # The catch-all is deliberate and it was earned. The first rehearsal died at step 3
         # with a ModuleNotFoundError — after the ten-second countdown had run — and because
@@ -333,12 +421,14 @@ def main(argv: list[str] | None = None) -> int:
         console.say()
         console.say(f"UNEXPECTED FAILURE: {type(err).__name__}: {err}")
         console.say("  (this is a bug in the demo machine, not a finding about the agent)")
-        traffic.stop(console)
-        _put_the_world_back(console, drained=bool(MODES[args.mode]["needs_traffic"]))
+        code = 1
+    finally:
+        # The one place the world goes back, on EVERY path including the ones nobody
+        # named — a second interrupt, a `SystemExit` from a library, a bug above. Step 6
+        # has normally run it already, and it refuses to run twice.
+        wind_down.run(console)
         console.say(console.timings())
-        return 1
-    console.say(console.timings())
-    return 0
+    return code
 
 
 def _walk(
@@ -346,9 +436,11 @@ def _walk(
     args: argparse.Namespace,
     scenario: str,
     traffic: TrafficHandle,
+    wind_down: WindDown,
 ) -> None:
     """Steps 1 to 6. The traffic handle is the caller's, so a raise still stops it."""
     mode = MODES[args.mode]
+    record_from_baseline = args.record_from == "baseline"
 
     # ---- STEP 1: a world that is provably healthy, and a console to watch it on -------
     step = console.begin(1, "stack, reset, audit, and the console URL")
@@ -362,14 +454,22 @@ def _walk(
     # the audience a fault somebody else left behind. Exit non-zero means stop.
     _must(["make", "world-audit"], "make world-audit")
     console.note(step, "world audit PASS — the world is the seeded baseline")
+    # AFTER the reset, deliberately. The reset writes the `lab.world_reset` boundary the
+    # page reads (WO-R3-327), and a page loaded before it is a page showing the world on
+    # the other side of that line.
     console.note(step, f"CONSOLE: {_console_url(args.mode)}")
+    console.note(
+        step,
+        "the reset just wrote the demo page's reset boundary — if the console was already "
+        "open, RELOAD it now, or it will still be showing the previous run",
+    )
     console.note(
         step,
         "log in as the demo operator — the DEFAULT_EMAIL / DEFAULT_PASSWORD constants in "
         "scripts/bootstrap_agent_token.py (this script never prints credentials)",
     )
     console.end(step)
-    console.wait("open the console, log in, and put it on screen")
+    console.wait("open (or reload) the console, log in, and put it on screen")
 
     # ---- STEP 2: the baseline the audience should see before anything breaks ----------
     step = console.begin(2, "baseline")
@@ -379,14 +479,23 @@ def _walk(
         _wait_for_healthy_baseline(console, step)
     else:
         console.note(step, "nothing to start — this world is seeded and quiet")
-    console.say()
-    console.say("  *** BASELINE — START RECORDING NOW ***")
     console.note(step, "the console should show: healthy, a small known lag, and no agent run yet")
-    console.end(step)
-    console.wait("recording? then continue and the fault fires")
+    if record_from_baseline:
+        console.say()
+        console.say("  *** BASELINE — START RECORDING NOW ***")
+        console.end(step)
+        console.wait("recording? then continue and the fault fires")
+    else:
+        console.note(
+            step,
+            "NOT recording yet: the prompt comes once the fault is on screen (step 4). "
+            "`make demo-live … RECORD_FROM=baseline` records from here instead",
+        )
+        console.end(step)
+        console.wait("ready? then the fault fires")
 
     # ---- STEP 3: break it, on a countdown, so the moment is narratable ----------------
-    step = console.begin(3, "inject the fault")
+    step = console.begin(3, "inject the fault, and wait for the platform to show it")
     for remaining in range(_FAULT_COUNTDOWN_SECONDS, 0, -1):
         console.say(f"  fault in {remaining}…")
         time.sleep(1)
@@ -399,17 +508,25 @@ def _walk(
         "that row comes from the platform's chaos audit stream, which the AGENT cannot see "
         "(ADR 0012) — the console sees it because a human operator is allowed to",
     )
+    # The page shows a MEASUREMENT, and the measurement trails the fault. Waiting for it
+    # here is what makes "start recording" in step 4 a promise rather than a hope.
+    _wait_until_the_fault_shows(console, step, args.mode)
     console.end(step)
 
     # ---- STEP 4: prove the fault is real before spending anything on it ---------------
-    step = console.begin(4, "wait for the fault to become visible")
+    step = console.begin(4, "prove the premise the scenario grades against")
     console.note(step, "polling the scenario's own precondition probes")
     _await_precondition(scenario)
     console.say()
     console.say("  *** FAULT VISIBLE ***")
     console.note(step, "the world now satisfies the premise the scenario grades against")
     console.end(step)
-    console.wait("say what is broken, then start the agent")
+    if record_from_baseline:
+        console.wait("say what is broken, then start the agent")
+    else:
+        console.say()
+        console.say("  *** FAULT VISIBLE — START RECORDING NOW ***")
+        console.wait("recording? then say what is broken and start the agent")
 
     # ---- STEP 5: the agent ------------------------------------------------------------
     step = console.begin(5, "run the agent" + (" — PAID" if args.live else " (free rehearsal)"))
@@ -450,10 +567,19 @@ def _walk(
 
     # ---- STEP 6: say what happened, put the world back, prove it -----------------------
     step = console.begin(6, "wind down")
-    traffic.stop(console)
+    run_id = _run_id_of(scenario)
+    if run_id is None:
+        console.note(
+            step,
+            "run id: not derivable (no trace or trajectory for this scenario) — the console "
+            "still has the record; open it as the newest run since the reset",
+        )
+    else:
+        console.note(step, f"run id: {run_id}")
+        console.note(step, f"CONSOLE (this run): {_console_url(args.mode, run_id)}")
     for line in _artifacts(scenario):
         console.note(step, line)
-    _put_the_world_back(console, drained=bool(mode["needs_traffic"]))
+    wind_down.run(console)
     console.say()
     console.say("  *** DONE — STOP RECORDING ***")
     console.end(step)
@@ -518,6 +644,127 @@ def _lag_reading() -> tuple[int | None, bool]:
     return (lag if isinstance(lag, int) else None), bool(payload.get("lag_known"))
 
 
+def _dlq_total() -> tuple[int | None, bool]:
+    """How many rows the dead-letter queue holds, and whether the platform answered.
+
+    Under the SMOKE principal, like ``_lag_reading``: an observation of the world is made
+    by the token that cannot change it.
+    """
+    from evals.runner import _settings_for_mode
+    from evals.world_audit import Probe, read
+    from incident_commander.tools.mcp_client import make_client
+
+    settings = _settings_for_mode(live=True)
+    smoke = settings.platform_smoke_token
+    client = make_client(settings, token=smoke.get_secret_value() if smoke is not None else None)
+    try:
+        reading = read(
+            client,
+            Probe(
+                tool="list_dlq_messages",
+                arguments=(("limit", 50),),
+                origins=("demo-live fault watch",),
+            ),
+        )
+    finally:
+        client.close()
+    payload = reading.payload or {}
+    total = payload.get("total")
+    return (total if isinstance(total, int) else None), reading.ok
+
+
+def _fault_is_visible(mode: str) -> tuple[bool, str]:
+    """Whether the platform's own reading shows this mode's fault, and that reading in words.
+
+    Not the scenario's precondition: that one says the world satisfies the premise the
+    grader will assume. This one says the measurement the console draws from is showing a
+    breach, which is what decides whether the page has anything on it. The DLQ half is
+    compared against ``world_audit``'s audited baseline rather than a number of its own —
+    step 1 gated on that baseline, so a rise above it is the row the hook just wrote.
+    """
+    from evals.world_audit import BASELINE_DLQ_TOTAL
+
+    signal = str(MODES[mode]["fault"])
+    if signal == "consumer_lag":
+        lag, known = _lag_reading()
+        if not known or lag is None:
+            return False, f"worker-dispatcher lag not known yet (lag {lag}, lag_known {known})"
+        return lag >= _FAULT_MIN_LAG, f"worker-dispatcher lag {lag} (want >= {_FAULT_MIN_LAG})"
+    total, ok = _dlq_total()
+    if not ok or total is None:
+        return False, f"DLQ total unreadable (total {total})"
+    return total > BASELINE_DLQ_TOTAL, f"DLQ total {total} (baseline {BASELINE_DLQ_TOTAL})"
+
+
+def _wait_until_the_fault_shows(console: Console, step: Step, mode: str) -> bool:
+    """Hold until the platform's own reading shows the fault. Warns rather than raising.
+
+    A warning and not a failure: the gate that decides whether the agent runs is the
+    scenario's precondition in step 4, and it says so in the words a reader needs. What this
+    wait is for is the OPERATOR — "the page will show this" — so a timeout is information,
+    not a verdict.
+    """
+    deadline = time.monotonic() + _FAULT_VISIBLE_TIMEOUT_SECONDS
+    while time.monotonic() < deadline:
+        visible, reading = _fault_is_visible(mode)
+        if visible:
+            console.note(step, f"the platform's own reading shows the fault: {reading}")
+            return True
+        console.say(f"  waiting for the platform's reading to show the fault ({reading})…")
+        time.sleep(_BASELINE_POLL_SECONDS)
+    console.say(
+        f"  WARNING: the platform's own reading has not shown the fault within "
+        f"{_FAULT_VISIBLE_TIMEOUT_SECONDS}s. The console's chart may still read healthy — "
+        "the precondition below is the gate, and the metric is recomputed on a 60-second "
+        "interval, so read the next line before concluding anything."
+    )
+    return False
+
+
+def _run_id_of(scenario: str) -> str | None:
+    """The run id the console holds for the run that just finished, or ``None``.
+
+    DERIVED the way the reporter derives it (ADR 0068: a UUID5 over the invocation id and
+    the scenario name), from the invocation id the run stamped on its own trace. Never
+    guessed and never read from the platform: the agent cannot read back what it reported,
+    and this script is on the agent's side of that line.
+    """
+    from evals.runner import _reporting_run_id
+
+    invocation = _newest_invocation(scenario)
+    if invocation is None:
+        return None
+    return str(_reporting_run_id(invocation, scenario))
+
+
+def _newest_invocation(scenario: str) -> str | None:
+    """The invocation id of the newest run of ``scenario``, from its trace or trajectory."""
+    trace = _REPO_ROOT / "evals" / "traces" / f"{scenario}.jsonl"
+    if trace.exists():
+        newest: str | None = None
+        with trace.open(encoding="utf-8") as handle:
+            for line in handle:
+                try:
+                    row = json.loads(line)
+                except ValueError:
+                    continue
+                candidate = row.get("invocation_id") if isinstance(row, dict) else None
+                if isinstance(candidate, str) and candidate:
+                    newest = candidate
+        if newest is not None:
+            return newest
+    # No trace (a run with no EVAL_TRACE_DIR): the trajectory carries the same id, and it
+    # is resolved through `artifacts.newest` rather than globbed (invariant 9).
+    from evals import artifacts
+
+    try:
+        path = artifacts.newest("trajectory", scenario)
+        recorded = json.loads(path.read_text(encoding="utf-8")).get("invocation_id")
+    except Exception:  # noqa: BLE001 - a missing id is a printed note, not a failure
+        return None
+    return recorded if isinstance(recorded, str) and recorded else None
+
+
 def _seed(scenario: str) -> list[str]:
     """Fire the scenario's own chaos plan under the chaos principal.
 
@@ -538,7 +785,13 @@ def _seed(scenario: str) -> list[str]:
         records = _seed_chaos_plan(target, target.chaos, settings, None)
     except Exception as err:
         raise DemoFailed(f"seeding {scenario!r} failed: {err}") from err
-    return [f"{record.name}({record.arguments}) -> ok={record.ok}" for record in records]
+    # The hook's own RESULT is printed too, not just that it fired: it names the row the
+    # world now holds (`poison_message` answers with the `dlq_job_id` the console will show)
+    # and, where the TTL was derived, when the fault expires on its own. The operator needs
+    # both to narrate the page — and a demo that says only "ok=True" says nothing checkable.
+    return [
+        f"{record.name}({record.arguments}) -> ok={record.ok} {record.result}" for record in records
+    ]
 
 
 def _await_precondition(scenario: str) -> None:

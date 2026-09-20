@@ -31,10 +31,14 @@ from typing import Any, Final
 
 from evals.artifacts import REPO_ROOT
 from evals.judge_calibration.roles import ACTION_VERIFIER, BRIEFING_JUDGE, CANDIDATE_SELECTOR
+from incident_commander.agent.planner_context import VERIFY_JUDGE_MARKER
 
 #: The evidence entry the ``action_verifier``'s verdict is written to.
-#: Underscore-prefixed by the ledger's convention, which keeps it out of the trail.
-VERDICT_MARKER: Final[str] = "_verify_judge"
+#: Underscore-prefixed by the ledger's convention, which keeps it out of the trail. Taken
+#: from the writer's own constant rather than re-spelled (INC-002): the name lives in
+#: ``agent/planner_context.py`` beside the other ledger markers, and a test used to pin
+#: this copy's equality to it — a pin that is now true by construction.
+VERDICT_MARKER: Final[str] = VERIFY_JUDGE_MARKER
 
 VERIFIED: Final[str] = "verified"
 NOT_VERIFIED: Final[str] = "not_verified"

@@ -46,6 +46,9 @@ from incident_commander.agent.briefing import (
     render_incidents,
 )
 from incident_commander.agent.hypothesis import HypothesisCategory
+from incident_commander.agent.planner_context import (
+    VERIFY_JUDGE_MARKER as _VERIFY_JUDGE_MARKER,
+)
 from incident_commander.agent.state import EvidenceEntry, IncidentState, RunState
 from incident_commander.tools.registry import TOOL_REGISTRY
 
@@ -971,10 +974,13 @@ def _grade_root_cause(
 
 
 #: The ledger entry the ``action_verifier`` writes its verdict to, underscore-prefixed by
-#: the ledger's convention so it stays out of the agent's trail. Written by
-#: ``agent/remediation.py``'s verify loop; a test pins this spelling against both the
-#: writer and ``judge_calibration.track_record``, which reads the same entry.
-VERIFY_JUDGE_MARKER: Final[str] = "_verify_judge"
+#: the ledger's convention so it stays out of the agent's trail. RE-EXPORTED here, not
+#: re-spelled: the name now lives beside the other ledger markers in
+#: ``agent/planner_context.py``, because the product side gained a reader of its own
+#: (``agent/run_reporting.py`` reports each verdict to the console) and INC-002's rule is
+#: that one entry has one spelling. Imported under this module's own name so every
+#: existing reader — including ``judge_calibration.track_record`` — keeps working.
+VERIFY_JUDGE_MARKER: Final[str] = _VERIFY_JUDGE_MARKER
 #: ``VERIFIED_VERDICT`` used to live here — the verdict ADR 0062 graded. O-29 took the
 #: decision off it: the claim graded is now the run ending ``RESOLVED``, which is what the
 #: on-call is told, and the verdict is one judge's reading of one probe on the way there. The

@@ -5855,13 +5855,18 @@ class TestTheFinalDiagnosisIsTheTopCandidate:
         different answer.
         """
         package = Path(__file__).resolve().parents[2] / "src" / "incident_commander"
-        writers = sorted(
+        mentions = sorted(
             path.relative_to(package).as_posix()
             for path in package.rglob("*.py")
             if '"hypotheses":' in path.read_text()
         )
         permitted = [
             "agent/investigation.py",
+            # The one file here that names the field and does NOT write it: the reporter
+            # puts the ranking in a report for the console (ADR 0072, amending ADR
+            # 0068). Checked below rather than trusted, because the scan is a proxy
+            # for "writes the field" and this is its one honest exception.
+            "agent/run_reporting.py",
             "agent/strategies/adaptive.py",
             "agent/strategies/best_of_n_enumerated.py",
             "agent/strategies/best_of_n_sampled.py",
@@ -5869,13 +5874,19 @@ class TestTheFinalDiagnosisIsTheTopCandidate:
             "agent/strategies/reflection.py",
             "agent/strategies/search.py",
         ]
-        assert writers == permitted, (
-            f"the ranking is now written in {writers}; the final diagnosis can no "
+        assert mentions == permitted, (
+            f"the ranking is now named in {mentions}; the final diagnosis can no "
             "longer be read off RunState.hypotheses without checking which write "
             "came last (WO-R3-191, WO-R3-205, WO-R3-206, WO-R3-209, WO-R3-235, "
             "plan 02 § 11.3)."
         )
-        for writer in writers:
+        reporter = (package / "agent" / "run_reporting.py").read_text()
+        assert "model_copy" not in reporter, (
+            "the reporter copied a RunState, so it is no longer only a reader of the "
+            "ranking — and a telemetry module that can write state is a writer whose "
+            "ordering against the planner's nobody has reasoned about."
+        )
+        for writer in [name for name in mentions if name != "agent/run_reporting.py"]:
             once = (package / writer).read_text().count('"hypotheses":')
             assert once == 1, (
                 f"{writer} writes the ranking {once} times. One write per planner "

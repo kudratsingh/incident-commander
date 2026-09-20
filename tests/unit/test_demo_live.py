@@ -37,6 +37,9 @@ class _FakeStack:
         self.preconditions_awaited: list[str] = []
         self.traffic_started = 0
         self.traffic_stopped = 0
+        #: Whether the platform's own reading shows the fault (step 3's wait). True by
+        #: default: a machine test is about the step order, not about a metric's lag.
+        self.fault_visible = True
 
     def run(self, command: Any, **kwargs: Any) -> subprocess.CompletedProcess[str]:
         argv = list(command)
@@ -70,6 +73,15 @@ def stack(monkeypatch: pytest.MonkeyPatch) -> _FakeStack:
     )
     monkeypatch.setattr(demo_live, "_artifacts", lambda scenario: ["trajectory: <fake>"])
     monkeypatch.setattr(demo_live, "_lag_reading", lambda: (0, True))
+    monkeypatch.setattr(
+        demo_live,
+        "_fault_is_visible",
+        lambda mode: (fake.fault_visible, "fake reading"),
+    )
+    # Derived from the newest trace in the real repo otherwise, which is a different test.
+    monkeypatch.setattr(
+        demo_live, "_run_id_of", lambda scenario: "8f14e45f-ceea-567d-b1c0-1a8c7e0f1b2d"
+    )
     # No countdown and no polling in a unit test: the machine's timing is measured in the
     # rehearsal, not asserted here.
     monkeypatch.setattr(time, "sleep", lambda _seconds: None)
@@ -415,9 +427,233 @@ class TestTheModesDescribeRealScenarios:
             )
 
 
+class TestWhenTheRecordingStarts:
+    """The owner's first take: ninety seconds of baseline before anything was on screen."""
+
+    def test_the_default_prompt_comes_after_the_fault_is_visible(
+        self, stack: _FakeStack, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        assert demo_live.main(["--mode", "dlq_backlog", "--auto"]) == 0
+
+        out = capsys.readouterr().out
+        assert "FAULT VISIBLE — START RECORDING NOW" in out
+        assert "BASELINE — START RECORDING NOW" not in out
+        assert "NOT recording yet" in out, "the operator has to be told why no prompt came"
+
+    def test_record_from_baseline_asks_at_the_baseline_instead(
+        self, stack: _FakeStack, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        assert demo_live.main(["--mode", "dlq_backlog", "--auto", "--record-from", "baseline"]) == 0
+
+        out = capsys.readouterr().out
+        assert "BASELINE — START RECORDING NOW" in out
+        assert "FAULT VISIBLE — START RECORDING NOW" not in out
+        assert "FAULT VISIBLE" in out, "the milestone is still printed either way"
+
+    def test_the_choice_is_printed_before_the_first_step(
+        self, stack: _FakeStack, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        assert demo_live.main(["--mode", "dlq_backlog", "--auto"]) == 0
+
+        out = capsys.readouterr().out
+        assert "recording from: fault" in out
+        assert out.index("recording from: fault") < out.index("STEP 1")
+
+    def test_an_unknown_answer_is_refused_at_parse_time(self, stack: _FakeStack) -> None:
+        with pytest.raises(SystemExit):
+            demo_live.main(["--mode", "dlq_backlog", "--auto", "--record-from", "whenever"])
+
+
+class TestStepThreeWaitsForThePlatformsOwnReading:
+    """Not the same claim as the precondition, and the one the page depends on."""
+
+    def test_it_holds_until_the_reading_shows_the_fault(
+        self, stack: _FakeStack, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        readings = iter([(False, "lag 0"), (False, "lag 3"), (True, "lag 23")])
+        monkeypatch.setattr(
+            demo_live, "_fault_is_visible", lambda mode: next(readings, (True, "lag 23"))
+        )
+
+        assert demo_live.main(["--mode", "consumer_outage", "--auto"]) == 0
+
+        out = capsys.readouterr().out
+        assert "waiting for the platform's reading to show the fault (lag 0)" in out
+        assert "the platform's own reading shows the fault: lag 23" in out
+        assert out.index("shows the fault: lag 23") < out.index("STEP 4")
+
+    def test_a_reading_that_never_shows_it_warns_and_leaves_the_gate_to_the_precondition(
+        self, stack: _FakeStack, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        # A warning, not a failure: the precondition is the gate, and it is the one that
+        # says "nothing was run and nothing was graded" in the words a reader needs.
+        stack.fault_visible = False
+        monkeypatch.setattr(demo_live, "_FAULT_VISIBLE_TIMEOUT_SECONDS", 0)
+
+        assert demo_live.main(["--mode", "consumer_outage", "--auto"]) == 0
+
+        out = capsys.readouterr().out
+        assert "WARNING: the platform's own reading has not shown the fault" in out
+        assert stack.preconditions_awaited == ["remediate_consumer_lag_success"]
+
+    def test_the_chaos_row_it_wrote_is_printed(
+        self, stack: _FakeStack, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        # The hook's own result, not just "ok": `poison_message` answers with the row id the
+        # console will show, and the operator narrates from it.
+        monkeypatch.setattr(
+            demo_live,
+            "_seed",
+            lambda scenario: [
+                "poison_message({'fixture_name': 'demo'}) -> ok=True "
+                "{'dlq_job_id': '97d91272-9774-5b8e-980b-f0d2fa6ed619', 'created': True}"
+            ],
+        )
+
+        assert demo_live.main(["--mode", "dlq_backlog", "--auto"]) == 0
+
+        out = capsys.readouterr().out
+        assert "fired: poison_message" in out
+        assert "97d91272-9774-5b8e-980b-f0d2fa6ed619" in out
+
+    def test_every_mode_declares_a_signal_the_watch_knows_how_to_poll(self) -> None:
+        for mode, spec in demo_live.MODES.items():
+            assert spec["fault"] in demo_live.FAULT_SIGNALS, (
+                f"mode {mode} declares fault signal {spec['fault']!r}, which "
+                "`_fault_is_visible` cannot poll — it would silently never show the fault"
+            )
+
+
+class TestTheRunIdAndTheDeepLink:
+    def test_the_finished_run_prints_its_id_and_its_deep_link(
+        self, stack: _FakeStack, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        assert demo_live.main(["--mode", "dlq_backlog", "--auto"]) == 0
+
+        out = capsys.readouterr().out
+        assert "run id: 8f14e45f-ceea-567d-b1c0-1a8c7e0f1b2d" in out
+        assert "/demo?mode=dlq_backlog&run=8f14e45f-ceea-567d-b1c0-1a8c7e0f1b2d" in out
+
+    def test_a_run_whose_id_cannot_be_derived_says_so_rather_than_inventing_one(
+        self, stack: _FakeStack, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        monkeypatch.setattr(demo_live, "_run_id_of", lambda scenario: None)
+
+        assert demo_live.main(["--mode", "dlq_backlog", "--auto"]) == 0
+
+        out = capsys.readouterr().out
+        assert "run id: not derivable" in out
+
+    def test_the_id_is_the_one_the_reporter_itself_derives(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """Derived from the trace's newest invocation id, never guessed (ADR 0068)."""
+        from evals.runner import _reporting_run_id
+
+        traces = tmp_path / "evals" / "traces"
+        traces.mkdir(parents=True)
+        (traces / "demo_scenario.jsonl").write_text(
+            '{"invocation_id": "aaaaaaaaaaaa", "kind": "scenario_start"}\n'
+            '{"invocation_id": "bbbbbbbbbbbb", "kind": "scenario_end"}\n',
+            encoding="utf-8",
+        )
+        monkeypatch.setattr(demo_live, "_REPO_ROOT", tmp_path)
+
+        assert demo_live._run_id_of("demo_scenario") == str(
+            _reporting_run_id("bbbbbbbbbbbb", "demo_scenario")
+        )
+
+    def test_a_scenario_with_no_trace_and_no_trajectory_has_no_id(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        monkeypatch.setattr(demo_live, "_REPO_ROOT", tmp_path)
+
+        assert demo_live._run_id_of("no_such_scenario_anywhere") is None
+
+
+class TestTheWindDownRunsOnceAndAlwaysRuns:
+    def test_the_happy_path_resets_exactly_once(self, stack: _FakeStack) -> None:
+        # Step 6 winds down and the `finally` asks again; the second ask is a no-op, or the
+        # demo would reset a world it had already put back and re-audit it for nothing.
+        assert demo_live.main(["--mode", "dlq_backlog", "--auto"]) == 0
+
+        assert stack.make_targets().count("eval-reset") == 2, (
+            "one reset in step 1 and one in the wind-down"
+        )
+        assert stack.traffic_stopped == 1
+
+    def test_an_interrupt_stops_the_traffic_and_puts_the_world_back(
+        self, stack: _FakeStack, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        def _interrupt(scenario: str) -> None:
+            raise KeyboardInterrupt
+
+        monkeypatch.setattr(demo_live, "_await_precondition", _interrupt)
+
+        assert demo_live.main(["--mode", "consumer_outage", "--auto"]) == 130
+
+        assert "INTERRUPTED by the operator" in capsys.readouterr().out
+        assert stack.traffic_stopped >= 1
+        assert stack.make_targets().count("eval-reset") == 2
+
+    def test_a_second_interrupt_during_the_wind_down_still_resets(
+        self, stack: _FakeStack, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """The gap the owner hit: ctrl-C twice left `make traffic` running.
+
+        The first interrupt lands in the handler; the second lands inside the wind-down
+        itself, which is where the old code had no guard at all.
+        """
+        console = demo_live.Console(auto=True)
+        stops = {"n": 0}
+
+        class _Stubborn(demo_live.TrafficHandle):
+            def stop(self, console: demo_live.Console) -> None:
+                stops["n"] += 1
+                if stops["n"] == 1:
+                    raise KeyboardInterrupt
+                stack.traffic_stopped += 1
+
+        demo_live.WindDown(_Stubborn(), drained=False).run(console)
+
+        out = capsys.readouterr().out
+        assert "interrupted during the wind-down" in out
+        assert stops["n"] == 2 and stack.traffic_stopped == 1
+        assert "eval-reset" in stack.make_targets(), "the world went back on the second try"
+
+    def test_two_interrupts_in_a_row_give_up_loudly_rather_than_quietly(
+        self, stack: _FakeStack, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        console = demo_live.Console(auto=True)
+
+        class _Unstoppable(demo_live.TrafficHandle):
+            def stop(self, console: demo_live.Console) -> None:
+                raise KeyboardInterrupt
+
+        demo_live.WindDown(_Unstoppable(), drained=False).run(console)
+
+        out = capsys.readouterr().out
+        assert "WARNING: interrupted twice during the wind-down" in out
+        assert "make eval-reset" in out, "it must say what the next operator has to run"
+
+    def test_it_refuses_to_run_twice(self, stack: _FakeStack) -> None:
+        console = demo_live.Console(auto=True)
+        wind_down = demo_live.WindDown(demo_live.TrafficHandle(), drained=False)
+
+        wind_down.run(console)
+        wind_down.run(console)
+
+        assert stack.make_targets().count("eval-reset") == 1
+
+
 class TestTheConsoleUrl:
     def test_it_carries_the_mode_the_page_reads(self) -> None:
         assert demo_live._console_url("dlq_backlog").endswith("/demo?mode=dlq_backlog")
+
+    def test_a_run_id_makes_it_a_deep_link(self) -> None:
+        url = demo_live._console_url("dlq_backlog", "aaaaaaaa-0000-5000-8000-000000000000")
+
+        assert url.endswith("/demo?mode=dlq_backlog&run=aaaaaaaa-0000-5000-8000-000000000000")
 
     def test_it_honours_the_port_override(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("DEMO_CONSOLE_HOST_PORT", "3100")

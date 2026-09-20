@@ -1183,9 +1183,10 @@ and on `main` until the other half lands. Bless the new snapshot locally
 from the new pinned stack, then commit the compose bump, the snapshot, and
 any registry realignment together.
 
-Platform ships a new digest → eight steps on the agent side (the sixth arrived
+Platform ships a new digest → nine steps on the agent side (the sixth arrived
 with v0.6.11, the first pin to make an existing tool's output field required; the
-seventh with v0.6.12; the eighth with v0.6.13):
+seventh with v0.6.12; the eighth with v0.6.13; the ninth with v0.6.14, the first
+pin whose re-record would rewrite a graded trajectory):
 
 1. Update `demo/compose.yml` — **all THREE platform-code services**
    (`migrate`, `platform`, `api`) and the prose that names the version:
@@ -1378,6 +1379,33 @@ seventh with v0.6.12; the eighth with v0.6.13):
    minute and run it again. `evals/fixture_probe.py::assert_seeded` catches the
    case where the FIRST call is refused (`UnseededPlatformError: HTTP 429`); a
    refusal partway through is silent.
+
+   v0.6.14 adds the fourth way, and it is the one a busy day produces: **a stack
+   whose last 24 hours are not empty makes a fault fixture look live.**
+   `get_slo_status` computes both objectives over a rolling 24 h of the `jobs`
+   table, and `make eval-reset` does not empty that table — it re-baselines
+   timestamps, which can pull older rows INTO the window. After a day of
+   `make demo-live` rehearsals the live reading was `total: 305, failed: 40,
+   healthy: false, budget_remaining_pct: -100.0`, which is what three fault
+   fixtures can. So three POST_FAULT / CANNED_ONLY ledger rows read "no longer
+   drifts" on this volume while CI's fresh stack, whose `jobs` table is empty,
+   answers `total: 0` and still drifts on all three. Same verdict as the other
+   three flavours — local volume, leave the ledger alone — and the same tell:
+   `new` was empty. Unlike the cold/warm rows these carry NO context word that
+   `classify()` can exempt, because the mechanism is not the stack's warmth; if
+   this recurs on every pin, the honest fix is a `busy-window` context, not a
+   bless.
+
+   One more reading from v0.6.14, on the two tools disagreeing again, because it
+   is now reproducible rather than anecdotal: `make fixture-drift` printed
+   **3** stale rows and `make test-drift` printed **4**, on the same stack,
+   minutes apart, with the same ledger. The fourth is
+   `remediate_stale_cache_success`'s `get_cache_key_info.size`, the single
+   `warm-stack` row, and it appears only in the pytest leg because
+   `scripts/fixture_drift.py` never passes `stack_context` (so the row is
+   exempt as "unknown") while the integration test does and this run read
+   `warm`. Neither tool is wrong. Read the CONTEXT of every row in the stale
+   list before believing any of it.
 5. Re-pin the planner's tool listing, which is the OTHER prompt the agent
    reads:
    ```bash
@@ -1531,6 +1559,58 @@ seventh with v0.6.12; the eighth with v0.6.13):
    prints three fresh tokens; paste all three. A stale token does not error
    loudly — reporting is fail-open, so the run is unharmed and the console simply
    stays empty, which is the failure that looks like a frontend bug.
+
+9. A pin can add an output field to a tool **whose canned planner script argues
+   from the old reading's blind spot**, and v0.6.14 is the first one where that
+   makes the re-record a behaviour change. `get_postgres_health` gained a `pools`
+   group (platform ADR 0033): the flat `pool_*` fields describe only the process
+   that answered, and the group is every process's own reading, so a pool held in
+   the api/worker process is readable from the agent's surface for the first
+   time. Step 4's v0.6.11 rule says write a new field into every fixture that
+   cans the tool. Here that is right and still not the re-pin's job, for a reason
+   worth recognising on sight.
+
+   **Read the canned SCRIPT, not just the canned response.** `postgres_slow`'s
+   script concludes, in its reasoning, its findings and its recommendation, that
+   "this reading cannot say whether any other process's pool is near its limit"
+   and that those pools "have to be read from those processes, because this probe
+   cannot see them". v0.6.14 answers exactly that question. Writing the group
+   into the fixture without rewriting those three sentences ships a world whose
+   evidence contradicts its own analysis; rewriting them edits a canned LLM
+   script, which is a graded trajectory and therefore a behaviour change with its
+   own `make eval-reg` reading. That does not belong in a digest bump. WO-R3-261
+   recorded the same call for v0.6.11's script.
+
+   **So the honest resolution is a ledger row that says it is work, not a
+   justification that says it is not.** The ten rows (five fixtures × `pools` +
+   `pool_gauges_unknown_reason`, kind `live_only_field`) go into `_JUSTIFIED`
+   with context `fixture-defect` — the one context the file's own legend calls
+   work — and `tests/unit/test_fixture_drift.py` now pins that burn-down list BY
+   NAME rather than asserting it is empty. Pinning the names is what keeps the
+   deferral from becoming an absolution: the ten leave when the re-record lands,
+   and anything else appearing there still fails. Choosing `post-fault` or
+   `canned-only` instead would have been the easy green and would have claimed a
+   mechanism that is not there. Also record, for whoever writes the fixture, that
+   `pools[].written_at` and `pools[].reported_age_s` can never be canned (a clock
+   and an age, exactly like `get_circuit_breakers`' `breakers.recorded_at` and
+   `breakers.reported_age_s`) and belong in `_VOLATILE`, while the counters stay
+   guarded.
+
+   **Do not reach for `make fixture-drift-bless` to add rows, even now that it
+   works again** (#318 fixed the context-scoped half). The committed ledger's 173
+   rows are GENERIC four-tuples, from before the format carried an element index,
+   and the bless writes what the walk observed — index-bearing five-tuples. One
+   bless therefore rewrites every row and grows the file to 412 entries, and it
+   drops whatever this run disproved, which on any developer volume includes the
+   local-volume rows CI still needs. Append the new rows in the committed generic
+   form, recompute `_counts`, and leave every prior row byte-identical; the diff
+   should be the new rows plus two count lines and nothing else.
+
+   **The corpus consequence to record rather than fix:** the `api_latency`
+   family's fifth world was dropped because "a held connection pool reads as the
+   healthy control field for field" (ADR 0066). After v0.6.14 it does not — a
+   held pool in the api/worker process now shows up in `pools`. That world is
+   buildable again, which is a scenario decision and not a pin's.
 
 ## Connection pool and run capacity ([ADR 0022](ADR/0022-connection-pool-sizing-and-the-run-concurrency-ceiling.md))
 

@@ -57,8 +57,28 @@ UNRESOLVED_REMAINDER_RULE: Final[str] = (
 )
 
 
+#: WHICH node of a chain an action may name (WO-R3-284, ADR 0070, amending ADR 0032).
+#: The other half of ADR 0070: the guard now admits a node of the alerted chain, and a
+#: guard that admits what no prompt asks for is half a rule — INC-002's failure, and the
+#: reason ADR 0053 § 4 dropped a world rather than ship one side of it. ONE sentence,
+#: because what is prevented is three paraphrases. It names the DISCRIMINATOR (the alerted
+#: job's own chain reading), the two admissible arms, and the three shapes that are never
+#: targets.
+CHAIN_NODE_ACTION_RULE: Final[str] = (
+    "An action about a dependency chain names a node the alerted job's own "
+    "`get_dag_state` reading names — the alerted job itself, or, when that job "
+    "completed and the chain's one dead-letter row belongs to a descendant in "
+    "that same reading, that descendant — because the reading is what makes a "
+    "node part of the incident you were paged for, so an id no reading of the "
+    "alerted chain carries, a node of a different chain, and a dead-letter row "
+    "sitting in the queue that the chain view does not name are each outside "
+    "this incident and are never targets."
+)
+
+
 #: Every shared rule, by the key a prompt file names it with.
 SHARED_RULES: Final[dict[str, str]] = {
+    "chain_node_action": CHAIN_NODE_ACTION_RULE,
     "stuck_chain_root": STUCK_CHAIN_ROOT_RULE,
     "unresolved_remainder": UNRESOLVED_REMAINDER_RULE,
 }

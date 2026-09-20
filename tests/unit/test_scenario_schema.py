@@ -893,6 +893,10 @@ class TestShippedScenariosRoundTripToPlans:
             "temporal_ttl_recovers_before_action",
             "temporal_ttl_recovers_during_verify",
             "workflow_stuck_dead_lettered_root",
+            # WO-R3-284 (ADR 0070): the family's fifth world. One hook, like world 1 and
+            # the control, and the composable form for the family's reason — every world
+            # of it declares a plan, so the alert and the settle window stay one shape.
+            "workflow_stuck_downstream_child_failed",
             "workflow_stuck_healthy_chain",
             "workflow_stuck_paused_dag",
             "workflow_stuck_resolver_stall",
@@ -1111,10 +1115,10 @@ class TestTheGraderSideCanReadTheAnswerKey:
     def test_coverage_is_reportable_over_the_whole_corpus(self) -> None:
         corpus = load_scenarios(_SCENARIOS_DIR)
         graded = [s.name for s in corpus if s.root_cause_graded]
-        # 53 of 62 carry a ground-truth label (ADR 0038 makes one mandatory); the other
+        # 54 of 63 carry a ground-truth label (ADR 0038 makes one mandatory); the other
         # nine are recorded abstentions, pinned by test_ground_truth_corpus.py.
-        assert len(graded) == 53
-        assert len(corpus) >= 62
+        assert len(graded) == 54
+        assert len(corpus) >= 63
 
 
 class TestTheAgentVisibleProjection:

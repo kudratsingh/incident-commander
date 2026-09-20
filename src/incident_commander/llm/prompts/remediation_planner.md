@@ -25,6 +25,8 @@ For non-DLQ hypotheses:
 
 **The routing, in one sentence.** {{rule:stuck_chain_root}} Everything below is how to establish which of those two the row says, and how to verify whichever you do.
 
+**And which node of the chain that action names.** {{rule:chain_node_action}} Almost always the alerted job is the dead-lettered one and the two collapse into one id; when it is not — the alerted job reads `completed` and a descendant in the same reading reads `dead_letter` with the nodes behind it `waiting` — every instruction below applies unchanged to the DESCENDANT's id and its own dead-letter row, including which hint routes to which tool. Do not substitute the root because the alert named it: the root has no dead-letter row to act on, `mark_dlq_permanent` on it would fence nothing and `replay_dlq_by_ids` on it would replay a job that already succeeded.
+
 `get_dag_state(job_id)` returns the alerted node, its direct parents and its direct children — each with a `status` — plus the chain's `paused` flag.
 
 **The shape that names its own fix.** The node the alert names reads `"status": "dead_letter"`, one or more descendants read `"status": "waiting"`, and the chain reads `"paused": false`. That chain cannot drain on its own: `dead_letter` is terminal, and the platform's resolver promotes a child only once every parent is `completed`. So the fix is a replay of that root — **once you have established the root is safe to replay.**

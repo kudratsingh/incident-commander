@@ -206,6 +206,84 @@ _JUSTIFIED: Final[dict[tuple[object, ...], tuple[str, str]]] = {
         "elements are absent from the un-faulted reading for the reason above, so both "
         "share this row",
     ),
+    # The family's FIFTH world (WO-R3-284, ADR 0070), same chain and therefore the same
+    # six absences: `create_stuck_dag` derives every id from `chain_name`, so in the
+    # un-faulted world the job the alert names does not exist and `get_dag_state` answers
+    # "job not found". Its fixture is a SINGLE element, because a fence leaves the chain
+    # byte-identical (`saga_stuck` measured that), so there is no second half to explain.
+    (
+        "workflow_stuck_downstream_child_failed",
+        "get_dag_state",
+        "edges",
+        "canned_only_field",
+    ): (
+        POST_FAULT,
+        "create_stuck_dag seeds the workflow-stuck-eval chain and derives its ids from the "
+        "chain_name, so the un-faulted world the check probes answers 'job not found' and "
+        "carries no edges at all — the dependency edges between them. This world is the "
+        "root completed over a DEAD-LETTERED descendant",
+    ),
+    (
+        "workflow_stuck_downstream_child_failed",
+        "get_dag_state",
+        "nodes",
+        "canned_only_field",
+    ): (
+        POST_FAULT,
+        "create_stuck_dag seeds the workflow-stuck-eval chain and derives its ids from the "
+        "chain_name, so the un-faulted world the check probes answers 'job not found' and "
+        "carries no nodes at all — the completed upstream, the completed root, and the "
+        "dead-lettered descendant below it. This world is the root completed over a "
+        "DEAD-LETTERED descendant",
+    ),
+    (
+        "workflow_stuck_downstream_child_failed",
+        "get_dag_state",
+        "paused",
+        "canned_only_field",
+    ): (
+        POST_FAULT,
+        "create_stuck_dag seeds the workflow-stuck-eval chain and derives its ids from the "
+        "chain_name, so the un-faulted world the check probes answers 'job not found' and "
+        "carries no paused at all — the chain's pause flag. This world is the root "
+        "completed over a DEAD-LETTERED descendant",
+    ),
+    (
+        "workflow_stuck_downstream_child_failed",
+        "get_dag_state",
+        "paused_by",
+        "canned_only_field",
+    ): (
+        POST_FAULT,
+        "create_stuck_dag seeds the workflow-stuck-eval chain and derives its ids from the "
+        "chain_name, so the un-faulted world the check probes answers 'job not found' and "
+        "carries no paused_by at all — the pause's holder. This world is the root completed "
+        "over a DEAD-LETTERED descendant",
+    ),
+    (
+        "workflow_stuck_downstream_child_failed",
+        "get_dag_state",
+        "paused_expires_in_seconds",
+        "canned_only_field",
+    ): (
+        POST_FAULT,
+        "create_stuck_dag seeds the workflow-stuck-eval chain and derives its ids from the "
+        "chain_name, so the un-faulted world the check probes answers 'job not found' and "
+        "carries no paused_expires_in_seconds at all — the pause's countdown. This world is "
+        "the root completed over a DEAD-LETTERED descendant",
+    ),
+    (
+        "workflow_stuck_downstream_child_failed",
+        "get_dag_state",
+        "seed_id",
+        "canned_only_field",
+    ): (
+        POST_FAULT,
+        "create_stuck_dag seeds the workflow-stuck-eval chain and derives its ids from the "
+        "chain_name, so the un-faulted world the check probes answers 'job not found' and "
+        "carries no seed_id at all — the root job id the chain is named for. This world is "
+        "the root completed over a DEAD-LETTERED descendant",
+    ),
     ("workflow_stuck_resolver_stall", "get_dag_state", "edges", "canned_only_field"): (
         POST_FAULT,
         "create_stuck_dag seeds the workflow-stuck-eval chain and derives its ids from the "
@@ -379,6 +457,43 @@ _JUSTIFIED: Final[dict[tuple[object, ...], tuple[str, str]]] = {
         "four boot-seeded ones. The three sibling worlds seed root_status=completed and "
         "dead-letter nothing, so their canned 4 matches live and needs no entry",
     ),
+    # The fifth world puts a row in the queue too, and it is the DESCENDANT's rather than
+    # the root's (WO-R3-284, ADR 0070). Its `list_dlq_messages` fixture is SEQUENCED —
+    # element 0 pre-fence, element 1 the post-fence verify read — and each key gets ONE
+    # line with no index, the same convention the get_dag_state blocks above use: both
+    # elements are absent from the un-faulted reading for the same reason, so a second row
+    # would record one fact twice. The fence's own `fenced_at`/`fenced_by` do not appear
+    # here at all, because `_VOLATILE` checks the DLQ clocks for type rather than value.
+    (
+        "workflow_stuck_downstream_child_failed",
+        "list_dlq_messages",
+        "items[].id[]",
+        "not_live_reachable",
+    ): (
+        POST_FAULT,
+        "the chain's step-1 id is uuid5-derived from the chain_name and exists only after "
+        "create_stuck_dag has fired, so no un-faulted reading of the DLQ contains it — the "
+        "same absence already recorded for its get_dag_state.seed_id, one node lower. Both "
+        "elements of the sequenced fixture carry it",
+    ),
+    (
+        "workflow_stuck_downstream_child_failed",
+        "list_dlq_messages",
+        "items[].trace_id[]",
+        "not_live_reachable",
+    ): (
+        POST_FAULT,
+        "create_stuck_dag stamps step-1's trace_id from the same namespace and chain_name "
+        "(88378353…), so it appears and disappears with the row itself; both elements of "
+        "the sequenced fixture carry it",
+    ),
+    ("workflow_stuck_downstream_child_failed", "list_dlq_messages", "total", "value"): (
+        POST_FAULT,
+        "create_stuck_dag dead-letters the workflow-stuck-eval chain's step-1 under a root "
+        "that succeeded, so the faulted world holds five DLQ rows where the un-faulted world "
+        "the check probes holds the four boot-seeded ones. Same asymmetry as world 1 and for "
+        "the same reason, one node lower; both elements of the sequenced fixture read 5",
+    ),
     # `search_traces(status="waiting")` in the three stranded worlds. This absence is
     # environment-wide, not scoped to the chain: platform ADR 0029 measured that a warm
     # stack has no waiting row ANYWHERE to borrow, which is why the chain is
@@ -416,6 +531,43 @@ _JUSTIFIED: Final[dict[tuple[object, ...], tuple[str, str]]] = {
         POST_FAULT,
         "create_stuck_dag stamps each descendant's trace_id from the same namespace and "
         "chain_name, so the two trace ids appear and disappear with the rows themselves",
+    ),
+    # The fifth world's held set is ONE row where the stranded worlds' is two, because its
+    # step-1 is dead rather than waiting — so the ids differ from its siblings' and the
+    # absence is still the same absence (WO-R3-284).
+    (
+        "workflow_stuck_downstream_child_failed",
+        "search_traces",
+        "matches[].job_id[]",
+        "not_live_reachable",
+    ): (
+        POST_FAULT,
+        "step-2 is uuid5-derived from the chain_name and exists only after create_stuck_dag "
+        "has fired, so its id is in no un-faulted reading. Here it is the ONLY waiting row "
+        "of the chain, held behind a dead-lettered sibling rather than behind the root",
+    ),
+    (
+        "workflow_stuck_downstream_child_failed",
+        "search_traces",
+        "matches[].status[]",
+        "not_live_reachable",
+    ): (
+        POST_FAULT,
+        "the canned value is `waiting`, and a warm un-faulted stack has no waiting row "
+        "anywhere — platform ADR 0029 measured that while building these hooks. The live "
+        "reading offers completed, dead_letter and failed, and none of them is a "
+        "disagreement about a value: the status this fixture pins cannot be reached without "
+        "the fault",
+    ),
+    (
+        "workflow_stuck_downstream_child_failed",
+        "search_traces",
+        "matches[].trace_id[]",
+        "not_live_reachable",
+    ): (
+        POST_FAULT,
+        "create_stuck_dag stamps step-2's trace_id from the same namespace and chain_name, "
+        "so it appears and disappears with the row itself",
     ),
     (
         "workflow_stuck_resolver_stall",

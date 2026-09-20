@@ -4,6 +4,7 @@
 * Date: 2026-09-08
 * Decider: Kudrat Singh
 * Supersedes nothing. Extends [ADR 0031](0031-an-alerted-dlq-category-is-the-incident.md), and corrects one consequence of it.
+* **Amended 2026-09-19 by [ADR 0070](0070-a-chain-action-may-name-the-node-the-alerted-chains-own-reading-names.md)** (WO-R3-284): the RESOURCE row of the target table below gains a second admissible shape — an action whose every resource is a node of the graph the subject ROOTS, per a reading the run already holds. Nothing here is withdrawn and no plan this record refuses is admitted but that one. The pointer, not a rewrite.
 
 ## Context and problem statement
 

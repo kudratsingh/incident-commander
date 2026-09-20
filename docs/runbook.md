@@ -145,7 +145,7 @@ is a documented substring override, and neither path spends or shares state).
 
 Trace files land in `evals/traces/*.jsonl`; the formatter turns them into readable stepwise trajectories in `evals/reports/human/<scenario>/*.txt` — one folder per scenario, and one new file per run, not one per scenario per run (WO-R3-257). `evals/reports/README.md` maps the whole folder.
 
-**Cost:** roughly $0.05 per read-only scenario, $0.07 per remediation scenario. Current suite of 62 (~48 live: 34 read-only, 14 remediation) is ~$2.68 of tokens end to end — but never in one invocation, for the reason above. A smoke pass is ~$1.15 of that; the remediation scenarios are the rest, paid one run at a time.
+**Cost:** roughly $0.05 per read-only scenario, $0.07 per remediation scenario. Current suite of 63 (~49 live: 34 read-only, 15 remediation) is ~$2.75 of tokens end to end — but never in one invocation, for the reason above. A smoke pass is ~$1.15 of that; the remediation scenarios are the rest, paid one run at a time.
 
 **Side effects:** remediation scenarios fire real Tier-1 mutations against the platform. Idempotent — repeat runs with the same `(incident_id, tool, args)` hash return the cached result. But the *first* run of a scenario does apply changes.
 

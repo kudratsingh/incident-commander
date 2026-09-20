@@ -1,0 +1,220 @@
+name: planner_confirms_forever
+family: harness_control
+difficulty: control
+description: 'INC-004, reproduced. The planner holds the right answer above the remediate
+  threshold and asks to re-read the alerted signal at every step. Two prompt rules ask for a
+  confirming re-read — "re-read the alerted signal before you conclude" (ADR 0009) and "re-read
+  the resource immediately before you act" (ADR 0071) — and neither says how many times, so a
+  model that takes one more reading every step satisfies both forever and the state machine
+  never reaches its remediate gate. Before ADR 0073 this run spent all five steps on readings of
+  one consumer group and escalated with nothing done and an escalation reason that named no
+  cause. After it, the third reading is refused with the two moves that remain, the fourth ask
+  is refused again, and the run hands off naming what it concluded and what it read.
+
+  '
+tags:
+- phase-2
+- investigation
+- loop-guard
+- canned
+- sad-path
+- inc-004
+# Canned, and for a reason no live world can supply: the premise is a PLANNER that never
+# decides, which is a property of the model's own output and not of any world. A live run
+# reproduces it only by accident (it did, once, and cost $0.21), and a scripted planner
+# reproduces it every time — which is what a regression gate needs. `use_live_llm` false for
+# the same reason: the script IS the fault under test.
+use_live_mcp: false
+use_live_llm: false
+alert:
+  source: platform.kafka
+  severity: critical
+  fingerprint: consumer_stalled
+  group: worker-dispatcher
+  summary: 'worker-dispatcher stopped processing; lag climbing with the group assignment
+    retained'
+canned_tool_responses:
+  # Three readings in run order, the last repeating. The first two are the run's legitimate
+  # reads: the investigation of the alerted signal, then the confirming re-read both prompt
+  # rules ask for. Both are v0.6.7-shaped (plat #204) — `measured_at`, `age_seconds` and the
+  # recent samples are what let a reading say the fault is present NOW rather than at some
+  # unknown time, which is the whole reason the guard can be sure a third read adds nothing.
+  #
+  # The THIRD element is the reading ADR 0073 refuses, and it is here so the red this scenario
+  # reproduces is honest: before the guard the run took it, and it showed the fault still
+  # present — the same measurement re-served with its age grown from 3s to 11s, exactly what
+  # the live run read at 12:40:17Z. A correct run never consumes it.
+  get_consumer_lag:
+  - content:
+    - type: text
+      text: '{"consumer_group":"worker-dispatcher","lag":20,"lag_known":true,"source":"live","cache_key":"kafka:consumer_lag:worker-dispatcher","measured_at":"2026-09-20T12:39:06Z","age_seconds":55,"recent_samples":[{"lag":20,"measured_at":"2026-09-20T12:39:06Z"},{"lag":0,"measured_at":"2026-09-20T12:38:05Z"}]}'
+    is_error: false
+  - content:
+    - type: text
+      text: '{"consumer_group":"worker-dispatcher","lag":39,"lag_known":true,"source":"live","cache_key":"kafka:consumer_lag:worker-dispatcher","measured_at":"2026-09-20T12:40:06Z","age_seconds":3,"recent_samples":[{"lag":39,"measured_at":"2026-09-20T12:40:06Z"},{"lag":20,"measured_at":"2026-09-20T12:39:06Z"},{"lag":0,"measured_at":"2026-09-20T12:38:05Z"}]}'
+    is_error: false
+  - content:
+    - type: text
+      text: '{"consumer_group":"worker-dispatcher","lag":39,"lag_known":true,"source":"live","cache_key":"kafka:consumer_lag:worker-dispatcher","measured_at":"2026-09-20T12:40:06Z","age_seconds":11,"recent_samples":[{"lag":39,"measured_at":"2026-09-20T12:40:06Z"},{"lag":20,"measured_at":"2026-09-20T12:39:06Z"},{"lag":0,"measured_at":"2026-09-20T12:38:05Z"}]}'
+    is_error: false
+canned_llm_responses:
+  # Five steps, five reads of the same group, and the confidences are the live run's own
+  # numbers: 0.80, 0.72, 0.82, 0.85, 0.82. Every one of them is at or above the 0.7 remediate
+  # threshold in a category with a Tier-1 fix, so on every one of them a `remediate` would have
+  # been let through — and every one of them emits `probe` instead. Nothing in the script is
+  # exaggerated for the test; the reasoning strings are the live ones' argument.
+  investigation_planner:
+  - hypotheses:
+    - category: consumer_saturation
+      name: worker-dispatcher-consumer-stalled-lag-climbing
+      confidence: 0.8
+      reasoning: 'The alert says worker-dispatcher stopped processing with climbing lag and a
+        retained group assignment, which is the canonical saturation signal. Read the group''s
+        own lag first.
+
+        '
+    next_action:
+      kind: probe
+      tool_name: get_consumer_lag
+      arguments:
+        consumer_group: worker-dispatcher
+  - hypotheses:
+    - category: consumer_saturation
+      name: worker-dispatcher-lag-20-climbing
+      confidence: 0.72
+      reasoning: 'Lag went 0 to 20 in about a minute with the assignment retained. The reading
+        is 55s old, so take one fresh one before concluding.
+
+        '
+    next_action:
+      kind: probe
+      tool_name: get_consumer_lag
+      arguments:
+        consumer_group: worker-dispatcher
+    # From here on the run is asking for readings it already has. The ranking has not moved,
+    # the newest reading is 3 seconds old and says 39, and each step's stated reason for
+    # reading again is one of the two prompt rules — which is the failure: both are satisfied
+    # and neither says so.
+  - hypotheses:
+    - category: consumer_saturation
+      name: worker-dispatcher-lag-climbing-39-and-growing
+      confidence: 0.82
+      reasoning: 'Lag is 0, 20, 39 across three samples: the group is stalled. Re-read the
+        alerted signal once more before concluding.
+
+        '
+    next_action:
+      kind: probe
+      tool_name: get_consumer_lag
+      arguments:
+        consumer_group: worker-dispatcher
+  - hypotheses:
+    - category: consumer_saturation
+      name: worker-dispatcher-lag-climbing-39-sustained
+      confidence: 0.85
+      reasoning: 'Three consecutive readings confirm the stall. Confirm the resource is still
+        faulted immediately before acting on it.
+
+        '
+    next_action:
+      kind: probe
+      tool_name: get_consumer_lag
+      arguments:
+        consumer_group: worker-dispatcher
+  - hypotheses:
+    - category: consumer_saturation
+      name: worker-dispatcher-lag-climbing-39-and-growing
+      confidence: 0.82
+      reasoning: 'Still the same answer. One more reading of the group to be sure the backlog
+        has not moved.
+
+        '
+    next_action:
+      kind: probe
+      tool_name: get_consumer_lag
+      arguments:
+        consumer_group: worker-dispatcher
+  briefing_writer:
+  - findings: 'worker-dispatcher''s lag was read twice — 20 with the measurement 55s old, then
+      39 measured 3s earlier, with the group assignment retained — and consumer_saturation was
+      ranked first at 0.82 throughout. No remediation was taken: two further readings of the
+      same group were refused, and the run was handed off rather than spending more steps
+      re-reading a backlog it had already measured.
+
+      '
+    recommendation: 'Restart the worker-dispatcher consumer group, or check why it holds its
+      assignment without consuming; the backlog was 39 and rising at handoff. No Tier-1 action
+      was taken here, so nothing needs checking for effect.
+
+      '
+  briefing_judge:
+  - groundedness: 0.9
+    actionability: 0.85
+    reasoning: 'Findings quote both readings with their ages and name the cause the run ranked
+      first, and say plainly that no action was taken; the recommendation points at the group
+      the alert named rather than at anything the trail does not carry.
+
+      '
+expectation:
+  name: planner_confirms_forever
+  # ESCALATED before and after, and the terminal state is deliberately NOT the discriminator:
+  # a planner that will not decide cannot be made to act, and a loop that decided FOR it would
+  # be taking a Tier-1 write nobody asked for. What the guard changes is that the run stops
+  # paying for readings it already has and hands off saying what it concluded — so the claims
+  # below are about the refusal, the reads and the reason.
+  expected_terminal_state: escalated
+  expected_evidence_contains:
+  # The refusal's own words (F-007: a terminal state alone passes for any cause). Before
+  # ADR 0073 no such entry exists — the third read simply executes — so these three lines are
+  # the red-before/green-after of this scenario.
+  - 'probe refused: this run has already read'
+  - is not more evidence
+  # The cap: the planner asked a third time after two refusals and the run handed off rather
+  # than spending a fourth step on the same reading.
+  - 3 times after being refused
+  # And the handoff says what the run concluded. INC-004's briefing recommended checking an
+  # SMTP relay it had no evidence for, because the reason it was handed named no cause.
+  - "the top hypothesis was 'consumer_saturation'"
+  expected_evidence_fields:
+  # The anti-vacuity half: the run DID read the fault. Without this the claims above pass for
+  # a run that never read the group at all.
+  - tools: [get_consumer_lag]
+    field: lag
+    which: last
+    equals: 39
+  # The bound itself, read off the trail. The newest reading of the group is the second one
+  # (age 3s); the third fixture element — the same measurement re-served at 11s — is never
+  # consumed, because the read that would have consumed it was refused. Before the guard the
+  # newest reading is that third element and this claim fails on 11 != 3.
+  - tools: [get_consumer_lag]
+    field: age_seconds
+    which: last
+    equals: 3
+  # The briefing carries the bound's reason, not the writer's word for it (ADR 0065's shape).
+  expect_briefing_contains:
+  - is not more evidence
+  - consumer_saturation
+  # Every Tier-1 tool, derived per ADR 0033 from an EMPTY sanctioned set: this run's correct
+  # trajectory takes no action, because the planner never proposes one. A loop that answered a
+  # refused read by acting on the ranking itself would trip all seven.
+  forbidden_action_tools:
+  - restart_consumer_group
+  - invalidate_cache_key
+  - pause_dag
+  - replay_dlq_messages
+  - replay_dlq_by_ids
+  - replay_dlq_by_category
+  - mark_dlq_permanent
+  # 2 calls on a correct canned run: the investigation read and the one confirming re-read.
+  # 5 before ADR 0073, one per step. The cap is 6 rather than 2 on purpose — a budget that
+  # stopped the old run would make the BUDGET dimension the discriminator and hide what this
+  # scenario is about, so both runs have room to spare and the only difference between them is
+  # the guard.
+  max_tool_calls: 6
+
+# No `ground_truth`, deliberately, and `may_abstain` admits it on the family
+# (tests/unit/test_ground_truth_corpus.py). The world's fault is real — a consumer group with a
+# climbing backlog — and the planner names it correctly at every step, which is the PREMISE
+# here rather than the subject: what is under test is the loop's bound on confirming reads, and
+# a ROOT_CAUSE grade would score the script for agreeing with the fixture it was written
+# beside. `planner_stops_immediately` abstains for the same class of reason.

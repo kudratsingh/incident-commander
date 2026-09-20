@@ -124,7 +124,7 @@ shared platform, with real spend and no reset between scenarios; run one at a
 time with a reset between, the full protocol is below.
 
 (Until 2026-09 neither refusal existed. A bare `make eval-live` was stopped
-only by the exit-8 canned-only gate, which fires because 14 scenarios declare
+only by the exit-8 canned-only gate, which fires because 15 scenarios declare
 no live leg — a fact about `evals/scenarios/`, not about the command, and one
 that would stop being true the moment every one of them gained a live leg.
 That count is written down here and nowhere else: the runner and the tests
@@ -145,7 +145,7 @@ is a documented substring override, and neither path spends or shares state).
 
 Trace files land in `evals/traces/*.jsonl`; the formatter turns them into readable stepwise trajectories in `evals/reports/human/<scenario>/*.txt` — one folder per scenario, and one new file per run, not one per scenario per run (WO-R3-257). `evals/reports/README.md` maps the whole folder.
 
-**Cost:** roughly $0.05 per read-only scenario, $0.07 per remediation scenario. Current suite of 63 (~49 live: 34 read-only, 15 remediation) is ~$2.75 of tokens end to end — but never in one invocation, for the reason above. A smoke pass is ~$1.15 of that; the remediation scenarios are the rest, paid one run at a time.
+**Cost:** roughly $0.05 per read-only scenario, $0.07 per remediation scenario. Current suite of 64 (~49 live: 34 read-only, 15 remediation) is ~$2.75 of tokens end to end — but never in one invocation, for the reason above. A smoke pass is ~$1.15 of that; the remediation scenarios are the rest, paid one run at a time.
 
 **Side effects:** remediation scenarios fire real Tier-1 mutations against the platform. Idempotent — repeat runs with the same `(incident_id, tool, args)` hash return the cached result. But the *first* run of a scenario does apply changes.
 

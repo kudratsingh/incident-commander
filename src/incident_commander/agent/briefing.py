@@ -12,6 +12,7 @@ from typing import Any, Final
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from incident_commander.agent.attribution import AttributionRead, attribution_of
 from incident_commander.agent.incidents import IncidentSlot, IncidentSlots, incident_slots
 from incident_commander.agent.investigation import REMEDIATE_CONFIDENCE_THRESHOLD
 from incident_commander.agent.planner_context import render_already_attempted
@@ -135,6 +136,32 @@ def _named_slot(slot: IncidentSlot) -> str:
     return f"{slot.category.value} / {slot.name} (confidence {slot.confidence:.2f})"
 
 
+#: How the attribution slot opens (O-29, ADR 0071). Named for the reason the two headings above
+#: are: ``render_attribution`` writes it, the deterministic grader searches the text it heads,
+#: and the shared prompt rule is about the block under it.
+ATTRIBUTION_HEADING: Final = "Recovery attribution (from this run's own readings):"
+
+
+def render_attribution(read: AttributionRead | None) -> list[str]:
+    """The attribution block, as both LLM readers are shown it.
+
+    One rendering for the briefing writer and the briefing judge, so the two cannot drift
+    (INC-002). Empty for a run with no verdict — which is every run whose resource no declared
+    reading can observe and every run that read no recovery at all, so their contexts stay
+    byte-identical to what they were before this block existed (ADR 0065's property).
+    """
+    if read is None:
+        return []
+    lines = [
+        ATTRIBUTION_HEADING,
+        f"  - VERDICT: {read.verdict.value} — {read.resource} read through {read.probe_tool}",
+        f"  - WHY: {read.detail}.",
+    ]
+    if read.sentence:
+        lines.append(f"  - REPORT IT AS: {read.sentence}.")
+    return lines
+
+
 class AttemptedAction(BaseModel):
     """A Tier-1 action that was invoked before the agent escalated.
 
@@ -161,6 +188,10 @@ class EscalationBriefing(BaseModel):
     # here, from its own ranking and its own attempts, whatever the writer goes on to say
     # (WP-11.3, ADR 0065). Empty for a run that produced no ranking.
     incidents: IncidentSlots = Field(default_factory=IncidentSlots)
+    # Structural for the same reason one slot up (O-29, ADR 0071): whether the recovery this
+    # run read is its own action's is a statement about two readings, so it is computed from
+    # them and not left to the writer. ``None`` for a run that claims no recovery.
+    attribution: AttributionRead | None = None
     investigation_trail: tuple[ProbeSummary, ...] = ()
     findings: str = ""
     recommendation: str = ""
@@ -177,6 +208,7 @@ def render_briefing(run_state: RunState) -> EscalationBriefing:
         escalation_reason=_escalation_reason(terminal_marker, run_state.evidence),
         attempted_action=_attempted_action(terminal_marker),
         incidents=incidents_of(run_state),
+        attribution=attribution_of(run_state),
         # ``trail_of`` filters out the escalation marker; the reason it carries
         # is read back out above into its own field, never faked as a probe.
         investigation_trail=trail_of(run_state.evidence),

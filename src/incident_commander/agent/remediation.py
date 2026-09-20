@@ -22,6 +22,13 @@ from incident_commander.agent.accounting import (
     accrue_llm_error,
     accrue_structured_call,
 )
+from incident_commander.agent.attribution import (
+    CLEARED_ON_ITS_OWN_SENTENCE,
+    RecoveredReading,
+    already_recovered,
+    readings_of,
+    render_reading,
+)
 from incident_commander.agent.hypothesis import Hypothesis, ReadToolName
 from incident_commander.agent.investigation import (
     FIX_MAP,
@@ -130,6 +137,11 @@ _PLAN_REFUSED_ARGUMENT_MARKER: Final[str] = "_plan_refused_argument"
 # Fifth marker (ADR 0032). Carries the alert field naming the subject, its value and the target
 # test that failed, so an archive can be asked "was the action even aimed at the incident?".
 _PLAN_REFUSED_SUBJECT_TARGET_MARKER: Final[str] = "_plan_refused_subject_target"
+# Sixth marker (O-29, ADR 0071), and the one refusal here that is TERMINAL: the fault the action
+# would fix already reads gone in this run's own newest reading of the resource, so there is no
+# re-plan to ask for. It names itself for the reason the five above do — an archive has to be
+# able to ask "why did this run act on nothing?" — and carries the reading that decided it.
+_PLAN_REFUSED_CLEARED_MARKER: Final[str] = "_plan_refused_cleared_before_action"
 
 # The failed attempt itself (ADR 0056) is ``planner_context.ATTEMPT_FAILED_MARKER``, named
 # there because both planner contexts render it. Underscore-prefixed like every other marker,
@@ -143,6 +155,10 @@ _ATTEMPT_READING_CHARS: Final[int] = 400
 # Every marker ``_format_plan_context`` must render whole and last. Derived membership, not a
 # match on one name: the renderer once matched ``_PLAN_REFUSED_MARKER`` alone, so a refusal
 # under any other name was cut by the 200-character truncation. A new shape must be added here.
+#
+# ``_PLAN_REFUSED_CLEARED_MARKER`` is deliberately NOT a member: that refusal escalates in the
+# same transition, so no planner ever reads a context it could be rendered into, and listing it
+# would promise a steer this guard does not give (O-29's answer there is "do not act at all").
 _PLAN_REFUSAL_MARKERS: Final[frozenset[str]] = frozenset(
     {
         _PLAN_REFUSED_MARKER,
@@ -467,8 +483,9 @@ def make_llm_plan(
     """Bind the LLM to the PLANNING transition: hypothesis + evidence → a ``RemediationPlan``.
 
     Non-Tier-1 actions are rejected, then every pre-execution guard runs (ADR 0024): three
-    escalate, and five refuse and re-ask once (ADR 0030, 0032, 0027, 0028, 0025).
-    ``max_attempts`` is ``MAX_REMEDIATION_ATTEMPTS`` (ADR 0056).
+    escalate, five refuse and re-ask once (ADR 0030, 0032, 0027, 0028, 0025), and one refuses
+    under its own name and escalates in the same breath, because its finding is that no action
+    is left to take (ADR 0071). ``max_attempts`` is ``MAX_REMEDIATION_ATTEMPTS`` (ADR 0056).
     """
 
     def transition_plan(run_state: RunState, at: datetime) -> RunState:
@@ -579,6 +596,17 @@ def make_llm_plan(
                         "aimed at the alert's subject; nothing was executed",
                     )
                 continue
+
+            # SECOND, and the only guard here that never re-asks (O-29, ADR 0071): is the
+            # fault this action would fix still there? After the subject guard, because on a
+            # plan aimed at the wrong resource this question would be asked of furniture; and
+            # before the three read-before-act guards, because "there is nothing left to do"
+            # outranks every question about how well the doing was prepared. The owner's
+            # answer when the resource already reads healthy is not a better plan, it is no
+            # plan: report that it cleared on its own and escalate, cause unknown.
+            cleared = _cleared_before_action(plan, run_state)
+            if cleared is not None:
+                return _refuse_cleared_before_action(run_state, at, plan, cleared)
 
             # Before the verify-leg guard, by priority: "should this action happen at
             # all" outranks "how would you check it". The other order would send the
@@ -1509,6 +1537,82 @@ def _unaddressed_alert_subject(plan: RemediationPlan, run_state: RunState) -> Su
         f"categories belong in the briefing so a human knows what is still there; they "
         f"are not this incident, and acting on one leaves the alerted slice untouched.",
     )
+
+
+class ClearedMiss(NamedTuple):
+    """A plan whose own resource already reads recovered (O-29, ADR 0071).
+
+    Returned by ``_cleared_before_action``; ``reason`` is what the refusal records and what
+    the escalation carries to the briefing, so the on-call reads one sentence, not two.
+    """
+
+    resource: str
+    """The resource the action would have touched."""
+    reading: RecoveredReading
+    """The declared predicate that read it recovered — named so the refusal is checkable."""
+    rendered: str
+    """That reading rendered as the call it was."""
+    reason: str
+    """The sentence the refusal and the escalation are both built from."""
+
+
+def _cleared_before_action(plan: RemediationPlan, run_state: RunState) -> ClearedMiss | None:
+    """The fault this plan would fix, already gone in the run's newest reading of it.
+
+    ``None`` means the plan may proceed. Inert wherever the question cannot be answered from a
+    reading: no declared ``RECOVERED_READING`` for the resource's probe (every entry and its
+    reason are in ``agent/attribution.py``), no reading of that resource in this run, or a
+    reading that shows the fault present. NOT inert when the newest reading reads recovered —
+    that is O-29's "if already healthy, do not act", and it is the one case where the action
+    provably cannot cause the recovery the run would go on to report.
+    """
+    found = already_recovered(run_state.evidence, plan.action_tool, plan.action_arguments)
+    if found is None:
+        return None
+    resource, reading = found
+    seen = readings_of(run_state.evidence, reading, resource)
+    rendered = render_reading(reading, resource, seen[-1][1])
+    return ClearedMiss(
+        resource,
+        reading,
+        rendered,
+        # Opens with a banner for the same reason ADR 0026's `STABILIZED, NOT RESOLVED` does:
+        # this lands on `EscalationBriefing.escalation_reason` and the first words are what an
+        # on-call reads. The owner's sentence follows it VERBATIM — a test pins that.
+        f"NO ACTION TAKEN: {CLEARED_ON_ITS_OWN_SENTENCE}. {plan.action_tool} would act on "
+        f"{resource}, and this "
+        f"run's own newest reading of it — {rendered} — already shows the fault gone: "
+        f"{reading.why}. An action cannot cause a recovery that has already happened, so no "
+        f"Tier-1 action is taken and this run escalates. The cause is UNKNOWN and may recur: "
+        f"nothing this run read says why {resource} recovered, only that it did.",
+    )
+
+
+def _refuse_cleared_before_action(
+    run_state: RunState, at: datetime, plan: RemediationPlan, miss: ClearedMiss
+) -> RunState:
+    """Record the refusal under its own name, then escalate with the same sentence.
+
+    Two entries, in that order, because they answer different questions and the escalation
+    marker must stay last (``agent/briefing.py::_terminal_marker`` reads it as the reason).
+    Underscore-prefixed, so no tool-call budget is spent and the trail is unchanged.
+    """
+    entry = EvidenceEntry(
+        tool_name=_PLAN_REFUSED_CLEARED_MARKER,
+        arguments={
+            "action_tool": plan.action_tool,
+            "action_arguments": plan.action_arguments,
+            "resource": miss.resource,
+            "probe_tool": miss.reading.tool_name,
+            "reading": miss.rendered,
+        },
+        result_summary=f"plan refused before execution: {miss.reason}",
+        timestamp=at,
+    )
+    run_state = run_state.model_copy(
+        update={"evidence": (*run_state.evidence, entry), "updated_at": at}
+    )
+    return _escalate_remediation(run_state, at, miss.reason)
 
 
 def _refuse_subject_target(

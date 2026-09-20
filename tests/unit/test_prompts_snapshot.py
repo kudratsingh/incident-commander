@@ -20,7 +20,11 @@ from typing import Final
 
 import pytest
 
-from incident_commander.agent.briefing import REMAINDER_HEADING
+from incident_commander.agent.attribution import (
+    CANNOT_ATTRIBUTE_SENTENCE,
+    CLEARED_ON_ITS_OWN_SENTENCE,
+)
+from incident_commander.agent.briefing import ATTRIBUTION_HEADING, REMAINDER_HEADING
 from incident_commander.agent.hypothesis import HypothesisCategory
 from incident_commander.agent.investigation import FIX_MAP
 from incident_commander.agent.remediation import RemediationPlan
@@ -31,6 +35,7 @@ from incident_commander.llm.prompts.loader import (
     raw_prompt,
 )
 from incident_commander.llm.prompts.shared_rules import (
+    ATTRIBUTION_RULE,
     CHAIN_NODE_ACTION_RULE,
     SHARED_RULES,
     STUCK_CHAIN_ROOT_RULE,
@@ -69,6 +74,17 @@ _CHAIN_NODE_RULE_READERS: Final[tuple[str, ...]] = (
     "remediation_planner",
 )
 
+# O-29's readers of the attribution rule: the planner that decides whether to act at all, the
+# remediation table that picks the action and its verify leg, and the judge that grades the
+# report. The briefing WRITER is deliberately not among them — it is shown the verdict as run
+# state (``render_attribution``), which is what the suite grades, so binding it to the rule's
+# words would be asking a writer to paraphrase a block it is already handed.
+_ATTRIBUTION_RULE_READERS: Final[tuple[str, ...]] = (
+    "briefing_judge",
+    "investigation_planner",
+    "remediation_planner",
+)
+
 # Every category the planner may emit, in a stable order, built from the enum so a
 # new ``HypothesisCategory`` value adds a case on the next collection.
 _CATEGORIES: Final[tuple[HypothesisCategory, ...]] = tuple(
@@ -91,7 +107,12 @@ _EXPECTED_HASHES: Final[dict[str, str]] = {
     # Moved again by WO-R3-284 / ADR 0070, with `remediation_planner` and `briefing_judge`
     # below: a SECOND shared sentence (`{{rule:chain_node_action}}`) says which node of a
     # chain an action may name, and it reaches the same three readers for the same reason.
-    "investigation_planner": ("2493301227a2e717539f4e46d58636fd80f9316064f7eefc6b8a7cdd47f07efb"),
+    #
+    # And a THIRD time by WO-R3-321 / O-29 / ADR 0071, the same three readers again: one
+    # sentence saying who may be credited with a recovery. Three hashes move together or the
+    # change is half a rule (INC-002). This value is taken on the tree that carries BOTH new
+    # rules, which is why it is neither builder's own number.
+    "investigation_planner": ("6600eb6f6ff2c84976b996c38fd8695d5060ead9376b4049d23501190ce5c67b"),
     # WP-5.2's addendum, appended to `investigation_planner` by
     # `best_of_n_enumerated` and never loaded alone — which is why the planner prompt's
     # own hash did not move: the control group's system prompt is byte-for-byte what it was.
@@ -110,13 +131,16 @@ _EXPECTED_HASHES: Final[dict[str, str]] = {
         "005dea4d2724b11d99734a5d4ebf1ce809358a53f6ad3f80bae7f65e4d1b2c98"
     ),
     # Moved by WO-R3-230 / WP-11.3 / ADR 0065 — the remainder rule's other reader — and
-    # again by WO-R3-284 / ADR 0070, the chain-node rule's third reader.
-    "briefing_judge": ("8da7b5f8bf70b3f7e323334710b7f126a799d5ded80aae7fb67bebcb17e7447c"),
+    # again by WO-R3-284 / ADR 0070, the chain-node rule's third reader, and again by
+    # WO-R3-321 / ADR 0071, the attribution rule's third reader (which also quotes the
+    # attribution block's own heading to it).
+    "briefing_judge": ("478362176cda8a81a9202e5d3920891a3b22686544b9f2036dba83b6cf289c0f"),
     # Moved by WO-R3-226 / ADR 0056: two sentences cited ADR 0008 for "you get one Tier-1
     # call", which is now true of a PLAN and not of a run. The rules themselves are
     # unchanged — a plan still proposes exactly one action. Moved again by WO-R3-284 /
-    # ADR 0070: the fix table now says which node of the chain the routing is aimed at.
-    "remediation_planner": ("f1a1459d316ad85c51c96c2924ef68d329ed42e5c6a9b2be599b1304c86867ae"),
+    # ADR 0070: the fix table now says which node of the chain the routing is aimed at. And
+    # by WO-R3-321 / ADR 0071: it is told the cleared-before-action refusal is structural.
+    "remediation_planner": ("8b6026da7b47322170f65a5fe08099ff78196f738856779bf15f461480531dea"),
     "verification_judge": ("6d55bbfb6efebdaa6b5b032839094c9cf7ec0547377df74fcd595ffb9b93d1e3"),
     "output_repair": ("461943691f22c6fb6c0c1b62a1cb356dc43eab3ec963b21db069a5701e86a1a0"),
 }
@@ -1096,6 +1120,78 @@ class TestTheUnresolvedRemainderRuleReachesBothReaders:
         assert REMAINDER_HEADING in UNRESOLVED_REMAINDER_RULE
         for name in _REMAINDER_RULE_READERS:
             assert REMAINDER_HEADING in load_prompt(name), name
+
+    def test_the_rule_is_in_the_table(self) -> None:
+        assert self._KEY in SHARED_RULES
+
+
+class TestTheAttributionRuleReachesEveryReader:
+    """O-29 (ADR 0071): who may be credited with a recovery, read the same way three times.
+
+    The planner decides whether to act at all, the remediation table picks the action and
+    writes the verify leg, and the judge grades the report that follows. Give the rule to the
+    first two and not the third and the judge marks an honest "I cannot confirm my action
+    caused it" down as hedging — INC-002 in its newest form, which is why the owner required
+    the prompt rule, the planner guard and the judge rule in ONE change.
+    """
+
+    _KEY: Final = "attribution"
+    _PLACEHOLDER: Final = "{{rule:attribution}}"
+
+    def test_the_rule_is_one_sentence(self) -> None:
+        rule = ATTRIBUTION_RULE.strip()
+        assert rule.endswith("."), rule
+        assert ". " not in rule, (
+            f"the attribution rule has more than one sentence:\n{rule}\nOne sentence, for "
+            f"O-19's reason: a second is where a paraphrase starts, and a paraphrase in one "
+            f"of three renderings is invisible in a diff."
+        )
+
+    @pytest.mark.parametrize("name", _ATTRIBUTION_RULE_READERS)
+    def test_every_reader_is_served_the_identical_rule(self, name: str) -> None:
+        assert ATTRIBUTION_RULE in load_prompt(name), (
+            f"{name} does not carry the attribution rule as served. It must write "
+            f"`{self._PLACEHOLDER}` where the rule belongs; `load_prompt` expands it."
+        )
+
+    @pytest.mark.parametrize("name", _ATTRIBUTION_RULE_READERS)
+    def test_every_reader_delegates_the_rule_rather_than_copying_it(self, name: str) -> None:
+        raw = raw_prompt(name)
+        assert self._PLACEHOLDER in raw, (
+            f"{name}.md does not delegate the shared rule. Replace the copied sentence "
+            f"with `{self._PLACEHOLDER}`."
+        )
+        assert ATTRIBUTION_RULE not in raw, (
+            f"{name}.md spells the attribution rule out as well as delegating it."
+        )
+
+    def test_the_readers_are_exactly_the_ones_the_decision_names(self) -> None:
+        """Both directions: O-29 names three readers, and a fourth is a decision."""
+        carrying = tuple(
+            sorted(name for name in available_prompts() if self._PLACEHOLDER in raw_prompt(name))
+        )
+        assert carrying == _ATTRIBUTION_RULE_READERS, (
+            f"prompts carrying the attribution rule are {list(carrying)}; O-29 names "
+            f"{list(_ATTRIBUTION_RULE_READERS)}."
+        )
+
+    def test_the_rule_quotes_the_two_sentences_the_code_holds(self) -> None:
+        """The pin that keeps the rule and the run saying the same words.
+
+        ``agent/attribution.py`` holds both sentences; the planner guard's escalation carries
+        the first and the briefing slot carries either. A prompt that asks for one wording
+        while the run reports another is a rule about a report nobody writes.
+        """
+        assert CLEARED_ON_ITS_OWN_SENTENCE in ATTRIBUTION_RULE
+        assert CANNOT_ATTRIBUTE_SENTENCE in ATTRIBUTION_RULE
+
+    def test_the_judge_is_told_which_block_carries_the_verdict(self) -> None:
+        """``render_attribution`` writes the heading; the judge's rubric quotes it.
+
+        Reword one without the other and the judge is looking for a block that does not
+        exist — the same pin WP-11.3 put on the remainder heading, for the same reason.
+        """
+        assert ATTRIBUTION_HEADING in load_prompt("briefing_judge")
 
     def test_the_rule_is_in_the_table(self) -> None:
         assert self._KEY in SHARED_RULES

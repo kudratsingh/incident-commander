@@ -76,11 +76,34 @@ CHAIN_NODE_ACTION_RULE: Final[str] = (
 )
 
 
+#: Who may be credited with a recovery, and what a run says when nobody may (owner decision
+#: O-29, 2026-09-19; ADR 0071, amending ADR 0062 and building on ADR 0009's re-probe). ONE
+#: sentence for the planner that decides to act, the fix table that picks the action and the
+#: judge that grades the report, because the failure it prevents is exactly INC-002's shape:
+#: a run told to refuse credit and a judge that marks the refusal down. It names the
+#: DISCRIMINATOR (the pair of readings, before and after, never how clean the action's own
+#: response looked), both arms, and both sentences VERBATIM — ``agent/attribution.py`` holds
+#: the two strings and a test pins that these are them.
+ATTRIBUTION_RULE: Final[str] = (
+    "A recovery belongs to your action only when the last reading you took of that resource "
+    "BEFORE acting showed the fault present and your reading after it shows the fault gone, "
+    "because a reading says what a resource is and never who changed it: so re-read the "
+    "resource immediately before you act, and when that reading already shows the fault gone, "
+    "do not act at all — take no Tier-1 action, report `the issue cleared on its own before I "
+    "could act`, and escalate, because the cause is unknown and may recur; when an action has "
+    "already been taken with no fault-present reading immediately behind it and the resource "
+    "now reads healthy, the honest report is `recovered, but I cannot confirm my action caused "
+    "it` and the run escalates on that too; and a run whose readings do carry the pair may say "
+    "plainly that its action fixed it."
+)
+
+
 #: Every shared rule, by the key a prompt file names it with.
 SHARED_RULES: Final[dict[str, str]] = {
     "chain_node_action": CHAIN_NODE_ACTION_RULE,
     "stuck_chain_root": STUCK_CHAIN_ROOT_RULE,
     "unresolved_remainder": UNRESOLVED_REMAINDER_RULE,
+    "attribution": ATTRIBUTION_RULE,
 }
 
 

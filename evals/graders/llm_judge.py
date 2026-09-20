@@ -14,6 +14,7 @@ from pydantic import ConfigDict, Field
 
 from incident_commander.agent.briefing import (
     EscalationBriefing,
+    render_attribution,
     render_incidents,
     render_trail,
 )
@@ -94,6 +95,9 @@ def format_briefing_context(briefing: EscalationBriefing) -> str:
     # Same block, same words, same place as the writer's (WP-11.3): the remainder is run
     # state, so a judge blind to it would score the writer down for naming it (INC-002).
     lines.extend(render_incidents(briefing.incidents))
+    # Same block, same words, same place as the writer's (ADR 0071): a judge blind to it
+    # would score down a briefing for refusing credit the run's own readings refuse.
+    lines.extend(render_attribution(briefing.attribution))
     lines.extend(render_trail(briefing.investigation_trail))
     lines.append(f"Findings: {briefing.findings}")
     lines.append(f"Recommendation: {briefing.recommendation}")

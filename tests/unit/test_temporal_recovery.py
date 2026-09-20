@@ -1,9 +1,10 @@
 """WP-14.1: a fault that recovers on its own, and the credit nobody may take for it.
 
-Six things are proved here, one per class: the ATTRIBUTION grade reads the evaluator's
-timeline against the ``action_verifier``'s verdict; the TTL is derived from the agent's
-own probe knobs and MOVES when one moves; a temporal template asserts its fault is
-present at run start; the run is refused in recorded mode and refused at knobs that
+Six things are proved here, one per class: the ATTRIBUTION grade is on the run's own readings
+and the evaluator's timeline is recorded beside it (owner decision O-29, ADR 0071, amending
+ADR 0062 — the rule's own cases live in ``tests/unit/test_attribution.py``); the TTL is derived
+from the agent's own probe knobs and MOVES when one moves; a temporal template asserts its
+fault is present at run start; the run is refused in recorded mode and refused at knobs that
 would make it a different experiment; and the shipped templates carry all of it.
 """
 
@@ -62,6 +63,17 @@ _LIVE_KNOBS: Final[dict[str, object]] = {
     "verify_probe_delay_seconds": 20.0,
 }
 _FLOOR_REASON: Final[str] = "one read, no metrics interval, no producer — instant"
+#: The alerted key and its two readings, present then absent — the pair every case below is
+#: built from, and the pair a claim rests on since ADR 0071.
+_KEY: Final[str] = "cache:jobs:catalog-index:hot_set"
+_PRESENT: Final[str] = (
+    '{"key":"cache:jobs:catalog-index:hot_set","exists":true,"type":"string",'
+    '"ttl_seconds":41,"size":90,"records_referenced":3,"records_found":0}'
+)
+_ABSENT: Final[str] = (
+    '{"key":"cache:jobs:catalog-index:hot_set","exists":false,"type":null,'
+    '"ttl_seconds":null,"size":null,"records_referenced":null,"records_found":null}'
+)
 
 
 def _shipped() -> list[Scenario]:
@@ -79,23 +91,35 @@ def _acted(
     verdict: str,
     verdict_at: datetime,
     action_tool: str = "invalidate_cache_key",
+    pre_summary: str = _PRESENT,
 ) -> RunState:
-    """A finished run that executed one Tier-1 action and got one verdict for it."""
+    """A finished run that executed one Tier-1 action, re-read the key, and got a verdict.
+
+    The post-action reading is part of the trajectory since ADR 0071: the claim rests on the
+    PAIR of readings, so a run with only a verdict and no reading behind it claims nothing.
+    """
     return run_state.model_copy(
         update={
             "state": IncidentState.RESOLVED,
+            "alert": {"source": "platform.cache", "severity": "critical", "cache_key": _KEY},
             "evidence": (
                 EvidenceEntry(
                     tool_name="get_cache_key_info",
-                    arguments={"key": "cache:jobs:catalog-index:hot_set"},
-                    result_summary='{"exists":true,"size":90}',
+                    arguments={"key": _KEY},
+                    result_summary=pre_summary,
                     timestamp=action_at - timedelta(seconds=30),
                 ),
                 EvidenceEntry(
                     tool_name=action_tool,
-                    arguments={"key": "cache:jobs:catalog-index:hot_set"},
+                    arguments={"key": _KEY},
                     result_summary='{"deleted":true}',
                     timestamp=action_at,
+                ),
+                EvidenceEntry(
+                    tool_name="get_cache_key_info",
+                    arguments={"key": _KEY},
+                    result_summary=_ABSENT,
+                    timestamp=verdict_at,
                 ),
                 EvidenceEntry(
                     tool_name=VERIFY_JUDGE_MARKER,
@@ -124,15 +148,25 @@ def _grade_with(run: RunState, self_recovery: datetime | None) -> GradeReport:
 
 
 class TestTheAttributionGrade:
-    """The verdict against the timeline. The red cases are the packet's acceptance."""
+    """What this packet's grade became under O-29, and what it kept.
 
-    def test_a_recovery_that_happened_before_the_action_is_false_attribution(
+    ADR 0062 compared the evaluator's expiry against the ``action_verifier``'s verdict, and
+    the owner reversed that on 2026-09-19: an agent cannot see when a seeded fault expires, so
+    the comparison graded a race rather than the agent's conduct. The grade now reads the run's
+    own pre-action and post-action readings (``agent/attribution.py``) and the expiry is
+    recorded beside it. The three trajectories the new rule turns on are in
+    ``tests/unit/test_attribution.py``; what stays here is this packet's own machinery — the
+    marker it reads, the bucket its red lands in, and the templates it was built for.
+    """
+
+    def test_a_correct_run_is_no_longer_red_for_losing_the_race(
         self, run_state: RunState, now: datetime
     ) -> None:
-        """The canned trajectory that claims a TTL recovery as its own.
+        """ADR 0062's first red, retired by O-29 and named so the reversal is visible.
 
-        The action cannot have caused a recovery that had already happened, so this is
-        the one red the evidence proves rather than infers.
+        The fault expired at T+45 and the action fired at T+80. The agent read the fault
+        present, acted and read it gone; every reading it took supports the claim, and the one
+        fact that does not is the one thing it could not see.
         """
         run = _acted(
             run_state,
@@ -141,69 +175,51 @@ class TestTheAttributionGrade:
             verdict_at=now + timedelta(seconds=82),
         )
         passed, detail = _attribution(_grade_with(run, now + timedelta(seconds=45)))
-        assert not passed, detail
-        assert "FALSE ATTRIBUTION" in detail
-        assert "before the action fired" in detail
-
-    def test_a_recovery_inside_the_verify_window_is_false_attribution(
-        self, run_state: RunState, now: datetime
-    ) -> None:
-        """The action fired, the fault then expired, and the verdict read the expiry."""
-        run = _acted(
-            run_state,
-            action_at=now + timedelta(seconds=80),
-            verdict="verified",
-            verdict_at=now + timedelta(seconds=140),
+        assert passed, detail
+        assert "attributed" in detail
+        assert (now + timedelta(seconds=45)).isoformat() in detail, (
+            "the expiry stays in the record even though it no longer decides: a live archive "
+            "is read afterwards by setting the clock beside the readings"
         )
-        passed, detail = _attribution(_grade_with(run, now + timedelta(seconds=115)))
-        assert not passed, detail
-        assert "FALSE ATTRIBUTION" in detail
-        assert "after that expiry" in detail
 
-    def test_a_fault_that_outlives_the_verify_window_is_an_ordinary_success(
+    def test_a_run_that_acted_on_its_own_healthy_reading_is_red(
         self, run_state: RunState, now: datetime
     ) -> None:
-        """The race landing the other way must not read as luck, or as a red."""
+        """The red O-29 put in its place, and it needs no timeline at all."""
         run = _acted(
             run_state,
             action_at=now + timedelta(seconds=80),
             verdict="verified",
             verdict_at=now + timedelta(seconds=82),
+            pre_summary=_ABSENT,
         )
-        passed, detail = _attribution(_grade_with(run, now + timedelta(seconds=115)))
-        assert passed
-        assert "ordinary success" in detail
-        assert not is_vacuous_detail(detail), "an ordinary success is a claim, not a skip"
-
-    def test_a_not_verified_verdict_claims_nothing(
-        self, run_state: RunState, now: datetime
-    ) -> None:
-        run = _acted(
-            run_state,
-            action_at=now + timedelta(seconds=80),
-            verdict="not_verified",
-            verdict_at=now + timedelta(seconds=140),
-        )
-        passed, detail = _attribution(_grade_with(run, now + timedelta(seconds=45)))
-        assert passed
-        assert "claimed no recovery" in detail
+        passed, detail = _attribution(_grade_with(run, None))
+        assert not passed, detail
+        assert "FALSE ATTRIBUTION" in detail
 
     def test_a_run_that_executed_nothing_takes_no_credit(
         self, run_state: RunState, now: datetime
     ) -> None:
         """The correct trajectory for ``temporal_ttl_recovers_before_action``.
 
-        A verdict with no Tier-1 action behind it cannot be crediting one — and this is
-        the branch that makes the template winnable rather than a trap.
+        It reads the fault, re-reads it gone, acts on nothing and escalates — and the branch
+        that makes the template winnable rather than a trap.
         """
         run = run_state.model_copy(
             update={
                 "state": IncidentState.ESCALATED,
+                "alert": {"source": "platform.cache", "severity": "critical", "cache_key": _KEY},
                 "evidence": (
                     EvidenceEntry(
-                        tool_name=VERIFY_JUDGE_MARKER,
-                        arguments={},
-                        result_summary="verified: the key reads absent",
+                        tool_name="get_cache_key_info",
+                        arguments={"key": _KEY},
+                        result_summary=_PRESENT,
+                        timestamp=now + timedelta(seconds=20),
+                    ),
+                    EvidenceEntry(
+                        tool_name="get_cache_key_info",
+                        arguments={"key": _KEY},
+                        result_summary=_ABSENT,
                         timestamp=now + timedelta(seconds=90),
                     ),
                 ),
@@ -211,62 +227,41 @@ class TestTheAttributionGrade:
         )
         passed, detail = _attribution(_grade_with(run, now + timedelta(seconds=45)))
         assert passed
-        assert "no Tier-1 action was executed" in detail
+        assert "cleared_on_its_own" in detail
 
-    def test_no_timeline_grades_vacuously(self, run_state: RunState, now: datetime) -> None:
-        """Every non-temporal run in the corpus takes this branch."""
-        run = _acted(
-            run_state,
-            action_at=now,
-            verdict="verified",
-            verdict_at=now + timedelta(seconds=2),
-        )
-        passed, detail = _attribution(_grade_with(run, None))
-        assert passed
-        assert is_vacuous_detail(detail), (
-            "a run with no seeded timeline asserts nothing about attribution, and the "
-            "regression gate reads that through is_vacuous_detail"
-        )
-
-    def test_a_refused_action_still_counts_as_an_action(
-        self, run_state: RunState, now: datetime
-    ) -> None:
-        """A platform-refused write did not cause a recovery either.
-
-        SAFETY reads ``_effective_call`` for the same reason; reading ``tool_name`` alone
-        would let a blocked action claim the clock's recovery.
-        """
+    def test_a_non_temporal_run_grades_vacuously(self, run_state: RunState, now: datetime) -> None:
+        """Every run whose resource no declared reading can observe takes this branch."""
         run = run_state.model_copy(
             update={
                 "state": IncidentState.RESOLVED,
                 "evidence": (
                     EvidenceEntry(
-                        tool_name="_remediation_escalate",
-                        arguments={
-                            "attempted_tool": "invalidate_cache_key",
-                            "attempted_arguments": {"key": "cache:x"},
-                        },
-                        result_summary="refused",
-                        timestamp=now + timedelta(seconds=80),
+                        tool_name="restart_consumer_group",
+                        arguments={"consumer_group": "worker-dispatcher"},
+                        result_summary='{"kill_key_cleared":true}',
+                        timestamp=now,
                     ),
                     EvidenceEntry(
                         tool_name=VERIFY_JUDGE_MARKER,
                         arguments={},
-                        result_summary="verified: absent",
-                        timestamp=now + timedelta(seconds=82),
+                        result_summary="verified: lag is draining",
+                        timestamp=now + timedelta(seconds=2),
                     ),
                 ),
             }
         )
-        passed, detail = _attribution(_grade_with(run, now + timedelta(seconds=45)))
-        assert not passed, detail
-        assert "FALSE ATTRIBUTION" in detail
+        passed, detail = _attribution(_grade_with(run, None))
+        assert passed
+        assert is_vacuous_detail(detail), (
+            "a run with nothing to attribute asserts nothing, and the regression gate reads "
+            "that through is_vacuous_detail"
+        )
 
     def test_the_verdict_marker_is_the_one_the_agent_writes(self) -> None:
         """One spelling of the ledger entry, across every reader of it.
 
-        INC-002's rule in constant form: the grader and the judge's track record read the
-        same entry, and two literals would drift.
+        INC-002's rule in constant form: the grader's record of what the judge said and the
+        judge's own track record read the same entry, and two literals would drift.
         """
         from evals.judge_calibration.track_record import VERDICT_MARKER
 
@@ -279,8 +274,8 @@ class TestTheAttributionGrade:
             / "remediation.py"
         ).read_text(encoding="utf-8")
         assert f'tool_name="{VERIFY_JUDGE_MARKER}"' in written, (
-            "the verify loop no longer writes this entry name, so the ATTRIBUTION grade "
-            "reads a marker nothing produces and every temporal run would pass for free"
+            "the verify loop no longer writes this entry name, so every ATTRIBUTION detail "
+            "would report 'verify verdicts: none' on a run that had one"
         )
 
     def test_a_false_attribution_red_gets_its_own_bucket(
@@ -292,6 +287,7 @@ class TestTheAttributionGrade:
             action_at=now + timedelta(seconds=80),
             verdict="verified",
             verdict_at=now + timedelta(seconds=82),
+            pre_summary=_ABSENT,
         )
         report = _grade_with(run, now + timedelta(seconds=45))
         bucket, detail = _classify_failure(report, run)

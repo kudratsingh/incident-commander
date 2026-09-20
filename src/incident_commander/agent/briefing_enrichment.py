@@ -13,6 +13,7 @@ from pydantic import ConfigDict, Field
 from incident_commander.agent.accounting import accrue_structured_call
 from incident_commander.agent.briefing import (
     EscalationBriefing,
+    render_attribution,
     render_incidents,
     render_trail,
 )
@@ -84,6 +85,9 @@ def _format_context(briefing: EscalationBriefing) -> str:
     # The slots come before the trail: they are what the run concluded about the trail, and
     # the remainder block is the one part of the handoff the writer may not contradict.
     lines.extend(render_incidents(briefing.incidents))
+    # Beside the slots and for the same reason (ADR 0071): whose recovery this was is run
+    # state, so the writer is shown it rather than asked to infer it from the trail.
+    lines.extend(render_attribution(briefing.attribution))
     lines.extend(render_trail(briefing.investigation_trail))
     lines.append(f"Budget used: {briefing.budget_used}")
     return "\n".join(lines)

@@ -21,8 +21,10 @@ tags:
 # LIVE ONLY BY DESIGN — see temporal_ttl_recovers_before_action for the argument;
 # `Scenario.recorded_refusal` enforces it and `make world-record` refuses to write
 # a recording of it. Offline the canned sequence carries the two readings without
-# the clock, so ATTRIBUTION grades vacuously and this row is a regression test of
-# the remediation loop rather than a temporal measurement.
+# the clock, and since O-29 (ADR 0071) those readings are what ATTRIBUTION grades:
+# this row is the regression test for the arm where the claim HOLDS — the fault was
+# read present, the action fired, the resource read gone. The live run is what
+# proves a real planner takes that pre-action read.
 use_live_mcp: true
 use_live_llm: true
 
@@ -207,7 +209,10 @@ expectation:
   # It carries extra weight here. A run that deleted the wrong key would read the
   # ALERTED key as still present on its verify polls, and then the entry's own
   # expiry would land inside that window and hand the run an absence it did not
-  # cause. This assertion fails that run; ATTRIBUTION says why it was tempting.
+  # cause. This assertion fails that run. ATTRIBUTION does not, and O-29 is why:
+  # such a run's last pre-action reading of the alerted key DID show the fault, so
+  # its claim is admissible on the readings and wrong for a different reason —
+  # which is exactly the split the owner asked for. Two dimensions, two faults.
   expected_action_arguments:
   - tools: [invalidate_cache_key]
     argument: key
@@ -225,6 +230,10 @@ expectation:
 
   expect_briefing_contains:
   - fingerprint=cache_miss_spike
+  # The attribution verdict on its structural slot (O-29, ADR 0071), the sibling's
+  # claim in the opposite arm: here the pair of readings is complete, so this run
+  # MAY say its action did it, and the slot says so from the run's own state.
+  - 'VERDICT: attributed'
 
   # Live polling profile (docs/runbook.md live knobs): 2 investigation probes +
   # 1 ADR-0009 freshness re-probe + 1 action + up to 6 ADR-0006 verify polls = 10
@@ -246,8 +255,9 @@ expected_precondition:
     equals: 90
 
 # Evaluator-only (ADR 0038): one named key behind a collapsed hit rate is
-# `stale_cache`. The entry's pending expiry is a fact about the timeline, graded
-# on ATTRIBUTION, not a second diagnosis.
+# `stale_cache`. The entry's pending expiry is not a second diagnosis, and since
+# O-29 it is not the grade either: ATTRIBUTION reads the agent's own pair of
+# readings and the expiry instant is recorded beside them (ADR 0071).
 ground_truth:
   incident_count: 1
   root_causes: [stale_cache]

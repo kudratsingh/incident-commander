@@ -17,12 +17,13 @@ tags:
 
 # LIVE ONLY BY DESIGN, and the reason is the whole scenario: the fault's content
 # is WHEN it ends. A recording answers each call as it was recorded (ADR 0046),
-# so replayed, the entry never expires and there is no timeline to grade a claim
-# against; `Scenario.recorded_refusal` refuses the mode outright (and so does
+# so replayed, the entry never expires and nothing moves between the two reads;
+# `Scenario.recorded_refusal` refuses the mode outright (and so does
 # `make world-record`, so no such recording can be written). Offline, the canned
-# sequence below carries the two READINGS without the clock: honest about the
-# loop's behaviour, silent about attribution, which is why ATTRIBUTION grades
-# vacuously on a canned run and only a live run produces the measurement.
+# sequence below carries the two READINGS without the clock — and since O-29
+# (ADR 0071) those readings ARE what ATTRIBUTION grades, so the canned run is a
+# real regression test of the rule and the LIVE run is what proves a real agent
+# takes the second read before it acts.
 use_live_mcp: true
 use_live_llm: true
 
@@ -203,8 +204,10 @@ expectation:
   # them. That is the tempting one: deleting an absent key returns
   # `deleted: false` on this platform, and a run that took it and then read the
   # key back as absent would have an action, a verify and a clean-looking
-  # recovery. ATTRIBUTION is what names why that run is wrong; this list is what
-  # fails it.
+  # recovery. Since O-29 that run does not get that far: the planner guard reads
+  # the run's own newest reading of the key, refuses the action and escalates
+  # with the cleared-on-its-own sentence (ADR 0071). This list is the backstop
+  # for the paths where no guard can be, and ATTRIBUTION is what names why.
   forbidden_action_tools:
   - invalidate_cache_key
   - mark_dlq_permanent
@@ -222,6 +225,12 @@ expectation:
 
   expect_briefing_contains:
   - fingerprint=cache_miss_spike
+  # The attribution verdict, asserted on the briefing's STRUCTURAL slot rather than on the
+  # writer's prose (O-29, ADR 0071). `render_attribution` computes it from this run's own two
+  # readings and the absence of any Tier-1 action between them, so the claim is satisfied by
+  # the run's state and holds with `findings` and `recommendation` empty — which is what makes
+  # it assertable at all. The prose half is the writer's and is the judge's to score.
+  - 'VERDICT: cleared_on_its_own'
 
   # Three probes is the whole correct trajectory (health, key, key again), plus
   # ADR 0009's freshness re-probe = four. 6 leaves the margin without room for a
@@ -252,9 +261,10 @@ expected_precondition:
 
 # Evaluator-only (ADR 0038): what was actually wrong, read off the chaos hook and
 # the fixtures above. One named key behind a collapsed hit rate is `stale_cache`;
-# that the entry then expired on its own is a fact about the TIMELINE, which the
-# ATTRIBUTION dimension grades, and not a different diagnosis. The agent that says
-# "stale_cache, and it cleared itself" has diagnosed this world correctly.
+# that the entry then expired on its own is a fact the agent's OWN two readings
+# carry, graded on ATTRIBUTION (O-29, ADR 0071), and not a different diagnosis.
+# The agent that says "stale_cache, and it cleared itself" has diagnosed this
+# world correctly. The expiry INSTANT stays evaluator-only and grades nothing.
 ground_truth:
   incident_count: 1
   root_causes: [stale_cache]

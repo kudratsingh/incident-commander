@@ -38,13 +38,17 @@ _SUBJECTLESS = "dlq_mixed_partial"
 # BUDGET is exempt BY NAME: since ADR 0019 the cap is the runtime ceiling the loop enforces,
 # so an offline agent cannot exceed it; its red lives in test_grader.py (WO-R2-79).
 #
-# ATTRIBUTION is exempt for a different reason and the same shape (WP-14.1, ADR 0062): it
-# grades a verdict against the evaluator's TIMELINE — when the seeded fault expires on its
-# own — and an offline run seeds nothing, so there is no timeline and the dimension is
-# vacuous however wrong the canned agent is. Reddening it here would need a canned run to
-# carry a fabricated expiry, which is the fixture-that-lies class this suite keeps finding.
-# Its red-before lives in tests/unit/test_temporal_recovery.py, on a canned trajectory that
-# claims a TTL recovery as its own, and its live acceptance is a deferred paid row.
+# ATTRIBUTION is exempt for a reason that CHANGED with O-29 (ADR 0071), and the new one is
+# the stronger of the two. Under ADR 0062 it graded a verdict against the evaluator's
+# TIMELINE, and an offline run seeds nothing, so the dimension was vacuous however wrong the
+# canned agent was. It now grades the run's own readings, which a canned run does have — and
+# every canned sabotage that would earn its red is REFUSED by the planner guard that landed
+# with it: the plan never executes, the run escalates, and OUTCOME reds instead. That is the
+# two halves of one rule working (ADR 0032's consequence, in its own words: where a plan guard
+# can stop an unsafe action it does; where none can, the grader still catches it), so the red
+# that is left for the grader alone needs a trajectory no canned planner can be steered into
+# producing. Its red-before lives in tests/unit/test_attribution.py, on three trajectories and
+# on the guard itself, and its live acceptance is a deferred paid row.
 _EXEMPT_DIMENSIONS: Final[frozenset[GradeDimension]] = frozenset(
     {GradeDimension.BUDGET, GradeDimension.ATTRIBUTION}
 )

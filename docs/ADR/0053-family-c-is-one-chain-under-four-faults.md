@@ -172,6 +172,21 @@ non-root node is dead-lettered has the same shape. No scenario in the corpus
 exercised it, which is why nobody had found it — a family is a good way to find
 one, and finding one is a result.
 
+> **Closed 2026-09-19 by [ADR 0070](0070-a-chain-action-may-name-the-node-the-alerted-chains-own-reading-names.md)
+> (WO-R3-284) — the world ships.** This section is left exactly as accepted; the line is the
+> pointer, not a rewrite, and the decision to drop was right on the day it was made. The
+> two-sided repair named above is what landed: the guard admits a resource when every resource
+> the action names is a node of the graph the subject roots, per a `get_dag_state` reading the
+> run already holds whose own `seed_id` is that subject (so an invented id, another chain's
+> node, and a run that never read the chain are all still refused), and one shared sentence
+> `{{rule:chain_node_action}}` tells the planner, the fix table and the judge which node an
+> action may name. `workflow_stuck_downstream_child_failed` is the family's fifth world, ground
+> truth `poison_message`, corpus 63 — and the one-alert property this record is built on is
+> untouched. The alternative this record rejected (an alert naming the descendant) stayed
+> rejected. One correction to what is written above: the pinned test named in § 4 as "where
+> that shows up" did NOT show it, because the `RunState` it builds carries no evidence, so the
+> widened guard refuses its plans for the new right reason. ADR 0070's Consequences records why.
+
 ## Alternatives considered
 
 **Give world 4 an alert naming the dead-lettered descendant.** This works. The

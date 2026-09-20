@@ -1449,6 +1449,18 @@ pin whose re-record would rewrite a graded trajectory):
    the model gets to make" both produce an unmoved hash, and only the second one
    needs a filter somebody remembered to add.
 
+   v0.6.16 (WO-R3-328) is the first pin where BOTH readings appear at once, and
+   the arithmetic is what makes the pair checkable. It changed exactly two tools.
+   `get_consumer_lag` is re-described around its 15-minute `recent_samples`
+   window: the block grew 29,125 → 29,168 characters, +43, and that tool's
+   description grew 3,401 → 3,444 — the same +43, so every character of the
+   growth is that one description and no other. `report_agent_run` grew its
+   description 1,713 → 2,389 and gained six input fields, and **none of that is
+   in the block** — the `[commander:` filter again, now carrying 676 characters
+   it keeps off the planner's page. Quote both numbers in the PR body: the +43
+   that moved and the 676 that did not are one reading of the same filter, and
+   subtracting them is cheaper than re-reading a 29,000-character diff.
+
    The lab-vocabulary assertion in that file is the one part to write
    carefully, and v0.6.11 is the example. Its two hooks are `saturate_db_pool`
    and `degrade_downstream`, and a filter on their word stems went red

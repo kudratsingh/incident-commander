@@ -1,6 +1,6 @@
 # Live demo: full platform footprint sufficient for remediation eval.
 #
-# Pinned to the incident-platform v0.6.15 release by digest so the agent's
+# Pinned to the incident-platform v0.6.16 release by digest so the agent's
 # contract expectations don't shift under us. Every platform-code service
 # below uses the SAME pinned digest. Bump the digest whenever the platform
 # ships a new release and rerun `make eval-live` to catch drift.
@@ -137,7 +137,7 @@ services:
     # One-shot schema migration, mirroring the dev compose's migrate
     # service: with two app-code services (mcp + api) neither should
     # race `alembic upgrade head` at boot.
-    image: ghcr.io/kudratsingh/incident-platform:v0.6.15@sha256:8da1185b821341439fe6368c990c6b91a42b098985f9e3e8b17582759b2e43dc
+    image: ghcr.io/kudratsingh/incident-platform:v0.6.16@sha256:ad3b37768b508936300446df9d76da8a799a88dc179fb40fbbd60c10f22ce865
     platform: linux/amd64
     environment:
       DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/incident_platform
@@ -149,7 +149,7 @@ services:
     restart: "no"
 
   platform:
-    # incident-platform v0.6.15 (INDEX digest published by the platform
+    # incident-platform v0.6.16 (INDEX digest published by the platform
     # release, confirmed with `docker buildx imagetools inspect` — the
     # top-level `Digest:`, not a per-platform child manifest).
     #
@@ -342,11 +342,37 @@ services:
     #     DLQ `error_message` gained a count — `bulk api sync failed: all N
     #     endpoint calls failed (0 of N endpoints returned a result)`. Nothing
     #     commander-side pins that text.
+    #
+    # What v0.6.15 changed (plat #228, WO-R3-327): NOTHING on this surface. The
+    # tool list is identical tool for tool and byte for byte against v0.6.14 —
+    # checked mechanically, not read — because its whole delta is the
+    # `lab.world_reset` audit row `make eval-reset` now writes, which the demo
+    # PAGE reads as the boundary between runs and no tool returns.
+    #
+    # What v0.6.16 changed (plat #230, platform ADR 0037, WO-R3-328): NO NEW
+    # TOOL. Still 40 (15 chaos, 16 read), no scope moves, and exactly TWO tools
+    # differ under an exact comparison:
+    #   * `get_consumer_lag` carries the last **15 minutes** of measurements in
+    #     `recent_samples` instead of 5 — same reading, longer window, and the
+    #     SHAPE is unchanged: no output property added or removed, the `required`
+    #     set identical, `$defs.LagSample` byte-identical. Only that field's
+    #     description moved (3,401 → 3,444 chars), which is the whole +43 the
+    #     planner's tool block grew by.
+    #   * `report_agent_run` takes the run itself: `hypotheses` (ranked, the
+    #     order IS the ranking), `plan`, `verification`, `budget`, and a `step`
+    #     the platform APPENDS one per call. All six additive and optional, so
+    #     `required` stays `[run_id, state]`. Its description grew 1,713 → 2,389
+    #     and NONE of that reaches the planner — the `[commander:` filter, 676
+    #     characters of it, which is the reading that pairs with the +43 above.
+    #     `report_agent_briefing` is untouched.
+    #   * ADR 0012 unchanged in both directions: still no read tool for
+    #     `agent_runs`, and the excerpts a step carries are ones the agent's own
+    #     principal cannot read back.
     # Do not switch to `:latest` — the whole point of pinning by digest is
     # that a platform-side prompt or schema change can't shift agent
     # behavior without an explicit bump here.
-    image: ghcr.io/kudratsingh/incident-platform:v0.6.15@sha256:8da1185b821341439fe6368c990c6b91a42b098985f9e3e8b17582759b2e43dc
-    # v0.6.15 is an OCI index, but it still lists linux/amd64 ONLY (plus an
+    image: ghcr.io/kudratsingh/incident-platform:v0.6.16@sha256:ad3b37768b508936300446df9d76da8a799a88dc179fb40fbbd60c10f22ce865
+    # v0.6.16 is an OCI index, but it still lists linux/amd64 ONLY (plus an
     # attestation manifest) — being an index is not the same as being
     # multi-arch, and this one is not. On Apple Silicon this runs under
     # Rosetta (slower cold start, correct output) — REQUIRED there; without
@@ -450,7 +476,7 @@ services:
     # Env copied deliberately from the dev compose's `app` service
     # (drift between services is platform bug #69's class); minio/jaeger
     # endpoints omitted with the services (see header note).
-    image: ghcr.io/kudratsingh/incident-platform:v0.6.15@sha256:8da1185b821341439fe6368c990c6b91a42b098985f9e3e8b17582759b2e43dc
+    image: ghcr.io/kudratsingh/incident-platform:v0.6.16@sha256:ad3b37768b508936300446df9d76da8a799a88dc179fb40fbbd60c10f22ce865
     platform: linux/amd64
     ports:
       - "${DEMO_API_HOST_PORT:-8000}:8000"
@@ -529,7 +555,7 @@ services:
     # No `depends_on: service_healthy` on api, deliberately: nginx resolves
     # the upstream per request, so the console coming up first only means a
     # 502 until the backend is ready, and `make demo` waits on both anyway.
-    image: ghcr.io/kudratsingh/incident-platform-console:v0.6.15@sha256:1bf65ccf37c55d547d6addbb4894fd9189402bcdb2cabf369787a69913e58d72
+    image: ghcr.io/kudratsingh/incident-platform-console:v0.6.16@sha256:33cd34c10c2b4d80c9d7b0af16fc3b9a5d0c69c3b1ede87663a049dbf07dba34
     platform: linux/amd64
     environment:
       API_UPSTREAM: http://api:8000

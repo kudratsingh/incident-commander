@@ -831,7 +831,7 @@
     },
     {
       "name": "get_consumer_lag",
-      "description": "Read the last-emitted Kafka consumer lag for one of the platform's consumer groups. Known consumer groups: worker-dispatcher, billing-consumer, orders-consumer, notifications-consumer, analytics-consumer, payments-consumer, shipping-consumer, healthy-consumer.\nFRESHNESS: cached in Redis, never a live Kafka query, and the refresh behaviour differs per group — read `source` on the response before reasoning about change over time.\n  - `worker-dispatcher` (source: live) is refreshed by a background loop every ~60s with a 90s TTL. Measured behaviour: after a fault begins the cached value catches up within ~60s; after a recovery it keeps reading the old high value for ~30s before dropping. Treat any single reading as up to a minute stale, in either direction. This is the only group whose lag moves, and so the only one where watching lag grow or drain is a valid way to observe a change.\n  - The other seven (source: static) report a recorded constant that nothing refreshes. Re-reading one after an action returns the same number — that is the expected behaviour, not evidence the action failed, and lag on these groups will never be seen to grow.\nONE CALL SHOWS THE TREND. Every response carries `measured_at` (when this number was measured), `age_seconds` (how old it is), and `recent_samples` — the last few measurements, newest first, each with its own time, the current one included. Compare those samples to decide whether lag is climbing, draining or flat. That comparison is the evidence; a second call is not, because a new measurement is taken only about every 60s. Two calls a few seconds apart therefore return the SAME number with the SAME `measured_at`, and that repetition means 'not re-measured yet', never 'not moving' — reading sooner cannot show change that has not been measured. If you need a genuinely newer number than the one in front of you, it exists once `age_seconds` passes ~60; until then this response already contains every reading the platform has. On the seven groups reporting a recorded constant, `measured_at` and `age_seconds` are null and `recent_samples` is empty: a constant was never measured at a moment, so it has no time and no history. `recent_samples` can also be empty for worker-dispatcher when nothing has been recorded yet — an empty list is missing history, not a flat line.\nA STALLED CONSUMER STILL REPORTS LAG. A consumer that has stopped processing keeps its Kafka assignment, so this metric goes on reporting its real and climbing lag rather than going null — rising lag is the expected signal of a stall, not absence of data.\nUNKNOWN IS NOT ZERO. `lag_known: false` with `lag: null` means the platform could not determine lag (nothing recorded for the group, unknown group, consumer not started, no partition assignment, or the query errored). It is deliberately not reported as 0, because a fabricated 0 would read as healthy. A measured `lag: 0` with `lag_known: true` is the opposite finding — the group is caught up. Never treat a null as a zero.\n`source: static` with `lag_known: false` means a value that should be recorded for this group is absent — an environment problem to report, not a fault to diagnose.\nNeither a number nor a null proves liveness. Consumer-group membership is the authoritative check — a group holds its assignment and keeps reporting accurate lag for minutes after its consumer stops, without being evicted.",
+      "description": "Read the last-emitted Kafka consumer lag for one of the platform's consumer groups. Known consumer groups: worker-dispatcher, billing-consumer, orders-consumer, notifications-consumer, analytics-consumer, payments-consumer, shipping-consumer, healthy-consumer.\nFRESHNESS: cached in Redis, never a live Kafka query, and the refresh behaviour differs per group — read `source` on the response before reasoning about change over time.\n  - `worker-dispatcher` (source: live) is refreshed by a background loop every ~60s with a 90s TTL. Measured behaviour: after a fault begins the cached value catches up within ~60s; after a recovery it keeps reading the old high value for ~30s before dropping. Treat any single reading as up to a minute stale, in either direction. This is the only group whose lag moves, and so the only one where watching lag grow or drain is a valid way to observe a change.\n  - The other seven (source: static) report a recorded constant that nothing refreshes. Re-reading one after an action returns the same number — that is the expected behaviour, not evidence the action failed, and lag on these groups will never be seen to grow.\nONE CALL SHOWS THE TREND. Every response carries `measured_at` (when this number was measured), `age_seconds` (how old it is), and `recent_samples` — the measurements recorded over the last 15 minutes, newest first, up to 15 of them, each with its own time, the current one included. Compare those samples to decide whether lag is climbing, draining or flat. That comparison is the evidence; a second call is not, because a new measurement is taken only about every 60s. Two calls a few seconds apart therefore return the SAME number with the SAME `measured_at`, and that repetition means 'not re-measured yet', never 'not moving' — reading sooner cannot show change that has not been measured. If you need a genuinely newer number than the one in front of you, it exists once `age_seconds` passes ~60; until then this response already contains every reading the platform has. On the seven groups reporting a recorded constant, `measured_at` and `age_seconds` are null and `recent_samples` is empty: a constant was never measured at a moment, so it has no time and no history. `recent_samples` can also be empty for worker-dispatcher when nothing has been recorded yet — an empty list is missing history, not a flat line.\nA STALLED CONSUMER STILL REPORTS LAG. A consumer that has stopped processing keeps its Kafka assignment, so this metric goes on reporting its real and climbing lag rather than going null — rising lag is the expected signal of a stall, not absence of data.\nUNKNOWN IS NOT ZERO. `lag_known: false` with `lag: null` means the platform could not determine lag (nothing recorded for the group, unknown group, consumer not started, no partition assignment, or the query errored). It is deliberately not reported as 0, because a fabricated 0 would read as healthy. A measured `lag: 0` with `lag_known: true` is the opposite finding — the group is caught up. Never treat a null as a zero.\n`source: static` with `lag_known: false` means a value that should be recorded for this group is absent — an environment problem to report, not a fault to diagnose.\nNeither a number nor a null proves liveness. Consumer-group membership is the authoritative check — a group holds its assignment and keeps reporting accurate lag for minutes after its consumer stops, without being evicted.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -935,7 +935,7 @@
             "title": "Age Seconds"
           },
           "recent_samples": {
-            "description": "The last few measurements for this group, newest first, the current one included. Comparing them is how to tell a climbing lag from a flat one without waiting. Empty for a group reporting a recorded constant (nothing measures it), and empty for the continuously-refreshed group when no window has been recorded yet — an empty list is absence of history, never evidence the lag is steady.",
+            "description": "The measurements recorded for this group over the last 15 minutes, newest first, the current one included — up to 15 of them, one per ~60s measurement. Comparing them is how to tell a climbing lag from a flat one without waiting. Empty for a group reporting a recorded constant (nothing measures it), and empty for the continuously-refreshed group when no window has been recorded yet — an empty list is absence of history, never evidence the lag is steady.",
             "items": {
               "$ref": "#/$defs/LagSample"
             },
@@ -4102,9 +4102,86 @@
     },
     {
       "name": "report_agent_run",
-      "description": "[commander: telemetry] Record where you are in the incident you are working, so a human operator watching the console can see it. This is a write with no matching read: nothing here can be read back, and there is no tool that returns what was reported.\nUPSERT BY `run_id`. The first call for an id creates the record; every later call with the same id updates it. Reporting the same state twice leaves the record exactly as it was, so retrying after a timeout or a dropped connection is safe and cannot double-count.\nWHAT IS KEPT AND WHAT IS REPLACED. `state` changes append one entry to an append-only phase history — one entry per transition, so the console can draw a timeline no later report can rewrite. `current_hypothesis` and `last_step` are the current reading and are REPLACED on every call, so omitting one clears it. `alert_id` and `run_label` are filled in when supplied and never cleared.\nTERMINAL STATES CLOSE THE RUN. `resolved`, `escalated` and `failed` stamp the run finished. A further report on a finished run is refused with `agent_run_already_finished`: a closed run is not reopened, because an operator may already have read its ending.\nWHICH CLOCK. `at` is your clock and is stored as sent; `started_at`, `updated_at` and `finished_at` in the reply are the platform's. Omit `at` and the platform stamps its own time rather than inventing yours.\nTHIS IS NOT A TOOL TO CHOOSE. It changes nothing about the incident and tells you nothing you did not already know — it exists so a person can follow along. Calling it is not progress and not investigation.\nIT CANNOT FAIL YOUR WORK. A refusal here means the report was not stored; the incident, and everything you have done to it, is untouched.",
+      "description": "[commander: telemetry] Record where you are in the incident you are working, so a human operator watching the console can see it. This is a write with no matching read: nothing here can be read back, and there is no tool that returns what was reported.\nUPSERT BY `run_id`. The first call for an id creates the record; every later call with the same id updates it. Reporting the same state twice leaves the record exactly as it was, so retrying after a timeout or a dropped connection is safe and cannot double-count.\nWHAT IS KEPT AND WHAT IS REPLACED, in three groups.\n  - APPENDED: a `state` change adds one entry to an append-only phase history (one entry per transition, so a timeline no later report can rewrite); each `step` is added to the run's step ledger; each `verification` is added to the list of verdicts. One step and one verdict per call.\n  - REPLACED BUT NEVER CLEARED: `hypotheses`, `plan`, `verification` (its latest), `budget`, `alert_id` and `run_label`. A report that carries one replaces it; a report that omits one leaves what was there. So a report about a single step does not erase the reasoning reported with the last transition.\n  - REPLACED, INCLUDING WITH NOTHING: `current_hypothesis` and `last_step`, which are the single current reading and are cleared by omitting them.\nEXCERPTS, NOT OUTPUT. `reasoning_excerpt`, `rationale_excerpt` and `result_excerpt` are short extracts YOU truncate — 280, 280 and 400 characters. Over the limit is refused rather than cut, so what is stored is always what you meant to send. A human reads these on a screen.\nTERMINAL STATES CLOSE THE RUN. `resolved`, `escalated` and `failed` stamp the run finished. A further report on a finished run is refused with `agent_run_already_finished`: a closed run is not reopened, because an operator may already have read its ending.\nWHICH CLOCK. `at` is your clock and is stored as sent; `started_at`, `updated_at` and `finished_at` in the reply are the platform's. Omit `at` and the platform stamps its own time rather than inventing yours.\nTHIS IS NOT A TOOL TO CHOOSE. It changes nothing about the incident and tells you nothing you did not already know — it exists so a person can follow along. Calling it is not progress and not investigation.\nIT CANNOT FAIL YOUR WORK. A refusal here means the report was not stored; the incident, and everything you have done to it, is untouched.",
       "inputSchema": {
         "$defs": {
+          "BudgetReport": {
+            "additionalProperties": false,
+            "properties": {
+              "tool_calls_used": {
+                "anyOf": [
+                  {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "description": "Calls the caller has spent so far, on its own count. The platform does not count them and never corrects this.",
+                "title": "Tool Calls Used"
+              },
+              "tool_calls_max": {
+                "anyOf": [
+                  {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "description": "The ceiling the caller is working to. `null` when it has none or did not say — never 0 for 'no limit', because 0 reads as 'no calls left'.",
+                "title": "Tool Calls Max"
+              },
+              "tokens_used": {
+                "anyOf": [
+                  {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "description": "Tokens spent so far, on the caller's count.",
+                "title": "Tokens Used"
+              },
+              "usd_used": {
+                "anyOf": [
+                  {
+                    "minimum": 0.0,
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "description": "Money spent so far, in US dollars, on the caller's count.",
+                "title": "Usd Used"
+              },
+              "wall_seconds": {
+                "anyOf": [
+                  {
+                    "minimum": 0.0,
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "description": "How long the run has been going, in seconds, on the caller's clock.",
+                "title": "Wall Seconds"
+              }
+            },
+            "title": "BudgetReport",
+            "type": "object"
+          },
           "HypothesisReport": {
             "additionalProperties": false,
             "properties": {
@@ -4150,6 +4227,234 @@
             "title": "HypothesisReport",
             "type": "object"
           },
+          "PlanReport": {
+            "additionalProperties": false,
+            "properties": {
+              "action_tool": {
+                "description": "The call the caller intends to make, by name.",
+                "maxLength": 128,
+                "title": "Action Tool",
+                "type": "string"
+              },
+              "action_arguments": {
+                "anyOf": [
+                  {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "description": "The arguments it intends to send, as an object. Stored verbatim and validated nowhere — it is the caller's own plan, not a call. `null` when it did not say.",
+                "title": "Action Arguments"
+              },
+              "target_hypothesis": {
+                "anyOf": [
+                  {
+                    "maxLength": 128,
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "description": "Which explanation this action is meant to settle, by the `name` the caller gave it. `null` when the plan names none; the platform does not check it against the list.",
+                "title": "Target Hypothesis"
+              },
+              "rationale_excerpt": {
+                "anyOf": [
+                  {
+                    "maxLength": 280,
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "description": "A short extract of why this action, and not another. An EXCERPT, truncated by the caller; over 280 characters is refused rather than cut.",
+                "title": "Rationale Excerpt"
+              }
+            },
+            "required": [
+              "action_tool"
+            ],
+            "title": "PlanReport",
+            "type": "object"
+          },
+          "RankedHypothesisReport": {
+            "additionalProperties": false,
+            "properties": {
+              "name": {
+                "description": "The caller's own short name for this explanation. Free text — the platform has no list of valid names and does not check this one.",
+                "maxLength": 128,
+                "title": "Name",
+                "type": "string"
+              },
+              "category": {
+                "anyOf": [
+                  {
+                    "maxLength": 64,
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "description": "The caller's coarse grouping for this explanation, when it has one. `null` means it did not supply one.",
+                "title": "Category"
+              },
+              "confidence": {
+                "anyOf": [
+                  {
+                    "maximum": 1.0,
+                    "minimum": 0.0,
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "description": "How sure the caller says it is about this one, 0.0 to 1.0. `null` when it did not say. Stored and shown as given; the platform never scales one, compares two, or re-ranks the list by them — the ORDER of the list is the ranking.",
+                "title": "Confidence"
+              },
+              "reasoning_excerpt": {
+                "anyOf": [
+                  {
+                    "maxLength": 280,
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "description": "A short extract of why the caller holds this explanation — an EXCERPT, truncated by the caller, not the reasoning itself. Over 280 characters is refused rather than silently cut, so what is stored is always what the caller meant to send. `null` when it sent none.",
+                "title": "Reasoning Excerpt"
+              }
+            },
+            "required": [
+              "name"
+            ],
+            "title": "RankedHypothesisReport",
+            "type": "object"
+          },
+          "StepEventReport": {
+            "additionalProperties": false,
+            "properties": {
+              "seq": {
+                "description": "The caller's own position for this step in its run, increasing. It is the identity of the step: reporting a `seq` already stored changes nothing, so retrying a report that timed out cannot enter the same step twice, and an operator polling for new steps asks for everything after the last `seq` it saw.",
+                "minimum": 0,
+                "title": "Seq",
+                "type": "integer"
+              },
+              "kind": {
+                "description": "`read` when the step only observed the platform, `action` when it changed something, `report` when it was a status report like this one — which is worth an entry because it explains a gap between two calls.",
+                "enum": [
+                  "read",
+                  "action",
+                  "report"
+                ],
+                "title": "Kind",
+                "type": "string"
+              },
+              "tool": {
+                "anyOf": [
+                  {
+                    "maxLength": 128,
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "description": "Name of the call the step made, as the caller knows it. `null` for a step that was not a call.",
+                "title": "Tool"
+              },
+              "arguments": {
+                "anyOf": [
+                  {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "description": "What the step sent, as an object, stored verbatim. `null` when the caller sent none. Do not put anything here you would not want a human operator reading on a screen.",
+                "title": "Arguments"
+              },
+              "result_excerpt": {
+                "anyOf": [
+                  {
+                    "maxLength": 400,
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "description": "A short extract of what the step got back — an EXCERPT, truncated by the caller, never the whole answer. Over 400 characters is refused rather than cut, so this table cannot become a store of full tool output. `null` when the caller sent none.",
+                "title": "Result Excerpt"
+              },
+              "outcome": {
+                "anyOf": [
+                  {
+                    "maxLength": 64,
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "description": "How the step ended, in the caller's own word — `success`, `error` and whatever else it uses. Not a closed set and not checked.",
+                "title": "Outcome"
+              },
+              "latency_ms": {
+                "anyOf": [
+                  {
+                    "minimum": 0.0,
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "description": "How long the step took, in milliseconds, on the caller's clock. `null` when it did not say.",
+                "title": "Latency Ms"
+              },
+              "at": {
+                "anyOf": [
+                  {
+                    "format": "date-time",
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "description": "When the step happened — ISO-8601. `null` when the caller did not say, which is not the same as 'just now': the platform does not fill it in.",
+                "title": "At"
+              }
+            },
+            "required": [
+              "seq",
+              "kind"
+            ],
+            "title": "StepEventReport",
+            "type": "object"
+          },
           "StepReport": {
             "additionalProperties": false,
             "properties": {
@@ -4188,6 +4493,64 @@
               "tool"
             ],
             "title": "StepReport",
+            "type": "object"
+          },
+          "VerificationReport": {
+            "additionalProperties": false,
+            "properties": {
+              "verdict": {
+                "description": "What the caller concluded from this check, in its own vocabulary — `verified`, `not_verified`, `verified_stabilizer` and anything else it uses. Deliberately NOT a closed set: the platform has no opinion about what counts as verified and a fixed list here would refuse a verdict the caller has.",
+                "maxLength": 64,
+                "title": "Verdict",
+                "type": "string"
+              },
+              "reasoning_excerpt": {
+                "anyOf": [
+                  {
+                    "maxLength": 280,
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "description": "A short extract of what the caller read to reach that verdict. An EXCERPT, truncated by the caller; over 280 characters is refused rather than cut.",
+                "title": "Reasoning Excerpt"
+              },
+              "attempt": {
+                "anyOf": [
+                  {
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "description": "Which check this was, counting from 1. `null` when the caller did not say — never inferred from how many it has already sent, because a report can be lost.",
+                "title": "Attempt"
+              },
+              "of": {
+                "anyOf": [
+                  {
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "description": "How many checks the caller intends to make in total, when it knows. `null` when it did not say.",
+                "title": "Of"
+              }
+            },
+            "required": [
+              "verdict"
+            ],
+            "title": "VerificationReport",
             "type": "object"
           }
         },
@@ -4280,6 +4643,70 @@
             ],
             "default": null,
             "description": "The most recent step the caller took, or `null` before its first. Replaced wholesale on every report, like `current_hypothesis`."
+          },
+          "hypotheses": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/$defs/RankedHypothesisReport"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Every explanation the caller is holding, BEST FIRST — the order is the ranking. Replaced whole when this report carries it and never cleared by a later report that omits it, which is the opposite of `current_hypothesis` and is deliberate: a report about one step should not blank the list a person is reading. Send `[]` to say the list is genuinely empty.",
+            "title": "Hypotheses"
+          },
+          "plan": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/PlanReport"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "What the caller has decided to do, and why. Sent when it decides — on the way into `remediating`. The newest one replaces the one before it (a re-plan is a new plan) and never cleared by a later report that omits it."
+          },
+          "verification": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/VerificationReport"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "One verdict from one check of whether the action worked. Send one per check: the newest is kept on its own for a reader that wants one line, AND appended to the list of every verdict in this run, because three checks to reach `verified` is a different story from one. Never cleared by a later report that omits it."
+          },
+          "step": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/StepEventReport"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "ONE STEP PER CALL, appended to this run's step ledger in the order reported. Not replaced, not merged: a second step in one report is not expressible, which is what keeps the ledger a ledger. `seq` is the identity — a repeat of one already stored changes nothing. The ledger keeps the newest 200 steps; past that the oldest are dropped and `steps_dropped` in the reply counts them, so a reader is never shown a shortened run as a complete one."
+          },
+          "budget": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/BudgetReport"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "What this run has spent so far, on the caller's own meters. The newest reading replaces the one before it and is never cleared by a later report that omits it, so the last reading stands. The platform counts nothing here and corrects nothing."
           }
         },
         "required": [
@@ -4343,6 +4770,16 @@
             "description": "When the run reached a terminal state. `null` while it has not — which means the run is still open, not that its end was not recorded.",
             "title": "Finished At"
           },
+          "steps_count": {
+            "description": "How many steps the run's ledger holds now, after this report and after the cap. Not how many were reported — subtract nothing; add `steps_dropped` for that.",
+            "title": "Steps Count",
+            "type": "integer"
+          },
+          "steps_dropped": {
+            "description": "How many of the oldest steps the cap has discarded over this run's life. Never decreases. 0 means the ledger is the whole run; anything else means it is the newest part of it.",
+            "title": "Steps Dropped",
+            "type": "integer"
+          },
           "accepted": {
             "description": "Always true in a successful reply; a refused report is an error, not an `accepted: false`. Present so a caller logging one field logs a meaningful one.",
             "title": "Accepted",
@@ -4357,6 +4794,8 @@
           "phase_count",
           "started_at",
           "updated_at",
+          "steps_count",
+          "steps_dropped",
           "accepted"
         ],
         "title": "ReportAgentRunOutput",

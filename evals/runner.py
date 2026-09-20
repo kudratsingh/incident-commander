@@ -1605,7 +1605,7 @@ def run_scenario(
     mcp_client: MCPClientProtocol
     live_mcp_client: MCPClient | None = None
     replay_client: RecordedMCPClient | None = None
-    # What the reporter's steps are made of (ADR 0068's WO-R3-329 amendment): latency, the
+    # What the reporter's steps are made of (ADR 0072, amending ADR 0068): latency, the
     # outcome and the raw first content block exist at the client seam and nowhere else.
     # Built only when reporting is on, so a graded run's tracer is byte-identical to today's.
     tool_log: ToolCallLog | None = None

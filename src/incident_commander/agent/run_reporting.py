@@ -28,7 +28,7 @@ and — one per call — a **step**: the tool, its wired arguments, an excerpt o
 back, the outcome and the latency. Two consequences are written down here because they are
 the shape of this module rather than details of it:
 
-* **One report per step, not one per transition** (the amendment to ADR 0068's decision 1).
+* **One report per step, not one per transition** (ADR 0072, amending ADR 0068's decision 1).
   A transition can make several calls — a verify leg polls — and the platform appends ONE
   step per call, so the seam sends one report per pending item and the run's own state
   travels on the last of them. Intermediate reports carry the state the run was IN while it
@@ -112,6 +112,13 @@ _MAX_NAME_CHARS: Final = 128
 _MAX_CATEGORY_CHARS: Final = 64
 #: Same reasoning, for a verdict string the platform leaves open.
 _MAX_VERDICT_CHARS: Final = 64
+#: And for a step's outcome. 64, not 128 — this module said 128 until the v0.6.16 snapshot
+#: landed and ``TestTheMirrorMatchesTheContract`` compared the two: an
+#: ``error: MCPError: MCP error -32000: transport error after 3 attempts…`` outcome is easily
+#: over 64, and it would have taken the whole report down with it (and then narrowed every
+#: later report of that run). A hand-written mirror is worth exactly what a test makes it
+#: worth, which is why that test exists.
+_MAX_OUTCOME_CHARS: Final = 64
 
 #: JSON-RPC's "Invalid params". MEASURED on platform v0.6.15 (the 2026-09-20 rehearsal):
 #: a report carrying a field its input model does not declare comes back as a JSON-RPC
@@ -206,7 +213,7 @@ class _Step(BaseModel):
     tool: str = Field(max_length=128)
     arguments: dict[str, Any] = Field(default_factory=dict)
     result_excerpt: str | None = Field(default=None, max_length=_MAX_RESULT_EXCERPT_CHARS)
-    outcome: str | None = Field(default=None, max_length=128)
+    outcome: str | None = Field(default=None, max_length=_MAX_OUTCOME_CHARS)
     latency_ms: int | None = Field(default=None, ge=0)
     at: datetime | None = None
 
@@ -328,7 +335,7 @@ class ToolCallLog:
         error = record.get("error")
         result = record.get("result")
         if isinstance(error, str) and error:
-            outcome, excerpt = f"error: {error}"[:128], None
+            outcome, excerpt = _capped(f"error: {error}", _MAX_OUTCOME_CHARS), None
         else:
             refused = bool(result.get("is_error")) if isinstance(result, Mapping) else False
             outcome = "refused" if refused else "ok"

@@ -1,6 +1,6 @@
 """The run reporter: the whole run in reports, fail-open, and off the planner's page.
 
-ADR 0068 and its WO-R3-329 amendment. Four properties were load-bearing from the start and
+ADR 0068 and ADR 0072, which amends it. Four properties were load-bearing from the start and
 each has a class here: reporting happens once per checkpoint *at least* and the briefing
 exactly once; every failure is swallowed with a log line; a report is NOT a tool call and
 cannot move the budget; and neither reporting tool is anything a model could choose.
@@ -25,6 +25,7 @@ from uuid import UUID, uuid4
 
 import httpx
 import pytest
+from pydantic import BaseModel
 
 from incident_commander.agent.attribution import AttributionRead, AttributionVerdict
 from incident_commander.agent.briefing import render_briefing
@@ -42,6 +43,14 @@ from incident_commander.agent.run_reporting import (
     ReportingCheckpointer,
     RunReporter,
     ToolCallLog,
+    _Budget,
+    _CurrentHypothesis,
+    _LastStep,
+    _Plan,
+    _RankedHypothesis,
+    _RunReport,
+    _Step,
+    _Verification,
     budget_payload,
     last_step,
     ranked_hypotheses,
@@ -1311,6 +1320,95 @@ class TestAnOlderPlatformNarrowsOnceAndKeepsTheOldFields:
         # as a second made the rehearsal's summary line read as two lost reports.
         assert len(reporter.failures) == 1
         assert reporter.narrowed_because is not None
+
+
+def _unwrap(spec: Mapping[str, Any]) -> dict[str, Any]:
+    """One property's real bounds, with an optional field's ``null`` branch dropped.
+
+    Both sides of the comparison below go through this, so `str | None = None` on one side
+    and `anyOf: [{…}, {type: null}]` on the other are read as the same declaration.
+    """
+    branches = spec.get("anyOf")
+    if isinstance(branches, list):
+        real = [b for b in branches if isinstance(b, dict) and b.get("type") != "null"]
+        spec = real[0] if len(real) == 1 else dict(spec)
+    return {
+        key: spec[key]
+        for key in ("type", "enum", "maxLength", "minimum", "maximum", "format")
+        if key in spec
+    }
+
+
+def _bounds(schema: Mapping[str, Any]) -> dict[str, dict[str, Any]]:
+    """Every property of one object schema, by name, reduced to its bounds."""
+    return {name: _unwrap(spec) for name, spec in schema.get("properties", {}).items()}
+
+
+class TestTheMirrorMatchesTheContract:
+    """The local payload models against the generated snapshot, field by field.
+
+    The mirror exists because fail-open makes a refusal SILENT — the console simply goes
+    thin — so a payload bug has to surface at the seam rather than on the platform. What it
+    cannot be is a second, hand-maintained copy of the contract that nobody compares: this
+    class is the comparison, and it earned itself on the v0.6.16 snapshot by finding that
+    `step.outcome` is capped at 64 and this module had written 128.
+    """
+
+    @staticmethod
+    def _schema() -> dict[str, Any]:
+        tools = {t["name"]: t for t in json.loads(_SNAPSHOT_PATH.read_text())["tools"]}
+        return dict(tools[REPORT_RUN_TOOL]["inputSchema"])
+
+    def test_the_top_level_fields_are_exactly_the_ones_the_platform_declares(self) -> None:
+        assert set(_RunReport.model_fields) == set(self._schema()["properties"]), (
+            "the mirror and the tool disagree about which fields a report has — which means "
+            "either a field is being sent that will be refused, or one the platform now "
+            "takes is not being sent at all"
+        )
+
+    def test_the_narrow_fallback_names_only_declared_fields(self) -> None:
+        assert set(NARROW_FIELDS) <= set(self._schema()["properties"])
+
+    @pytest.mark.parametrize(
+        ("model", "definition"),
+        [
+            (_CurrentHypothesis, "HypothesisReport"),
+            (_RankedHypothesis, "RankedHypothesisReport"),
+            (_LastStep, "StepReport"),
+            (_Step, "StepEventReport"),
+            (_Plan, "PlanReport"),
+            (_Verification, "VerificationReport"),
+            (_Budget, "BudgetReport"),
+        ],
+        ids=lambda value: value if isinstance(value, str) else "",
+    )
+    def test_every_nested_model_carries_the_platforms_own_bounds(
+        self, model: type[BaseModel], definition: str
+    ) -> None:
+        declared = _bounds(self._schema()["$defs"][definition])
+        mirrored = _bounds(model.model_json_schema())
+
+        assert set(mirrored) == set(declared), (
+            f"{model.__name__} and {definition} disagree about which fields exist"
+        )
+        for field, bound in declared.items():
+            mine = mirrored[field]
+            if mine.get("type") == "integer" and bound.get("type") == "number":
+                # The one allowed narrowing: every integer is a number, so a mirror that
+                # says `int` cannot produce a payload the platform refuses. `latency_ms` is
+                # whole milliseconds here on purpose.
+                mine = {**mine, "type": "number"}
+            assert mine == bound, (
+                f"{model.__name__}.{field} no longer matches {definition}.{field}: every "
+                "maxLength, enum and bound here is one the platform REFUSES a payload for "
+                "exceeding, and a refusal costs the whole report"
+            )
+        # The mirror may be STRICTER about what must be present (it always sends a step's
+        # tool, for instance) and must never be laxer: a field the platform requires and
+        # the mirror treats as optional is a payload that passes here and is refused there.
+        assert set(declared.get("required", [])) <= set(
+            name for name, field in model.model_fields.items() if field.is_required()
+        )
 
 
 class TestNothingLeaksASecret:

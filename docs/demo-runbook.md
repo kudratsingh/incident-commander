@@ -61,7 +61,7 @@ as remaining work. That is the one to slow down for.
 
 ## What the console is sent during a run
 
-The reporter sends the whole run, not just its phase (ADR 0068 as amended by WO-R3-329). Per
+The reporter sends the whole run, not just its phase ([ADR 0072](ADR/0072-a-run-report-carries-one-step-and-an-older-platform-gets-fewer-fields.md), amending ADR 0068). Per
 report: the **state**, the **ranked hypotheses** with a reasoning excerpt each, the
 **current hypothesis**, the **plan** (tool, arguments, target hypothesis, rationale) once it
 exists, one **verification** per verify poll with its verdict and `{attempt, of}`, the
@@ -83,6 +83,11 @@ reach the platform once the commander is pinned to a platform that declares them
 Before that pin the reporter **narrows** — see the next section.
 
 ## Reporting against a platform that does not know the new fields
+
+**On v0.6.16 and later this section is history**: the fields are declared, the reports land
+whole, and the fallback below is dormant. It stays because the two repos are versioned
+independently — a demo stack can be older than the commander talking to it — and because the
+failure it prevents has happened once.
 
 `report_agent_run`'s input model forbids unknown fields, so on platform **v0.6.15** a widened
 report is refused whole — state included. Measured on the 2026-09-20 rehearsal, and the shape

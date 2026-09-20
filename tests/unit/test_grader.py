@@ -5863,8 +5863,8 @@ class TestTheFinalDiagnosisIsTheTopCandidate:
         permitted = [
             "agent/investigation.py",
             # The one file here that names the field and does NOT write it: the reporter
-            # puts the ranking in a report for the console (ADR 0068's WO-R3-329
-            # amendment). Checked below rather than trusted, because the scan is a proxy
+            # puts the ranking in a report for the console (ADR 0072, amending ADR
+            # 0068). Checked below rather than trusted, because the scan is a proxy
             # for "writes the field" and this is its one honest exception.
             "agent/run_reporting.py",
             "agent/strategies/adaptive.py",

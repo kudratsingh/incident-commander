@@ -1,12 +1,9 @@
-# ADR 00XX — a run report carries one step, and an older platform gets fewer fields
+# ADR 0072 — a run report carries one step, and an older platform gets fewer fields
 
-Status: proposed (2026-09-20, WO-R3-329). **Amends [ADR 0068](0068-the-agent-reports-its-run-and-reporting-is-never-a-tool-call.md)**
+Status: accepted (2026-09-20, WO-R3-329). **Amends [ADR 0068](0068-the-agent-reports-its-run-and-reporting-is-never-a-tool-call.md)**
 decision 1 (what a report contains and how often one is sent). Everything else in ADR 0068 —
 fail-open, never a tool call, off unless asked for, the model never chooses, the derived run
 id — stands unchanged.
-
-> The number is a placeholder: WO-R3-329's brief assigned none, and three builders were
-> working in parallel over the same ADR range. The coordinator numbers this file before merge.
 
 ## Context
 
@@ -94,11 +91,21 @@ reported nothing. Both routes are now read, and only two things narrow: JSON-RPC
 run-level codes. An HTTP 403 does **not** narrow — a token minted before `agent_runs:write`
 existed is a re-mint, and hiding it behind a thinner console is the wrong repair.
 
-**7. The payload is validated locally before it is sent.** A private Pydantic mirror of the
-tool's input schema gates every report; a payload that fails it is logged and the narrow form
-is sent instead. The mirror is a gate and not a serializer — the dict this module assembled is
-what goes on the wire — and its schema reaches no prompt, no tool contract and no OpenAPI
-document.
+**7. The payload is validated locally before it is sent, and the mirror that validates it is
+pinned against the snapshot.** A private Pydantic mirror of the tool's input schema gates every
+report; a payload that fails it is logged and the narrow form is sent instead. The mirror is a
+gate and not a serializer — the dict this module assembled is what goes on the wire — and its
+schema reaches no prompt, no tool contract and no OpenAPI document.
+
+It is kept rather than dropped once v0.6.16's real schema landed in the snapshot, for one
+reason: **fail-open makes a refusal silent.** The console simply goes thin, and on a recording
+nobody notices until afterwards, so a payload bug has to surface at the seam. What the mirror
+may not be is a second hand-maintained copy of a generated contract, so
+`TestTheMirrorMatchesTheContract` compares the two field by field — names, `maxLength`, `enum`,
+numeric bounds, and required-ness in the one safe direction (the mirror may be stricter, never
+laxer). That test earned itself immediately: it found `step.outcome` capped at 64 where this
+module had written 128, which an `error: MCPError…` outcome exceeds — a refusal that would have
+narrowed every later report of that run.
 
 ## Consequences
 

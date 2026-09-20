@@ -1455,6 +1455,8 @@ def run_scenario(
                 "model": settings.agent_model,
                 "model_role": model_role.value,
                 "judge_model": settings.judge_model,
+                "execution_mode": "recorded" if recorded else "canned",
+                "recorded_world_id": _repo_relative(recorded_world) if recorded_world else None,
             }
         )
 

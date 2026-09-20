@@ -280,6 +280,8 @@ class TrajectoryRecord(BaseModel):
     model_role: str | None = None
     live_mcp: bool | None = None
     live_llm: bool | None = None
+    execution_mode: str | None = None
+    recorded_world_id: str | None = None
     strategy: str | None = None
     decisions: tuple[DecisionRecord, ...] = ()
     actions: tuple[ActionRecord, ...] = ()
@@ -658,6 +660,8 @@ def _trajectory(invocation: TraceInvocation, scenario: Scenario) -> TrajectoryRe
         model_role=start.get("model_role") if start else None,
         live_mcp=start.get("live_mcp") if start else None,
         live_llm=start.get("live_llm") if start else None,
+        execution_mode=start.get("execution_mode") if start else None,
+        recorded_world_id=start.get("recorded_world_id") if start else None,
         strategy=decisions[0].strategy if decisions else None,
         decisions=decisions,
         actions=actions,
@@ -870,7 +874,12 @@ def build_export(
         trajectories_bytes=len(trajectories_jsonl.encode()),
         labels_sha256=_digest(labels_jsonl.encode()),
         labels_bytes=len(labels_jsonl.encode()),
-        absent_fields=dict(ABSENT_FIELDS),
+        absent_fields={
+            key: reason
+            for key, reason in ABSENT_FIELDS.items()
+            if key not in {"execution_mode", "recorded_world_id"}
+            or any(getattr(record, key) is None for record in trajectories)
+        },
         reward=_reward_manifest(rewards),
     )
     return Export(

@@ -2,6 +2,7 @@ import pytest
 from pydantic import TypeAdapter, ValidationError
 
 from incident_commander.agent.hypothesis import (
+    SETTLED_CHOICE_DESCRIPTION,
     Hypothesis,
     HypothesisCategory,
     InvestigationStep,
@@ -9,7 +10,10 @@ from incident_commander.agent.hypothesis import (
     ProbeAction,
     RemediateAction,
     StopAction,
+    asked_for_a_probe,
+    without_probe,
 )
+from incident_commander.llm.client import LLMOutputError
 
 #: The eight values the enum shipped with, and their exact spellings. A literal table
 #: rather than a derivation, because what it protects is that these strings never move.
@@ -344,3 +348,186 @@ class TestInvestigationStepOrdering:
             }
         )
         assert [h.name for h in step.hypotheses] == ["top", "first-tie", "second-tie"]
+
+
+class TestWithoutProbe:
+    """ADR 0074: the step schema with ``probe`` withdrawn, and how it says so.
+
+    The structural half of F1. ADR 0073's refusal arrived AFTER the planner had chosen, which
+    left "probe a different tool" open — and the third live take took it twice. A model that is
+    never offered the move cannot take it, so the narrowing is in the schema the call is made
+    with.
+    """
+
+    def test_the_narrowed_schema_offers_two_moves_and_no_probe(self) -> None:
+        schema = without_probe(InvestigationStep).model_json_schema()
+        next_action = schema["properties"]["next_action"]
+
+        assert set(next_action["discriminator"]["mapping"]) == {"remediate", "stop"}
+        # Not merely undiscriminated: the probe's own definition is gone, so nothing in the
+        # schema describes the shape of a move the model is not offered.
+        assert "ProbeAction" not in schema.get("$defs", {})
+
+    def test_the_narrowed_schema_says_why_on_the_field(self) -> None:
+        """The reason travels in the schema, not in a class docstring.
+
+        A docstring on a model whose schema reaches a prompt is a silent schema change
+        (CLAUDE.md); a field description is the deliberate one. The trail carries the same
+        reason in the loop's own words, so a model reading either is told the same thing.
+        """
+        next_action = without_probe(InvestigationStep).model_json_schema()["properties"][
+            "next_action"
+        ]
+
+        assert next_action["description"] == SETTLED_CHOICE_DESCRIPTION
+        assert "no probe" in SETTLED_CHOICE_DESCRIPTION
+        assert "what you would need to SEE to act" in SETTLED_CHOICE_DESCRIPTION
+
+    def test_it_is_the_same_model_otherwise(self) -> None:
+        """A subclass, so every gate that reads a step still reads this one.
+
+        The ranking validator included: three gates read ``hypotheses[0]`` as the top pick, and
+        a narrowed step that skipped the sort would hand them an unsorted list.
+        """
+        narrowed = without_probe(InvestigationStep)
+        step = narrowed.model_validate(
+            {
+                "hypotheses": [
+                    {
+                        "category": "unknown",
+                        "name": "second",
+                        "confidence": 0.2,
+                        "reasoning": "r",
+                    },
+                    {
+                        "category": "consumer_saturation",
+                        "name": "first",
+                        "confidence": 0.9,
+                        "reasoning": "r",
+                    },
+                ],
+                "next_action": {"kind": "remediate", "reason": "act"},
+            }
+        )
+
+        assert issubclass(narrowed, InvestigationStep)
+        assert isinstance(step, InvestigationStep)
+        assert step.hypotheses[0].name == "first"
+        assert isinstance(step.next_action, RemediateAction)
+
+    def test_a_probe_is_refused_by_the_narrowed_schema(self) -> None:
+        with pytest.raises(ValidationError) as raised:
+            without_probe(InvestigationStep).model_validate(
+                {
+                    "hypotheses": [
+                        {
+                            "category": "consumer_saturation",
+                            "name": "x",
+                            "confidence": 0.9,
+                            "reasoning": "r",
+                        }
+                    ],
+                    "next_action": {
+                        "kind": "probe",
+                        "tool_name": "get_consumer_lag",
+                        "arguments": {},
+                    },
+                }
+            )
+
+        assert asked_for_a_probe(raised.value)
+
+    def test_the_narrowed_model_is_built_once_per_model(self) -> None:
+        """Cached, because ``model_json_schema()`` is cached per CLASS.
+
+        A fresh class per step would regenerate the schema on every planner call and send a
+        different tool definition each time, which is a cache miss on every step.
+        """
+        assert without_probe(InvestigationStep) is without_probe(InvestigationStep)
+
+    def test_it_narrows_a_model_that_is_not_the_investigation_step(self) -> None:
+        """Every strategy's own schema, not just the control group's.
+
+        ``best_of_n_enumerated`` asks with a generated ``CandidateStep<n>``; a narrowing that
+        only knew ``InvestigationStep`` would leave that arm able to probe exactly where the
+        loop said it may not.
+        """
+        from incident_commander.agent.strategies.best_of_n_enumerated import candidate_step_model
+
+        narrowed = without_probe(candidate_step_model(2))
+        mapping = narrowed.model_json_schema()["properties"]["next_action"]["discriminator"]
+        assert set(mapping["mapping"]) == {"remediate", "stop"}
+        # The arm's own bound survives the narrowing: still exactly N candidates.
+        assert narrowed.model_json_schema()["properties"]["candidates"]["minItems"] == 2
+
+
+class TestAskedForAProbe:
+    """Which validation failures are a REFUSED move, and which are ADR 0035's re-ask."""
+
+    def _refusal(self) -> ValidationError:
+        with pytest.raises(ValidationError) as raised:
+            without_probe(InvestigationStep).model_validate(
+                {
+                    "hypotheses": [
+                        {
+                            "category": "consumer_saturation",
+                            "name": "x",
+                            "confidence": 0.9,
+                            "reasoning": "r",
+                        }
+                    ],
+                    "next_action": {"kind": "probe", "tool_name": "get_consumer_lag"},
+                }
+            )
+        return raised.value
+
+    def test_the_probe_tag_is_recognised(self) -> None:
+        assert asked_for_a_probe(self._refusal()) is True
+
+    def test_it_reads_the_cause_as_well(self) -> None:
+        """``LLMClient`` wraps a ``ValidationError`` in ``LLMOutputError`` (ADR 0007).
+
+        So on the live path the real complaint arrives one link down, and a predicate that
+        looked only at the exception it was handed would send every live refusal through the
+        re-ask instead.
+        """
+        wrapped = LLMOutputError("output failed schema validation")
+        wrapped.__cause__ = self._refusal()
+
+        assert asked_for_a_probe(wrapped) is True
+
+    def test_an_invented_tag_is_not_a_refusal(self) -> None:
+        """A model that names a move nobody offers is malformed output, not a refusal.
+
+        It keeps ADR 0035's one bounded re-ask, because "your output was invalid" is exactly
+        the right sentence for it.
+        """
+        with pytest.raises(ValidationError) as raised:
+            InvestigationStep.model_validate(
+                {
+                    "hypotheses": [
+                        {
+                            "category": "consumer_saturation",
+                            "name": "x",
+                            "confidence": 0.9,
+                            "reasoning": "r",
+                        }
+                    ],
+                    "next_action": {"kind": "restart", "reason": "go"},
+                }
+            )
+
+        assert asked_for_a_probe(raised.value) is False
+
+    def test_an_ordinary_missing_field_is_not_a_refusal(self) -> None:
+        with pytest.raises(ValidationError) as raised:
+            without_probe(InvestigationStep).model_validate(
+                {"hypotheses": [], "next_action": {"kind": "stop"}}
+            )
+
+        assert asked_for_a_probe(raised.value) is False
+
+    def test_a_model_that_narrows_nothing_refuses_nothing(self) -> None:
+        """The default hook, so every other output model keeps ADR 0035 exactly."""
+        assert InvestigationStep.output_refused(self._refusal()) is False
+        assert without_probe(InvestigationStep).output_refused(self._refusal()) is True

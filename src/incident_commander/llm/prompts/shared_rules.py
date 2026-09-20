@@ -99,23 +99,31 @@ ATTRIBUTION_RULE: Final[str] = (
 
 
 #: How MANY times a "re-read before X" rule asks to be satisfied (INC-004, 2026-09-20; ADR
-#: 0073). Held here for a reason this module has not had before: the two readers are two RULES
-#: in the same file rather than two prompts. `investigation_planner.md` states the freshness
-#: re-read (ADR 0009) and the attribution re-read (ADR 0071) as separate bullets, a model
-#: applied both as "take one more confirming read" on every step, and a clause appended to one
-#: of them would leave the other saying what it said. One sentence written once, rendered into
-#: both, so neither can drift and a later edit cannot reach only half the demand. The
-#: STRUCTURAL half is `investigation._confirming_read_exhausted`; this sentence is what makes
-#: the refusal predictable rather than a surprise.
+#: 0073, amended by ADR 0074). Held here for a reason this module has not had before: the two
+#: readers are two RULES in the same file rather than two prompts. `investigation_planner.md`
+#: states the freshness re-read (ADR 0009) and the attribution re-read (ADR 0071) as separate
+#: bullets, a model applied both as "take one more confirming read" on every step, and a clause
+#: appended to one of them would leave the other saying what it said. One sentence written
+#: once, rendered into both, so neither can drift and a later edit cannot reach only half the
+#: demand. The STRUCTURAL half is `investigation._probe_withdrawn`, which takes `probe` out of
+#: the schema for that step; this sentence is what makes the narrowing predictable rather than
+#: a surprise.
+#:
+#: ADR 0074 rewrote the tail. ADR 0073's version promised that "a probe of some OTHER tool
+#: stays open", which was true of that guard and was exactly what the third live take did with
+#: it: refused a third reading of the consumer group, then read the DLQ, then the circuit
+#: breakers, then asked for the group a fourth time. A prompt may not promise a move the schema
+#: withdraws, so the sentence now says what the narrowed step really offers.
 CONFIRMING_READ_BOUND_RULE: Final[str] = (
     "One fresh reading that shows the fault is the whole demand of this rule — a second is "
-    "not more evidence, it is the same evidence and one step you cannot get back — so the "
-    "state machine refuses a THIRD reading of the alerted subject once your top hypothesis "
-    "has held at or above the remediate threshold in a category with a Tier-1 fix for two "
-    "steps running and your own newest reading of that subject is fresh and shows the fault "
-    "present, that refusal names itself on the evidence trail, and the only moves left for "
-    "that resource are `remediate` and `stop` — a probe of some OTHER tool stays open for as "
-    "long as a different reading would change your ranking."
+    "not more evidence, it is the same evidence and one step you cannot get back — so once "
+    "your top hypothesis has held at or above the remediate threshold in a category with a "
+    "Tier-1 fix for two steps running and your own newest reading of the alerted resource is "
+    "fresh and shows the fault present, the state machine takes `probe` out of the schema for "
+    "your next step entirely, names that refusal on the evidence trail, and leaves you "
+    "`remediate` and `stop`: act on the answer you have already ranked, or hand off with a "
+    "reason naming what you would need to SEE to act, because a reading that would not change "
+    "a ranking that settled is a step spent to arrive where you already are."
 )
 
 

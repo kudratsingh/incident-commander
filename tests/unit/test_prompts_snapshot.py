@@ -133,7 +133,14 @@ _EXPECTED_HASHES: Final[dict[str, str]] = {
     # 0009's freshness re-read and ADR 0071's pre-action re-read), not two prompts. So exactly
     # one hash moves: the remediation planner and both judges are byte-for-byte what they were,
     # because the bound is about which read the planner asks for next and about nothing else.
-    "investigation_planner": ("f01f5f5ed5e2483060823c40452ea021b4afae76220adc33890eb82276f6eb70"),
+    #
+    # And a FIFTH time by WO-R3-332 / ADR 0074, alone again and for the same reason: the same
+    # one sentence, rewritten because its tail had become false. ADR 0073's version told the
+    # planner that "a probe of some OTHER tool stays open", and the third live take did exactly
+    # that — refused a third reading of the consumer group, then read the DLQ, then the circuit
+    # breakers, then asked for the group again. The bound is now the schema itself, so the
+    # sentence says so. One hash, again: no other prompt carries the rule.
+    "investigation_planner": ("284f178947609419bc9588e6a615d20227646add20ec2cc8784e94ff36d23455"),
     # WP-5.2's addendum, appended to `investigation_planner` by
     # `best_of_n_enumerated` and never loaded alone — which is why the planner prompt's
     # own hash did not move: the control group's system prompt is byte-for-byte what it was.
@@ -1731,10 +1738,17 @@ class TestTheConfirmingReadBoundReachesBothReReadRules:
             _SETTLED_RANKING_STEPS,
         )
 
-        assert _CONFIRMING_READS_ALLOWED == 2, "the rule says a THIRD reading is refused"
+        assert _CONFIRMING_READS_ALLOWED == 2, (
+            "ADR 0073's own guard still refuses a THIRD reading of the subject on the step "
+            "where the streak completes"
+        )
         assert _SETTLED_RANKING_STEPS == 2, "the rule says 'for two steps running'"
-        assert "THIRD" in CONFIRMING_READ_BOUND_RULE
         assert "two steps running" in CONFIRMING_READ_BOUND_RULE
+        # ADR 0074: the sentence describes the SCHEMA narrowing, because that is what the
+        # planner meets now. A rule still promising "a probe of some OTHER tool stays open"
+        # would be promising a move the schema does not offer.
+        assert "takes `probe` out of the schema" in CONFIRMING_READ_BOUND_RULE
+        assert "OTHER tool" not in CONFIRMING_READ_BOUND_RULE
 
     def test_the_rule_is_in_the_table(self) -> None:
         assert self._KEY in SHARED_RULES

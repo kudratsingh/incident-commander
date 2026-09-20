@@ -46,6 +46,7 @@ from incident_commander.llm.prompts.loader import load_prompt
 from incident_commander.llm.prompts.shared_rules import STUCK_CHAIN_ROOT_RULE
 from incident_commander.llm.repair import (
     INVESTIGATION_PLANNER_INVALID,
+    OutputNotOffered,
     call_with_output_repair,
     sum_usage,
     usage_of,
@@ -666,6 +667,20 @@ def make_llm_investigate(
             if run_state.budget.is_exhausted:
                 return _escalate_investigation(run_state, at, "budget exhausted mid-investigation")
 
+            # ADR 0074, and BEFORE the call rather than after it: once the ranking has settled
+            # on an actionable answer and the alerted resource's own newest reading is fresh
+            # and shows the fault, no further reading is worth a step — so the planner is not
+            # offered one. The refusal is recorded FIRST, so this call's own context carries
+            # the reason its choice is narrower than it was: a choice that shrinks without
+            # saying why leaves a model guessing, and guessing for five steps is INC-004.
+            withdrawn = (
+                _probe_withdrawn(run_state, subject, settled_steps) if subject is not None else None
+            )
+            if withdrawn is not None and subject is not None:
+                run_state = _refuse_confirming_read(
+                    run_state, at, subject, *withdrawn, settled_steps
+                )
+
             prior_hypotheses = run_state.hypotheses
             try:
                 # Third value is the ``StepRecord``, already written to ``record_step``.
@@ -682,6 +697,9 @@ def make_llm_investigate(
                         selector_llm_client=selector_llm_client,
                         critic_llm_client=critic_llm_client,
                         branch_prober=branch_prober,
+                        # The narrowing reaches every strategy's planner call through the
+                        # context, and no strategy decides anything (ADR 0036).
+                        offer_probe=withdrawn is None,
                     ),
                 )
             except (ValueError, ValidationError, LLMError) as err:
@@ -690,6 +708,25 @@ def make_llm_investigate(
                 run_state = run_state.model_copy(
                     update={"budget": accrue_llm_error(run_state.budget, err, model)}
                 )
+                # The planner asked for the probe the narrowed schema withdrew (ADR 0074).
+                # Neither an unreadable output nor a reason to escalate: the refusal is already
+                # on the trail, the state stays INVESTIGATING, and the planner keeps its turn —
+                # ADR 0032/0033's shape, under the same cap as ADR 0073's own refusal.
+                if (
+                    isinstance(err, OutputNotOffered)
+                    and withdrawn is not None
+                    and subject is not None
+                ):
+                    if confirming_refusals_spent >= _MAX_CONFIRMING_READ_REFUSALS:
+                        return _finalize(
+                            run_state,
+                            at,
+                            _refusals_exhausted_reason(
+                                run_state, subject, confirming_refusals_spent
+                            ),
+                        )
+                    confirming_refusals_spent += 1
+                    continue
                 return _escalate_investigation(
                     run_state, at, f"{INVESTIGATION_PLANNER_INVALID}: {err}"
                 )
@@ -801,7 +838,16 @@ def make_llm_investigate(
             # bound is here, where the reads are counted, and not in the prompt. Refuses
             # rather than escalating, in ADR 0032/0033's shape: the planner keeps its turn
             # and is offered the two moves that remain.
-            confirming = (
+            #
+            # TWO ways a probe arrives here while the loop has withdrawn it (ADR 0074), and
+            # both are met by the same refusal. ``withdrawn`` is this step's narrowing, so a
+            # probe that reached the loop anyway came from a planner whose output does not go
+            # through the schema — a strategy that assembles its step in Python
+            # (``candidate_selector``, ``search``) or a client that ignores the model it was
+            # handed. ``_confirming_read_exhausted`` is ADR 0073's own condition, still
+            # reachable on the step where the streak COMPLETES: the narrowing is computed
+            # before the call and the streak is updated by it.
+            confirming = withdrawn or (
                 _confirming_read_exhausted(run_state, subject, action, settled_steps)
                 if subject is not None
                 else None
@@ -811,20 +857,16 @@ def make_llm_investigate(
                     return _finalize(
                         run_state,
                         at,
-                        (
-                            f"planner asked to re-read {subject.alert_field}="
-                            f"{subject.value!r} {confirming_refusals_spent + 1} times after "
-                            f"being refused: {_ranking_sentence(run_state)}, and "
-                            f"{_reads_taken_sentence(run_state.evidence)}. A further reading "
-                            f"of a resource this run has already read is not more evidence, "
-                            f"and no step will be spent on one; escalating with the readings "
-                            f"it has"
-                        ),
+                        _refusals_exhausted_reason(run_state, subject, confirming_refusals_spent),
                     )
                 confirming_refusals_spent += 1
-                run_state = _refuse_confirming_read(
-                    run_state, at, subject, *confirming, settled_steps
-                )
+                if withdrawn is None:
+                    # ADR 0073's path: the refusal is written now, because the loop learned
+                    # only from the proposal that it had one to make. The narrowed path wrote
+                    # its own before the call, and writing a second would say it twice.
+                    run_state = _refuse_confirming_read(
+                        run_state, at, subject, *confirming, settled_steps
+                    )
                 continue
 
             if run_state.budget.is_exhausted:
@@ -848,11 +890,17 @@ def _plan_next_step(
     at: datetime,
     llm_client: LLMClientProtocol,
     model: str,
+    output_model: type[InvestigationStep] = InvestigationStep,
 ) -> tuple[RunState, InvestigationStep, PlannerCall]:
     """One planner LLM call — plus one bounded repair if it does not parse.
 
     ADR 0035: a ``record_output`` payload the schema rejects is a harness event. Both legs
     accrue; a second failure raises ``OutputRepairExhausted``.
+
+    ``output_model`` is the step schema for THIS call and defaults to the whole of it. The loop
+    passes a narrowed one — ``hypothesis.without_probe(InvestigationStep)`` — on a step where it
+    has withdrawn the probe (ADR 0074), and a ``probe`` under that schema raises
+    ``OutputNotOffered`` with no re-ask.
 
     The third return value is the call's own measurements (tokens, trace-record id, context
     size, elapsed time — WP-2.1, WO-R3-260). The loop never reads it.
@@ -865,7 +913,7 @@ def _plan_next_step(
         llm_client,
         system_prompt=system_prompt,
         user_message=user_message,
-        output_model=InvestigationStep,
+        output_model=output_model,
         model=model,
     )
     new_budget = accrue_structured_call(run_state.budget, call, model)
@@ -1172,31 +1220,36 @@ def _ranks_an_actionable_answer(hypotheses: Sequence[Hypothesis]) -> bool:
     return top.category in FIX_MAP and top.confidence >= REMEDIATE_CONFIDENCE_THRESHOLD
 
 
-def _confirming_read_exhausted(
+def _probe_withdrawn(
     run_state: RunState,
     subject: AlertSubject,
-    action: ProbeAction,
     settled_steps: int,
 ) -> tuple[EvidenceEntry, FaultPresentReading] | None:
-    """The reading that makes a further read of the subject pointless, or ``None``.
+    """The reading that makes ANY further read pointless this step, or ``None`` (ADR 0074).
 
-    ADR 0073's trigger, and every clause of it is load-bearing:
+    Asked BEFORE the planner call, so it names only facts that hold before one: the ranking
+    and the readings already on the trail. Three clauses, and each is ADR 0073's own:
 
     1. ``settled_steps >= _SETTLED_RANKING_STEPS`` — the top hypothesis has been the same
        actionable answer for two planner steps running. One step is a ranking; two is a
        ranking that did not move.
-    2. The proposed probe would read THE ALERT'S OWN SUBJECT again — the same tool with the
-       same value. Any other read is a different question and is never refused.
-    3. The run has already taken ``_CONFIRMING_READS_ALLOWED`` readings of it, so the refused
-       one is the THIRD. Never a first (that read is the investigation) and never a second
-       (that one is what ADR 0009 and ADR 0071 ask for).
-    4. A DECLARED reading of that subject can say the fault is present, and the newest one
-       does (``reads_fault_present``), and it is FRESH (``reading_is_fresh``, ADR 0009).
+    2. A DECLARED reading of the alert's subject can say the fault is present
+       (``FAULT_PRESENT_READING``), and this run has taken at least one.
+    3. The NEWEST of those readings says so (``reads_fault_present``) and is FRESH
+       (``reading_is_fresh``, ADR 0009's own window).
 
-    Every "cannot say" answers ``None``: a reading that shows the fault gone, one whose age
-    the platform did not report, one outside its freshness window, an unparseable summary and
-    a subject no map entry covers all leave the loop exactly as it was. The guard exists to
-    stop a read that is certainly redundant, not to ration reads in general.
+    What ADR 0073 asked for and this does not is a COUNT of readings. That bound refused the
+    third reading of the subject, which left "probe a different tool" open — and the third live
+    take spent two steps taking it. The count is gone because the prompt clause ADR 0073 itself
+    added is the true rule: **one fresh reading that shows the fault is the whole demand**. One
+    such reading satisfies ADR 0009's re-read (the conclusion rests on a current measurement)
+    and ADR 0071's pre-action read (the reading immediately behind the action shows the fault),
+    so a run holding one has everything either rule asks for.
+
+    Every "cannot say" answers ``None`` and leaves the choice whole: a reading that shows the
+    fault gone, one whose age the platform did not report, one outside its window, an
+    unparseable summary, a subject no map entry covers, a ranking that moved or never cleared
+    the bar. The guard withdraws a read that is certainly redundant; it does not ration reads.
     """
     if settled_steps < _SETTLED_RANKING_STEPS:
         return None
@@ -1205,10 +1258,8 @@ def _confirming_read_exhausted(
     # resource, the same equality `attribution.alerted_subject` makes.
     if reading is None or reading.argument_field != subject.argument_field:
         return None
-    if not _probe_would_read_the_subject(action, subject):
-        return None
     reads = subject_reads(run_state, subject)
-    if len(reads) < _CONFIRMING_READS_ALLOWED:
+    if not reads:
         return None
     newest = reads[-1]
     if reads_fault_present(newest, reading) is not True:
@@ -1216,6 +1267,38 @@ def _confirming_read_exhausted(
     if not reading_is_fresh(newest, subject.tool_name):
         return None
     return newest, reading
+
+
+def _confirming_read_exhausted(
+    run_state: RunState,
+    subject: AlertSubject,
+    action: ProbeAction,
+    settled_steps: int,
+) -> tuple[EvidenceEntry, FaultPresentReading] | None:
+    """The reading that makes a further read of the subject pointless, or ``None``.
+
+    ADR 0073's trigger: ``_probe_withdrawn``'s three clauses plus the two that can only be
+    judged once the planner has proposed something —
+
+    2a. The proposed probe would read THE ALERT'S OWN SUBJECT again — the same tool with the
+        same value, judged on the WIRED arguments. Any other read is a different question.
+    3a. The run has already taken ``_CONFIRMING_READS_ALLOWED`` readings of it, so the refused
+        one is the THIRD. Never a first (that read is the investigation) and never a second
+        (that one is what ADR 0009 and ADR 0071 ask for).
+
+    Still reachable with ADR 0074's narrowing in place, on exactly one kind of step: the one
+    where the streak COMPLETES. The narrowing is computed before the planner call and the
+    streak is updated by it, so a step that takes the ranking from one settled step to two can
+    propose a third reading that no narrowed schema ever refused.
+    """
+    withdrawn = _probe_withdrawn(run_state, subject, settled_steps)
+    if withdrawn is None:
+        return None
+    if not _probe_would_read_the_subject(action, subject):
+        return None
+    if len(subject_reads(run_state, subject)) < _CONFIRMING_READS_ALLOWED:
+        return None
+    return withdrawn
 
 
 def _refuse_confirming_read(
@@ -1226,13 +1309,18 @@ def _refuse_confirming_read(
     reading: FaultPresentReading,
     settled_steps: int,
 ) -> RunState:
-    """Refuse one more reading of the alerted subject and narrow the planner's choice.
+    """Refuse a further reading and narrow the planner's choice to the two moves left.
 
     NOT a terminal transition, and the same shape as the two refusals above: the state stays
-    INVESTIGATING, the reason is rendered into the next planner context, and the marker is
+    INVESTIGATING, the reason is rendered into the planner context, and the marker is
     underscore-prefixed so the briefing trail and the grader's tool set exclude it. What it
     adds to their shape is the narrowed choice — a refusal that only said "not that read"
     would leave the planner to guess, and guessing is what spent five steps in INC-004.
+
+    Written by both of ADR 0074's paths, in the same words on purpose. On the narrowed path it
+    is written BEFORE the call it explains, so the model reads the reason in the same turn its
+    schema lost the probe; on ADR 0073's own path it is written after the proposal that earned
+    it. One text either way: the trail should not say a refusal two ways.
     """
     taken = len(subject_reads(run_state, subject))
     age = (_parsed_reading(newest) or {}).get(READING_AGE_FIELD)
@@ -1250,9 +1338,10 @@ def _refuse_confirming_read(
         f"'re-read before you conclude' and of 'read the resource again before you act' — a "
         f"second is not more evidence, it is the same evidence and one step you cannot get "
         f"back. Decide on what you have: emit `remediate` to act on "
-        f"{top.category.value!r}, or `stop` to hand off with the readings you took. A probe "
-        f"of a DIFFERENT tool is still open if some other reading would change your ranking; "
-        f"this resource will not be read again."
+        f"{top.category.value!r}, or `stop` to hand off with the readings you took, naming in "
+        f"the reason what you would need to SEE to act. No probe is offered this step — not "
+        f"of this resource and not of any other tool: a reading that would not change a "
+        f"ranking this settled is a step spent to arrive where you already are."
     )
     entry = EvidenceEntry(
         tool_name=_CONFIRMING_READ_REFUSED_MARKER,
@@ -1272,6 +1361,27 @@ def _refuse_confirming_read(
             "evidence": (*run_state.evidence, entry),
             "updated_at": at,
         }
+    )
+
+
+def _refusals_exhausted_reason(
+    run_state: RunState, subject: AlertSubject, refusals_spent: int
+) -> str:
+    """Why a run that was offered ``remediate`` or ``stop`` twice is handed off instead.
+
+    One text for both of ADR 0074's paths — the planner that asked for a withdrawn probe and
+    the one ADR 0073's guard refused — because a reader should not have to learn which internal
+    path counted the asks. It opens with the words the corpus matches on
+    (``N times after being refused``) and then says what the run concluded and what it read,
+    which is INC-004's second half: an escalation reason that names no cause is one a briefing
+    writer fills in.
+    """
+    return (
+        f"planner asked to re-read {subject.alert_field}={subject.value!r} "
+        f"{refusals_spent + 1} times after being refused: {_ranking_sentence(run_state)}, and "
+        f"{_reads_taken_sentence(run_state.evidence)}. A further reading of a resource this "
+        f"run has already read is not more evidence, and no step will be spent on one; "
+        f"escalating with the readings it has"
     )
 
 

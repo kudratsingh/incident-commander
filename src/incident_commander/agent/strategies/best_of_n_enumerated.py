@@ -173,7 +173,9 @@ class BestOfNEnumeratedStrategy:
                 ctx.llm_client,
                 system_prompt=self._system_prompt,
                 user_message=user_message,
-                output_model=self._output_model,
+                # N candidates, and the narrowing if the loop made one (ADR 0074): the arm's
+                # own model is what gets narrowed, so the candidate bound survives it.
+                output_model=ctx.step_model(self._output_model),
                 model=ctx.model,
             )
         candidates = call.result.output.candidates

@@ -9,9 +9,9 @@ which decodes a nested object that arrived as a JSON string (ADR 0035, run ``779
 from __future__ import annotations
 
 from enum import StrEnum
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any, Final, Literal, cast
 
-from pydantic import ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, create_model, field_validator
 
 from incident_commander.llm.structured import StructuredOutput
 
@@ -253,3 +253,114 @@ class InvestigationStep(StructuredOutput):
         ties keep the model's order (``test_hypothesis.py::TestInvestigationStepOrdering``).
         """
         return tuple(sorted(value, key=lambda h: h.confidence, reverse=True))
+
+
+# ---------------------------------------------------------------------------
+# The step schema with `probe` withdrawn (ADR 0074, amending ADR 0073).
+#
+# INC-004's third take: ADR 0073's guard refused a third reading of the alerted subject and
+# the planner answered by probing `list_dlq_messages`, then `get_circuit_breakers`, then
+# asking for the subject a fourth time — never `remediate`. A refusal the planner meets AFTER
+# it has chosen leaves "probe something else" open, and a model takes it. So once the ranking
+# has settled the choice is narrowed in the SCHEMA the planner is handed, where there is
+# nothing to take: `next_action` offers `remediate` and `stop` and no probe at all.
+#
+# The loop decides when (`investigation._probe_withdrawn`); every strategy renders it
+# (`strategies.protocol.StrategyContext.step_model`), which is ADR 0036's line.
+
+
+SettledNextAction = Annotated[StopAction | RemediateAction, Field(discriminator="kind")]
+"""``NextAction`` with ``probe`` removed: the two moves left once the ranking has settled."""
+
+
+#: What the planner is told in the schema itself when the probe has been withdrawn. On the
+#: FIELD rather than in a class docstring, because a docstring on one of these models is a
+#: silent schema change (CLAUDE.md) — this one is the point of the model and says so out loud.
+#: The evidence trail carries the same reason in the loop's own words
+#: (``investigation._refuse_confirming_read``), so a model that reads only one of the two is
+#: still told why.
+SETTLED_CHOICE_DESCRIPTION: Final[str] = (
+    "This step offers two moves and no probe. Your top hypothesis has held at or above the "
+    "remediate threshold in a category with a Tier-1 fix for two steps running, and your own "
+    "newest reading of the alerted resource is fresh and shows the fault present — so there "
+    "is no read left that would change your ranking, and none is offered. Emit `remediate` to "
+    "act on the top hypothesis, or `stop` to hand off; a `stop` here must name in its reason "
+    "what you would need to SEE to act instead, because that sentence is what the human who "
+    "picks the incident up has to work from. The evidence trail carries this refusal in the "
+    "loop's own words."
+)
+
+
+class ProbeWithdrawn(StructuredOutput):
+    # NO class docstring, deliberately: this model is mixed into the step model a planner call
+    # is made with, and a docstring becomes the JSON schema's `description` (CLAUDE.md's rule
+    # about a Pydantic docstring that reaches a prompt). The reason the model needs to read
+    # travels on `next_action`'s own description instead, which is where it belongs.
+    model_config = ConfigDict(extra="forbid")
+
+    next_action: SettledNextAction = Field(description=SETTLED_CHOICE_DESCRIPTION)
+
+    @classmethod
+    def output_refused(cls, error: Exception) -> bool:
+        """A ``probe`` payload is this model REFUSING a move, never output it cannot read.
+
+        ``llm.structured.StructuredOutput.output_refused``'s hook, answered here: the caller
+        (``llm.repair.call_with_output_repair``) raises ``OutputNotOffered`` instead of
+        re-asking, because a re-ask carrying "your output was invalid" is the wrong sentence —
+        the output was readable and the move was not on offer. The loop then records the
+        refusal and gives the planner its next turn (ADR 0074).
+        """
+        return asked_for_a_probe(error)
+
+
+#: Built models, keyed by the model they narrow, so one planner call per step does not build a
+#: Pydantic class per step: ``model_json_schema()`` is cached per class, and a fresh class each
+#: time would re-generate the schema on every call and defeat the prompt cache.
+_WITHOUT_PROBE: Final[dict[type[BaseModel], type[BaseModel]]] = {}
+
+
+def without_probe[T: BaseModel](model: type[T]) -> type[T]:
+    """``model`` with ``probe`` withdrawn from ``next_action`` (ADR 0074).
+
+    Derived from the model handed in rather than written out for ``InvestigationStep`` alone:
+    the best-of-N arm's planner call takes a ``CandidateStep`` and the enumerated arm a
+    generated ``CandidateStep<n>``, and a narrowing that reached only the control group would
+    leave every other strategy able to probe exactly where the loop said it may not — the F1
+    failure one layer down. A subclass, so ``isinstance(step, InvestigationStep)`` and the
+    ranking validator both still hold.
+    """
+    cached = _WITHOUT_PROBE.get(model)
+    if cached is None:
+        cached = create_model(
+            f"Settled{model.__name__}",
+            __base__=(ProbeWithdrawn, model),
+            __module__=__name__,
+        )
+        _WITHOUT_PROBE[model] = cached
+    return cast(type[T], cached)
+
+
+#: Pydantic's own name for "the discriminator value is not one this union admits". Named
+#: because a string literal in a predicate is how a Pydantic upgrade turns a refusal into a
+#: silent escalation; ``tests/unit/test_hypothesis.py`` pins that Pydantic still says it.
+_UNION_TAG_INVALID: Final[str] = "union_tag_invalid"
+
+
+def asked_for_a_probe(error: Exception) -> bool:
+    """Whether a validation failure is a planner asking for the probe the schema withdrew.
+
+    Reads the structured errors rather than the message text, and looks at the cause as well:
+    ``LLMClient`` wraps a ``ValidationError`` in ``LLMOutputError`` (ADR 0007), so the real
+    complaint arrives one link down. Anything else — a missing field, an invented tag, an
+    unparseable payload — answers ``False`` and keeps ADR 0035's one bounded re-ask.
+    """
+    for candidate in (error, error.__cause__):
+        if not isinstance(candidate, ValidationError):
+            continue
+        for detail in candidate.errors():
+            if detail.get("type") != _UNION_TAG_INVALID:
+                continue
+            context = detail.get("ctx") or {}
+            if str(context.get("tag", "")) == ProbeAction.model_fields["kind"].default:
+                return True
+    return False

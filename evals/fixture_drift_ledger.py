@@ -1069,6 +1069,22 @@ _JUSTIFIED: Final[dict[tuple[object, ...], tuple[str, str]]] = {
         "element is the reading the ADR 0073 guard refuses, so a correct run never consumes "
         "it and no live walk could ever produce it; all three elements share this row",
     ),
+    # WO-R3-332 (ADR 0074), the sibling scenario's own row and the same mechanism one packet
+    # later. ONE row again, generic over the two elements, and the same three fields agree with
+    # the platform for the same reasons: `source` says `live` and so does the platform for
+    # `worker-dispatcher`, and the fixture's `list_dlq_messages` and `get_circuit_breakers`
+    # answers are the platform's own resting rows and breakers — declared here and observed
+    # clean, which is why neither tool appears in this ledger at all.
+    ("planner_probes_elsewhere_forever", "get_consumer_lag", "lag", "value"): (
+        CANNED_ONLY,
+        "the world is one reading of worker-dispatcher — 30, measured 8s ago, over samples "
+        "reading 0, 10, 30 — plus that same measurement re-served with its age grown to 52s, "
+        "and `use_live_mcp` is false, so the pair is the scenario's premise rather than a "
+        "recording of anything. The un-faulted world the check probes answers 0. The SECOND "
+        "element is the fourth ask for the group that ADR 0074 refuses by withdrawing the "
+        "probe, so a correct run never consumes it and no live walk could produce it; both "
+        "elements share this row",
+    ),
     # Group 2: a hot-set key nothing seeds. `create_stale_cache` writes
     # `cache:jobs:worker-dispatcher:hot_set`; this scenario's key is a different one, so the
     # un-faulted world answers `exists: false` with every field null. Five rows because an

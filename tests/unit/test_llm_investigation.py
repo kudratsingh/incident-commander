@@ -10,7 +10,7 @@ from uuid import UUID
 import pytest
 
 from incident_commander.agent.briefing import render_briefing, trail_of
-from incident_commander.agent.hypothesis import HypothesisCategory
+from incident_commander.agent.hypothesis import HypothesisCategory, InvestigationStep
 from incident_commander.agent.investigation import (
     _CONFIRMING_READ_REFUSED_MARKER,
     _MAX_CONFIRMING_READ_REFUSALS,
@@ -21,7 +21,7 @@ from incident_commander.agent.investigation import (
     reads_fault_present,
 )
 from incident_commander.agent.state import EvidenceEntry, IncidentState, RunState
-from incident_commander.llm.client import LLMResult
+from incident_commander.llm.client import LLMError, LLMResult
 from incident_commander.llm.fakes import CannedLLMClient, CannedUsage
 from incident_commander.tools import policies
 from incident_commander.tools.mcp_client import MCPError, ToolResult
@@ -1663,12 +1663,17 @@ class TestConfirmingReadBound:
             "the third read reached the platform"
         )
         refusals = self._refusals(result)
-        assert len(refusals) == 1
+        # TWO records for two narrowed steps (ADR 0074): the refusal is written BEFORE each
+        # narrowed call, so the step that asked for the third read carries one and the step
+        # that took the offered `stop` carries one as well — a call whose schema was narrowed
+        # says so on the trail whatever the planner then did with it.
+        assert len(refusals) == 2
         reason = refusals[0].result_summary
         assert "probe refused" in reason
         assert "is not more evidence" in reason
         # The narrowed choice, which is the half a bare refusal would leave out.
         assert "`remediate`" in reason and "`stop`" in reason
+        assert "No probe is offered this step" in reason
         assert refusals[0].arguments["remaining_decisions"] == ["remediate", "stop"]
         assert refusals[0].arguments["reads_already_taken"] == 2
         # The refusal is not terminal: the planner kept its turn and used it.
@@ -1688,13 +1693,17 @@ class TestConfirmingReadBound:
         assert len(self._lag_reads(result)) == 2
         assert self._refusals(result) == ()
 
-    def test_a_probe_of_a_different_tool_is_allowed(
+    def test_a_probe_of_a_different_tool_is_refused_once_the_ranking_has_settled(
         self, run_state: RunState, now: datetime
     ) -> None:
-        """Only the subject's own read is bounded: another tool is another question.
+        """ADR 0074 reverses ADR 0073 here, and this test is the record of it.
 
-        This is the difference between a bound and a ration, and it is what keeps the guard
-        off a run that is genuinely still investigating.
+        ADR 0073 bounded the SUBJECT's own read and left "probe something else" open, on the
+        reasoning that another tool is another question. The third live take answered the
+        refusal by reading `list_dlq_messages`, then `get_circuit_breakers`, then asking for the
+        group a fourth time — five steps, no action. A settled ranking with a fresh
+        fault-present reading of the alerted resource has no read left that would change it, so
+        the probe goes out of the schema entirely and a different tool is refused too.
         """
         llm = CannedLLMClient(
             [
@@ -1712,10 +1721,41 @@ class TestConfirmingReadBound:
 
         result = transition(_investigating(run_state, group="worker-dispatcher"), now)
 
+        assert [name for name, _ in mcp.calls] == ["get_consumer_lag", "get_consumer_lag"]
+        refusals = self._refusals(result)
+        assert len(refusals) == 2
+        assert "No probe is offered this step" in refusals[0].result_summary
+        assert "not of any other tool" in refusals[0].result_summary
+
+    def test_a_probe_of_a_different_tool_is_allowed_while_the_ranking_is_still_moving(
+        self, run_state: RunState, now: datetime
+    ) -> None:
+        """The bound is not a ration: an unsettled run keeps every read it might need.
+
+        One step over the bar is a ranking, not a settled one, so the step after it is offered
+        the whole schema — which is what keeps the guard off a run that is genuinely still
+        investigating.
+        """
+        llm = CannedLLMClient(
+            [
+                _saturation_probe(0.80),
+                _probe_step("list_dlq_messages", {}, category="transient_dependency"),
+                _probe_step("get_circuit_breakers", {}, category="consumer_saturation"),
+                {
+                    "hypotheses": [_hyp("consumer_saturation", 0.9)],
+                    "next_action": {"kind": "stop", "reason": "done"},
+                },
+            ]
+        )
+        mcp = _lag_mcp([_timed_lag_response(39)])
+        transition = make_llm_investigate(mcp, llm, model="m")
+
+        result = transition(_investigating(run_state, group="worker-dispatcher"), now)
+
         assert [name for name, _ in mcp.calls] == [
             "get_consumer_lag",
-            "get_consumer_lag",
             "list_dlq_messages",
+            "get_circuit_breakers",
         ]
         assert self._refusals(result) == ()
 
@@ -1896,7 +1936,10 @@ class TestConfirmingReadBound:
         result = transition(_investigating(run_state, group="worker-dispatcher"), now)
 
         assert len(mcp.calls) == 2
-        assert len(self._refusals(result)) == _MAX_CONFIRMING_READ_REFUSALS
+        # One record per narrowed call (ADR 0074), so the step that ends the run carries its
+        # own: the cap counts ASKS, and the third ask is the one that is not answered with a
+        # further turn. Two refusals taken, three refusals written.
+        assert len(self._refusals(result)) == _MAX_CONFIRMING_READ_REFUSALS + 1
         assert result.state is IncidentState.ESCALATED
         reason = result.evidence[-1].result_summary
         assert "3 times after being refused" in reason
@@ -1960,7 +2003,8 @@ class TestConfirmingReadBound:
         result = transition(_investigating(run_state, group="worker-dispatcher"), now)
 
         assert result.state is IncidentState.PLANNING
-        assert len(self._refusals(result)) == 1
+        # Two narrowed calls: the one that asked for a third read and the one that acted.
+        assert len(self._refusals(result)) == 2
 
 
 class TestTheFaultPresentReadingMap:
@@ -2084,3 +2128,365 @@ class TestTheExhaustedIterationsReason:
 
         assert briefing.escalation_reason.startswith("max iterations (1) exceeded")
         assert "'consumer_saturation'" in briefing.escalation_reason
+
+
+class _SchemaRecordingPlanner:
+    """A canned planner that also records the SCHEMA each call was made with.
+
+    ``CannedLLMClient`` validates against whatever model it is handed, which is what makes the
+    narrowing observable offline at all; this adds the two things ADR 0074's claims are about —
+    the model of each call, and the context that call was given.
+    """
+
+    def __init__(self, outputs: list[dict[str, Any]]) -> None:
+        self._outputs = list(outputs)
+        self.models: list[type[Any]] = []
+        self.messages: list[str] = []
+
+    @property
+    def unused(self) -> int:
+        """Payloads the run never asked for — how a repair leg shows up in a count."""
+        return len(self._outputs)
+
+    def call(
+        self,
+        system_prompt: str,
+        user_message: str,
+        output_model: type[Any],
+        model: str,
+        max_tokens: int = 4096,
+        *,
+        repair_of: str | None = None,
+        temperature: float | None = None,
+    ) -> LLMResult[Any]:
+        self.models.append(output_model)
+        self.messages.append(user_message)
+        if not self._outputs:
+            raise LLMError("no more canned responses")
+        payload = self._outputs.pop(0)
+        return LLMResult(
+            output=output_model.model_validate(payload),
+            input_tokens=0,
+            output_tokens=0,
+            cache_creation_tokens=0,
+            cache_read_tokens=0,
+            stop_reason="canned",
+        )
+
+
+def _offers_probe(model: type[Any]) -> bool:
+    """Whether the schema a call was made with offers the ``probe`` move at all.
+
+    Read off the JSON schema rather than the Python type, because the schema is what the model
+    is shown: a narrowing that did not reach ``model_json_schema()`` would be a narrowing the
+    planner never saw.
+    """
+    discriminated = model.model_json_schema()["properties"]["next_action"]
+    return "probe" in discriminated["discriminator"]["mapping"]
+
+
+class TestProbeWithdrawnOnceTheRankingIsSettled:
+    """ADR 0074 (WO-R3-332, F1): the planner acts or hands off — it cannot probe elsewhere.
+
+    ADR 0073 bounded re-reading the SUBJECT and the third live take took the door that left
+    open: refused a third `get_consumer_lag`, then read `list_dlq_messages`, then
+    `get_circuit_breakers`, then asked for the lag a fourth time. Confidence 0.75 → 0.82
+    throughout, `consumer_saturation` first at every step, and no action in five steps. So the
+    move is withdrawn from the SCHEMA of the next call, where there is no door.
+    """
+
+    def _refusals(self, result: RunState) -> tuple[EvidenceEntry, ...]:
+        return tuple(
+            entry for entry in result.evidence if entry.tool_name == _CONFIRMING_READ_REFUSED_MARKER
+        )
+
+    def _settled_run(self, outputs: list[dict[str, Any]]) -> _SchemaRecordingPlanner:
+        return _SchemaRecordingPlanner(outputs)
+
+    def test_the_schema_of_the_settled_step_offers_only_remediate_or_stop(
+        self, run_state: RunState, now: datetime
+    ) -> None:
+        """The marquee claim, read off the schema each call was actually made with."""
+        planner = self._settled_run(
+            [
+                _saturation_probe(0.80),
+                _probe_step("list_dlq_messages", {}, category="consumer_saturation"),
+                {
+                    "hypotheses": [_hyp("consumer_saturation", 0.85)],
+                    "next_action": {"kind": "remediate", "reason": "restart the group"},
+                },
+            ]
+        )
+        mcp = _lag_mcp([_timed_lag_response(30)])
+        transition = make_llm_investigate(mcp, planner, model="m")
+
+        result = transition(_investigating(run_state, group="worker-dispatcher"), now)
+
+        # Steps 1 and 2 are offered everything: one step over the bar is a ranking, not a
+        # settled one. Step 3 is the settled one, and it has no probe to take.
+        assert [_offers_probe(model) for model in planner.models] == [True, True, False]
+        assert result.state is IncidentState.PLANNING
+
+    def test_a_probe_of_a_different_tool_is_what_this_closes(
+        self, run_state: RunState, now: datetime
+    ) -> None:
+        """F1 itself: the take's own move, refused rather than executed.
+
+        The scripted planner probes a DIFFERENT tool each step — exactly what the live planner
+        did after ADR 0073's refusal — and only two of its five reads ever reach the platform.
+        """
+        planner = self._settled_run(
+            [
+                _saturation_probe(0.80),
+                _probe_step("list_dlq_messages", {}, category="consumer_saturation"),
+                _probe_step("get_circuit_breakers", {}, category="consumer_saturation"),
+                _probe_step("search_traces", {}, category="consumer_saturation"),
+                _saturation_probe(0.82),
+            ]
+        )
+        mcp = _lag_mcp([_timed_lag_response(30)])
+        transition = make_llm_investigate(mcp, planner, model="m")
+
+        result = transition(_investigating(run_state, group="worker-dispatcher"), now)
+
+        assert [name for name, _ in mcp.calls] == ["get_consumer_lag", "list_dlq_messages"]
+        assert result.state is IncidentState.ESCALATED
+        reason = result.evidence[-1].result_summary
+        assert "3 times after being refused" in reason
+        # And what it bought: the reads it did not take are not in the handoff either.
+        assert "the reads it took were get_consumer_lag, list_dlq_messages" in reason
+
+    def test_the_refused_call_is_told_why_in_its_own_context(
+        self, run_state: RunState, now: datetime
+    ) -> None:
+        """The reason reaches the model in the SAME turn its schema lost the probe.
+
+        A choice that shrinks without saying why is a model guessing, and ADR 0073's refusal
+        was only readable one step later — on the next call's context.
+        """
+        planner = self._settled_run(
+            [
+                _saturation_probe(0.80),
+                _probe_step("list_dlq_messages", {}, category="consumer_saturation"),
+                {
+                    "hypotheses": [_hyp("consumer_saturation", 0.85)],
+                    "next_action": {
+                        "kind": "stop",
+                        "reason": "handing off: I would need a "
+                        "reading of the group AFTER a restart to say more",
+                    },
+                },
+            ]
+        )
+        mcp = _lag_mcp([_timed_lag_response(30)])
+        transition = make_llm_investigate(mcp, planner, model="m")
+
+        transition(_investigating(run_state, group="worker-dispatcher"), now)
+
+        settled_context = planner.messages[2]
+        assert "probe refused" in settled_context
+        assert "No probe is offered this step" in settled_context
+        # And the schema says it too, in the field the model fills in.
+        narrowed = planner.models[2].model_json_schema()["properties"]["next_action"]
+        assert "no probe" in narrowed["description"]
+        assert "what you would need to SEE to act" in narrowed["description"]
+
+    def test_a_stop_at_the_narrowed_step_is_an_escalation(
+        self, run_state: RunState, now: datetime
+    ) -> None:
+        """The other offered move. It ends the run ESCALATED, carrying its own reason."""
+        planner = self._settled_run(
+            [
+                _saturation_probe(0.80),
+                _probe_step("list_dlq_messages", {}, category="consumer_saturation"),
+                {
+                    "hypotheses": [_hyp("consumer_saturation", 0.85)],
+                    "next_action": {
+                        "kind": "stop",
+                        "reason": "I would need to see a consumer-group member list to act",
+                    },
+                },
+            ]
+        )
+        mcp = _lag_mcp([_timed_lag_response(30)])
+        transition = make_llm_investigate(mcp, planner, model="m")
+
+        result = transition(_investigating(run_state, group="worker-dispatcher"), now)
+
+        assert result.state is IncidentState.ESCALATED
+        assert result.evidence[-1].tool_name == "_planner_stop"
+        assert "member list" in result.evidence[-1].result_summary
+
+    def test_the_withdrawn_move_is_refused_rather_than_re_asked(
+        self, run_state: RunState, now: datetime
+    ) -> None:
+        """ADR 0035's re-ask is for an output nobody can read, and this one was readable.
+
+        Measured by what the script has left: a repair would consume the next payload as this
+        step's correction, which against a scripted planner reads the NEXT step's answer.
+        """
+        planner = self._settled_run(
+            [
+                _saturation_probe(0.80),
+                _probe_step("list_dlq_messages", {}, category="consumer_saturation"),
+                _probe_step("get_circuit_breakers", {}, category="consumer_saturation"),
+                {
+                    "hypotheses": [_hyp("consumer_saturation", 0.85)],
+                    "next_action": {"kind": "remediate", "reason": "restart the group"},
+                },
+            ]
+        )
+        mcp = _lag_mcp([_timed_lag_response(30)])
+        transition = make_llm_investigate(mcp, planner, model="m")
+
+        result = transition(_investigating(run_state, group="worker-dispatcher"), now)
+
+        # Four calls, four payloads, in order: the refused step consumed exactly its own.
+        assert len(planner.models) == 4
+        assert planner.unused == 0
+        assert result.state is IncidentState.PLANNING
+
+    def test_a_refused_call_costs_no_tool_call_and_no_tokens(
+        self, run_state: RunState, now: datetime
+    ) -> None:
+        planner = self._settled_run(
+            [
+                _saturation_probe(0.80),
+                _probe_step("list_dlq_messages", {}, category="consumer_saturation"),
+                _probe_step("get_circuit_breakers", {}, category="consumer_saturation"),
+                {
+                    "hypotheses": [_hyp("consumer_saturation", 0.85)],
+                    "next_action": {"kind": "remediate", "reason": "restart the group"},
+                },
+            ]
+        )
+        mcp = _lag_mcp([_timed_lag_response(30)])
+        transition = make_llm_investigate(mcp, planner, model="m")
+
+        result = transition(_investigating(run_state, group="worker-dispatcher"), now)
+
+        assert result.budget.tool_calls_used == 2
+        # The canned planner bills nothing, so a refused call cannot silently charge one:
+        # ``accrue_llm_error`` charges what the failure reports and this one reports nothing.
+        assert result.budget.tokens_used == 0
+
+    def test_it_is_inert_while_the_ranking_has_not_settled(
+        self, run_state: RunState, now: datetime
+    ) -> None:
+        """One step over the bar, then one under: the whole schema, every step."""
+        planner = self._settled_run(
+            [
+                _saturation_probe(0.85),
+                _probe_step("list_dlq_messages", {}, category="transient_dependency"),
+                _probe_step("get_circuit_breakers", {}, category="consumer_saturation"),
+            ]
+        )
+        mcp = _lag_mcp([_timed_lag_response(30)])
+        transition = make_llm_investigate(mcp, planner, model="m", max_iterations=3)
+
+        result = transition(_investigating(run_state, group="worker-dispatcher"), now)
+
+        assert all(_offers_probe(model) for model in planner.models)
+        assert self._refusals(result) == ()
+
+    def test_it_is_inert_when_no_reading_shows_the_fault_present(
+        self, run_state: RunState, now: datetime
+    ) -> None:
+        """The narrowing needs a reading that says the fault is here, NOW.
+
+        A drained backlog (ADR 0071's "it cleared on its own") and a reading whose age the
+        platform did not report both leave the choice whole — the same inert direction ADR 0073
+        chose, kept because acting on a measurement the run cannot date is the mirror failure.
+        """
+        for reading in (_timed_lag_response(0), _timed_lag_response(30, age_seconds=None)):
+            planner = self._settled_run(
+                [
+                    _saturation_probe(0.85),
+                    _saturation_probe(0.85),
+                    _probe_step("get_circuit_breakers", {}, category="consumer_saturation"),
+                ]
+            )
+            transition = make_llm_investigate(
+                _lag_mcp([reading]), planner, model="m", max_iterations=3
+            )
+
+            result = transition(_investigating(run_state, group="worker-dispatcher"), now)
+
+            assert all(_offers_probe(model) for model in planner.models), reading
+            assert self._refusals(result) == ()
+
+    def test_it_is_inert_when_the_alert_names_no_subject(
+        self, run_state: RunState, now: datetime
+    ) -> None:
+        """No subject, no reading to be settled about: a whole-queue alert names a condition."""
+        planner = self._settled_run(
+            [
+                _saturation_probe(0.85),
+                _saturation_probe(0.85),
+                _probe_step("get_circuit_breakers", {}, category="consumer_saturation"),
+            ]
+        )
+        transition = make_llm_investigate(
+            _lag_mcp([_timed_lag_response(30)]), planner, model="m", max_iterations=3
+        )
+        subjectless = run_state.model_copy(
+            update={
+                "state": IncidentState.INVESTIGATING,
+                "alert": {"source": "kafka", "severity": "high"},
+            }
+        )
+
+        result = transition(subjectless, now)
+
+        assert alert_subject(subjectless.alert) is None
+        assert all(_offers_probe(model) for model in planner.models)
+        assert self._refusals(result) == ()
+
+    def test_a_probe_assembled_in_python_is_refused_too(
+        self, run_state: RunState, now: datetime
+    ) -> None:
+        """The schema is not the only door, so the loop closes the other one.
+
+        Two strategies build their emitted step in Python from a selected candidate
+        (`candidate_selector`, `search`), so a narrowed schema they honoured on the CALL cannot
+        bind what they assemble from its answer. The loop refuses a probe that arrives while
+        the move is withdrawn, whoever produced it — this fake is that shape reduced to its
+        essentials: a planner whose output never went through the narrowed model.
+        """
+
+        class _IgnoresTheSchema(_SchemaRecordingPlanner):
+            def call(self, *args: Any, **kwargs: Any) -> LLMResult[Any]:
+                result = super().call(*args, **kwargs)
+                if _offers_probe(self.models[-1]):
+                    return result
+                # The narrowed step, answered with a probe anyway: what a step assembled in
+                # Python looks like from the loop's side — a move that never went through the
+                # schema of the call it came out of.
+                return LLMResult(
+                    output=InvestigationStep.model_validate(
+                        _probe_step("get_circuit_breakers", {}, category="consumer_saturation")
+                    ),
+                    input_tokens=0,
+                    output_tokens=0,
+                    cache_creation_tokens=0,
+                    cache_read_tokens=0,
+                    stop_reason="canned",
+                )
+
+        planner = _IgnoresTheSchema(
+            [
+                _saturation_probe(0.80),
+                _saturation_probe(0.82),
+                _saturation_probe(0.82),
+                _saturation_probe(0.82),
+                _saturation_probe(0.82),
+            ]
+        )
+        mcp = _lag_mcp([_timed_lag_response(30)])
+        transition = make_llm_investigate(mcp, planner, model="m")
+
+        result = transition(_investigating(run_state, group="worker-dispatcher"), now)
+
+        assert [name for name, _ in mcp.calls] == ["get_consumer_lag", "get_consumer_lag"]
+        assert result.state is IncidentState.ESCALATED
+        assert "3 times after being refused" in result.evidence[-1].result_summary

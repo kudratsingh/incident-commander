@@ -123,7 +123,10 @@ class ReflectionStrategy:
                 "would report the critique's tokens under the planner's role, and "
                 '"added tokens" is the number this arm exists to report.'
             )
-        planned, initial_step, planner = _plan_next_step(run_state, at, ctx.llm_client, ctx.model)
+        step_model = ctx.step_model(InvestigationStep)
+        planned, initial_step, planner = _plan_next_step(
+            run_state, at, ctx.llm_client, ctx.model, step_model
+        )
         budget = RevisionPass()
         try:
             critic = critique_step(
@@ -165,7 +168,14 @@ class ReflectionStrategy:
         # render could differ from the string the model saw.
         revision_context = format_revision_context(run_state, initial_step, critique)
         try:
-            revision = revise_step(ctx.llm_client, user_message=revision_context, model=ctx.model)
+            revision = revise_step(
+                ctx.llm_client,
+                user_message=revision_context,
+                model=ctx.model,
+                # The revision is the same step under the same schema: a narrowing the
+                # first call was held to cannot lapse because a critic spoke (ADR 0074).
+                output_model=step_model,
+            )
         except Exception as err:
             raise ReflectionFailed(
                 REVISION_STAGE,

@@ -22,7 +22,7 @@ from evals.graders.llm_judge import JudgeScore, judge_briefing
 from evals.runner import _classify_failure
 from incident_commander.agent.briefing import EscalationBriefing
 from incident_commander.agent.briefing_enrichment import BriefingContent, enrich_briefing
-from incident_commander.agent.hypothesis import InvestigationStep
+from incident_commander.agent.hypothesis import InvestigationStep, without_probe
 from incident_commander.agent.investigation import make_llm_investigate
 from incident_commander.agent.remediation import RemediationPlan, make_llm_verify
 from incident_commander.agent.state import BudgetLedger, EvidenceEntry, IncidentState, RunState
@@ -35,6 +35,7 @@ from incident_commander.llm.repair import (
     OUTPUT_INVALID_PREFIXES,
     PLANNER_OUTPUT_INVALID_CLASS,
     VERIFY_JUDGE_INVALID,
+    OutputNotOffered,
     OutputRepairExhausted,
     call_with_output_repair,
     repair_message,
@@ -676,3 +677,94 @@ class TestBriefingContentStillRejectsEmptyStrings:
     def test_an_empty_findings_string_is_still_invalid(self) -> None:
         with pytest.raises(ValidationError):
             BriefingContent.model_validate({"findings": "", "recommendation": "x"})
+
+
+class TestARefusedMoveIsNotRepaired:
+    """ADR 0074: one failure is never re-asked — the move the schema did not offer.
+
+    ADR 0035's re-ask exists for output nobody can read, and its turn says so ("your output
+    was invalid"). A ``probe`` under a schema whose ``next_action`` offers ``remediate`` and
+    ``stop`` is not that: it was perfectly readable and the move was withdrawn. Two reasons to
+    refuse instead of re-asking, and both are practical — a second billed call to be told the
+    same thing, and, against a scripted planner, a correction served from the NEXT step's answer.
+    """
+
+    _PROBE: Final[dict[str, Any]] = {
+        "hypotheses": [{"category": "unknown", "name": "n", "confidence": 0.5, "reasoning": "r"}],
+        "next_action": {"kind": "probe", "tool_name": "get_consumer_lag", "arguments": {}},
+    }
+
+    def test_a_withdrawn_move_raises_without_a_second_call(self) -> None:
+        llm = _ScriptedLLM([self._PROBE, _GOOD_STEP])
+
+        with pytest.raises(OutputNotOffered):
+            call_with_output_repair(
+                llm,
+                system_prompt="s",
+                user_message="u",
+                output_model=without_probe(InvestigationStep),
+                model="m",
+            )
+
+        assert len(llm.calls) == 1, "the withdrawn move was re-asked instead of refused"
+
+    def test_the_refusal_carries_what_the_call_billed(self) -> None:
+        """A refused call is a billed call (ADR 0015): the ledger charges what it reports.
+
+        This is the LIVE shape — ``LLMClient`` raises ``LLMOutputError`` with the usage and the
+        ``ValidationError`` as its cause (ADR 0007) — so it also pins that the refusal is read
+        through the cause rather than off the message text.
+        """
+        narrowed = without_probe(InvestigationStep)
+        try:
+            narrowed.model_validate(self._PROBE)
+        except ValidationError as cause:
+            failure = _output_error(
+                usage=LLMUsage(input_tokens=11, output_tokens=3), record_id="r1"
+            )
+            failure.__cause__ = cause
+        llm = _ScriptedLLM([failure])
+
+        with pytest.raises(OutputNotOffered) as raised:
+            call_with_output_repair(
+                llm,
+                system_prompt="s",
+                user_message="u",
+                output_model=narrowed,
+                model="m",
+            )
+
+        assert len(llm.calls) == 1
+        assert raised.value.usage == LLMUsage(input_tokens=11, output_tokens=3)
+        assert raised.value.record_id == "r1"
+
+    def test_a_malformed_payload_still_gets_its_one_re_ask(self) -> None:
+        """The narrowing changes nothing about the failure ADR 0035 is about."""
+        llm = _ScriptedLLM([_BAD_STEP, {**_GOOD_STEP}])
+
+        call = call_with_output_repair(
+            llm,
+            system_prompt="s",
+            user_message="u",
+            output_model=without_probe(InvestigationStep),
+            model="m",
+        )
+
+        assert len(llm.calls) == 2
+        assert call.was_repaired
+        assert load_prompt("output_repair").split("{error}")[0].strip() in llm.calls[1][1]
+
+    def test_the_whole_schema_re_asks_a_probe_like_anything_else(self) -> None:
+        """Nothing changed for a call the loop did not narrow: a probe is a valid answer."""
+        llm = _ScriptedLLM([self._PROBE])
+
+        call = call_with_output_repair(
+            llm,
+            system_prompt="s",
+            user_message="u",
+            output_model=InvestigationStep,
+            model="m",
+        )
+
+        assert len(llm.calls) == 1
+        assert not call.was_repaired

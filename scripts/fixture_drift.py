@@ -181,8 +181,10 @@ def main(argv: list[str] | None = None) -> int:
                 "nothing written, nothing disproved"
             )
         before = load_ledger()
-        carried, disproved = split_for_bless({drift.key for drift in drifts}, before, compared)
-        count = dump_ledger(drifts, checked=compared)
+        carried, disproved = split_for_bless(
+            {drift.key for drift in drifts}, before, compared, stack_context=result.stack_context
+        )
+        count = dump_ledger(drifts, checked=compared, stack_context=result.stack_context)
         defects = defect_count()
         print(f"wrote {count} known-drift entries to evals/fixture-drift-ledger.json")
         print(f"  {defects} are fixture defects — the burn-down number")

@@ -10,6 +10,7 @@ import json
 from collections.abc import Callable, Mapping
 from datetime import UTC, datetime
 from decimal import Decimal
+from pathlib import Path
 from typing import Any, Final
 from uuid import UUID
 
@@ -29,13 +30,16 @@ from incident_commander.agent.remediation import (
     DEAD_LETTER_ACTIONS,
     DLQ_LISTING_SCOPES,
     DLQ_ROW_SOURCE,
+    GRAPH_VIEW_FOR_SUBJECT,
     RemediationPlan,
     SubjectKind,
     _evidence_value_corpus,
     _format_plan_context,
+    _graph_nodes_in_evidence,
     _row_decisions_in_evidence,
     _row_source_for_subject,
     _subject_kind,
+    _unaddressed_alert_subject,
     _unsourced_resource_args,
     build_idempotency_key,
     make_llm_plan,
@@ -3818,6 +3822,316 @@ class TestTheActionMustAddressTheAlertsSubject:
         assert decisions[self._CHAOS_ROW] is None
         assert decisions[self._SAFE_ROW] == "replay_safe"
         assert "never-listed-id" not in decisions
+
+
+class TestAChainNodeActionIsAdmittedByTheChainsOwnReading:
+    """ADR 0070 (amending ADR 0032): a node of the ALERTED chain is a legitimate target.
+
+    ADR 0032's RESOURCE test is value equality — ``subject.value in acted`` — which is
+    right for a consumer group and wrong for a dependency chain, because a chain's fault
+    is frequently one hop below the job the page names. WP-7.2 measured the consequence
+    (ADR 0053 § 4): under the `workflow_stuck` family's shared alert the subject is the
+    chain ROOT, so ``mark_dlq_permanent(job_id=<step-1>)`` was refused while
+    ``investigation_planner.md``'s `human_required` rule told the agent to take exactly
+    that action — half a rule, which is INC-002's failure, and a world the plan asked for
+    had to be dropped.
+
+    The widening is EVIDENCE-GROUNDED, and that is the whole safety argument. Admission
+    needs a ``get_dag_state`` reading THE RUN ALREADY HOLDS whose own ``seed_id`` is the
+    alerted subject and whose ``nodes`` name the id being acted on. So the guard still
+    refuses every shape it was built to refuse: an id nothing read (the planner inventing
+    a target), a node of a DIFFERENT chain, and a batch that reaches outside the chain.
+    Nothing here is decided from free text, and nothing is decided from the plan's own
+    claims about what it is doing.
+    """
+
+    #: The `workflow_stuck` family's chain, as ``create_stuck_dag`` derives it from
+    #: ``chain_name="workflow-stuck-eval"``. Literals here rather than a recomputation,
+    #: because ``tests/unit/test_policies.py::TestWorkflowStuckFamily`` recomputes them
+    #: from the platform's published namespace at every site that names them.
+    _ROOT = "4a30546f-d3c5-549f-a772-633c0b26219d"
+    _UPSTREAM = "404c3151-cdc6-511e-8532-471693d5cfe1"
+    _STEP_1 = "7fb11dea-d182-5033-a4d0-2d2a645eb1df"
+    #: A node of ANOTHER chain (`saga-stuck-eval`'s root), read in this run but not part
+    #: of the alerted chain's own view.
+    _OTHER_CHAIN_ROOT = "87f50f4d-ca7e-508e-9820-63c1a24c8f52"
+    #: Boot-seeded DLQ furniture: read, replayable-looking, and somebody else's incident.
+    _FURNITURE = "fc8d2a03-23b3-5371-9acb-46443c73baa5"
+    #: An id no reading in this run carries.
+    _INVENTED = "00000000-0000-5000-8000-000000000000"
+
+    _CHAIN_ALERT: Final[dict[str, Any]] = {
+        "source": "platform.dag",
+        "severity": "critical",
+        "fingerprint": "workflow_not_advancing",
+        "job_id": _ROOT,
+        "summary": (
+            "a workflow is not advancing; the dependency chain rooted at this job has a "
+            "descendant that has not run"
+        ),
+    }
+
+    def _chain_reading(self, seed: str, nodes: tuple[str, ...]) -> EvidenceEntry:
+        """One ``get_dag_state`` reading, as the investigation loop records it."""
+        return EvidenceEntry(
+            tool_name="get_dag_state",
+            arguments={"job_id": seed},
+            result_summary=json.dumps(
+                {
+                    "seed_id": seed,
+                    "nodes": [
+                        {
+                            "id": node,
+                            "type": "bulk_api_sync",
+                            "status": "waiting",
+                            "retry_count": 0,
+                            "created_at": "2026-09-18T23:30:19.698767Z",
+                        }
+                        for node in nodes
+                    ],
+                    "edges": [],
+                    "paused": False,
+                    "paused_expires_in_seconds": None,
+                    "paused_by": None,
+                }
+            ),
+            timestamp=_now(),
+        )
+
+    def _alerted_chain(self) -> EvidenceEntry:
+        return self._chain_reading(self._ROOT, (self._ROOT, self._UPSTREAM, self._STEP_1))
+
+    def _run(self, *evidence: EvidenceEntry) -> RunState:
+        return _run_state(
+            state=IncidentState.PLANNING,
+            alert=self._CHAIN_ALERT,
+            hypotheses=(
+                Hypothesis(
+                    category=HypothesisCategory.POISON_MESSAGE,
+                    name="a node in the chain cannot succeed",
+                    confidence=0.85,
+                    reasoning="the chain's dead-lettered descendant carries bad data",
+                ),
+            ),
+            evidence=evidence,
+        )
+
+    def _fence(self, job_id: str) -> RemediationPlan:
+        return RemediationPlan(
+            target_hypothesis="a node in the chain cannot succeed",
+            action_tool="mark_dlq_permanent",
+            action_arguments={
+                "job_id": job_id,
+                "reason": "The stored payload is missing a required field, so no replay helps.",
+            },
+            verify_tool="list_dlq_messages",
+            verify_arguments={"limit": 50},
+            verify_expectation="the row carries a fenced_at where it read null before",
+        )
+
+    def _replay(self, *job_ids: str) -> RemediationPlan:
+        return RemediationPlan(
+            target_hypothesis="a node in the chain cannot succeed",
+            action_tool="replay_dlq_by_ids",
+            action_arguments={"job_ids": list(job_ids), "idempotency_key": "k" * 10},
+            verify_tool="get_dag_state",
+            verify_arguments={"job_id": self._ROOT},
+            verify_expectation="the chain drains",
+        )
+
+    # -- admitted, because the alerted chain's own reading names the node ---
+
+    def test_a_fence_on_the_chains_dead_lettered_descendant_is_admitted(self) -> None:
+        """The action ADR 0053 § 4 could not take, taken.
+
+        The alert names the root, the row to fence is one hop below it, and the run's own
+        ``get_dag_state(<root>)`` reading names that hop as a node of this chain.
+        """
+        assert (
+            _unaddressed_alert_subject(self._fence(self._STEP_1), self._run(self._alerted_chain()))
+            is None
+        )
+
+    def test_a_by_id_replay_of_that_descendant_is_admitted(self) -> None:
+        """The other tool ADR 0053 § 4 measured as refused, for the same reason."""
+        assert (
+            _unaddressed_alert_subject(self._replay(self._STEP_1), self._run(self._alerted_chain()))
+            is None
+        )
+
+    def test_the_subject_itself_is_still_admitted(self) -> None:
+        """ADR 0032's own test, unchanged: this widens the guard and replaces nothing."""
+        assert (
+            _unaddressed_alert_subject(self._fence(self._ROOT), self._run(self._alerted_chain()))
+            is None
+        )
+
+    def test_the_upstream_parent_is_admitted_too(self) -> None:
+        """The reading is the boundary, and it reaches one hop in BOTH directions.
+
+        Stated as a test rather than left implicit: what the guard admits is exactly the
+        node set the run read, so a completed upstream parent in that view is admissible
+        while a node behind step-1 — which ``get_dag_state`` cannot see from the root — is
+        not, until some reading names it.
+        """
+        assert (
+            _unaddressed_alert_subject(
+                self._fence(self._UPSTREAM), self._run(self._alerted_chain())
+            )
+            is None
+        )
+
+    # -- still refused, which is what makes the widening safe ---------------
+
+    def test_an_id_no_reading_names_is_still_refused(self) -> None:
+        """Evidence-grounded, not free text: a made-up id has no licence."""
+        miss = _unaddressed_alert_subject(
+            self._fence(self._INVENTED), self._run(self._alerted_chain())
+        )
+        assert miss is not None
+        assert miss.kind is SubjectKind.RESOURCE
+        assert miss.subject.value == self._ROOT
+        assert self._INVENTED in miss.reason
+
+    def test_a_node_of_another_chain_is_refused(self) -> None:
+        """The scope is ONE DAG, and ``seed_id`` is what says which.
+
+        Without the ``seed_id`` comparison this would pass: the id is a real node, read in
+        this run, of a real chain. It is not a node of the chain the alert is about, and
+        this suite seeds three stuck chains at once.
+        """
+        run = self._run(
+            self._alerted_chain(),
+            self._chain_reading(self._OTHER_CHAIN_ROOT, (self._OTHER_CHAIN_ROOT,)),
+        )
+        miss = _unaddressed_alert_subject(self._fence(self._OTHER_CHAIN_ROOT), run)
+        assert miss is not None
+        assert miss.subject.value == self._ROOT
+
+    def test_the_descendant_is_refused_when_the_run_never_read_the_chain(self) -> None:
+        """No reading, no admission — the guard does not take the plan's word for it."""
+        miss = _unaddressed_alert_subject(self._fence(self._STEP_1), self._run())
+        assert miss is not None
+        assert miss.subject.value == self._ROOT
+
+    def test_a_batch_mixing_a_chain_node_with_queue_furniture_is_refused(self) -> None:
+        """Every id the action names has to be in the chain, or the action reaches outside it.
+
+        This is the ``off_slice`` shape the CATEGORY and UNCLASSIFIED arms already refuse,
+        and it is the one that matters here: the family's queue holds four replayable-looking
+        rows belonging to other incidents, so "fix my chain and sweep the queue while I am
+        here" must not be bought by the chain half of the batch.
+        """
+        miss = _unaddressed_alert_subject(
+            self._replay(self._STEP_1, self._FURNITURE), self._run(self._alerted_chain())
+        )
+        assert miss is not None
+        assert self._FURNITURE in miss.reason
+
+    def test_a_batch_naming_the_subject_and_furniture_is_still_admitted(self) -> None:
+        """ADR 0032's equality arm is untouched, deliberately, and this pins that.
+
+        A batch carrying the subject itself passed the subject guard before this change and
+        still does — the sweep is caught by ``forbidden_replay_job_ids`` and by ADR 0041's
+        whole-queue rule, not here. Tightening it would be a separate safety decision, and
+        making it silently as part of a widening is how a guard's scope drifts.
+        """
+        assert (
+            _unaddressed_alert_subject(
+                self._replay(self._ROOT, self._FURNITURE), self._run(self._alerted_chain())
+            )
+            is None
+        )
+
+    def test_a_non_graph_subject_is_unaffected_by_a_chain_reading(self) -> None:
+        """The admission is keyed on the SUBJECT's own probe, so it is inert elsewhere.
+
+        A consumer-group alert with a chain reading in evidence must not buy a DLQ replay:
+        `adcdcadd94a3`'s exact shape, and the reason this table is keyed on the probe tool
+        rather than asking whether a graph reading exists anywhere in the run.
+        """
+        run = _run_state(
+            state=IncidentState.PLANNING,
+            alert=_GROUP_ALERT,
+            evidence=(self._alerted_chain(), _dlq_listing()),
+        )
+        miss = _unaddressed_alert_subject(self._replay(self._STEP_1), run)
+        assert miss is not None
+        assert miss.subject.value == "worker-dispatcher"
+
+    # -- end to end through the planner, and the derivation ------------------
+
+    def test_the_fence_reaches_the_plan_instead_of_a_refusal(self) -> None:
+        """The whole point, driven through ``make_llm_plan`` rather than the predicate.
+
+        One planner call, no refusal marker, a plan on the state — the run can now REACH
+        the action the fifth world grades.
+        """
+        plan = _plan_dict(
+            target_hypothesis="a node in the chain cannot succeed",
+            action_tool="mark_dlq_permanent",
+            action_arguments={
+                "job_id": self._STEP_1,
+                "reason": "The stored payload is missing a required field; a replay re-fails.",
+            },
+            verify_tool="list_dlq_messages",
+            verify_arguments={"limit": 50},
+            verify_expectation="the row carries a fenced_at where it read null before",
+        )
+        run = self._run(self._alerted_chain(), _dlq_listing())
+        result = make_llm_plan(CannedLLMClient([plan]), model=_MODEL)(run, _now())
+        assert result.state is IncidentState.REMEDIATING
+        assert result.remediation_plan is not None
+        assert result.remediation_plan["action_arguments"]["job_id"] == self._STEP_1
+        assert not [
+            e for e in result.evidence if e.tool_name == _PLAN_REFUSED_SUBJECT_TARGET_MARKER
+        ]
+
+    def test_the_graph_view_is_declared_against_the_subject_map(self) -> None:
+        """Anti-vacuity, both directions.
+
+        Every entry has to be a real subject probe, or the admission is dead code that
+        looks alive; and ``get_dag_state`` has to be present, or the fifth world's fence is
+        refused again with nothing failing here.
+        """
+        from incident_commander.agent.investigation import ALERT_SUBJECT_PROBES
+
+        probes = {probe.tool_name for probe in ALERT_SUBJECT_PROBES.values()}
+        assert set(GRAPH_VIEW_FOR_SUBJECT) <= probes
+        assert "get_dag_state" in GRAPH_VIEW_FOR_SUBJECT
+
+    def test_the_graph_view_fields_are_the_tools_own_output_schema(self) -> None:
+        """The fields are read off the pinned contract, never remembered.
+
+        A renamed response field would otherwise make the admission silently inert — the
+        node set would come back empty and every descendant action would be refused again,
+        with the fifth world red and no test saying why.
+        """
+        root = Path(__file__).resolve().parents[2]
+        snapshot = json.loads((root / "contracts" / "platform-tools.snapshot.json").read_text())
+        by_name = {tool["name"]: tool for tool in snapshot["tools"]}
+        for tool_name, view in GRAPH_VIEW_FOR_SUBJECT.items():
+            schema = by_name[tool_name]["outputSchema"]
+            assert view.subject_field in schema["properties"], tool_name
+            assert view.nodes_field in schema["properties"], tool_name
+            node_schema = schema["$defs"][
+                schema["properties"][view.nodes_field]["items"]["$ref"].rsplit("/", 1)[-1]
+            ]
+            assert view.id_field in node_schema["properties"], tool_name
+
+    def test_the_node_set_is_scoped_to_the_alerted_chain(self) -> None:
+        """The helper, directly: one reading in, the chain's own node ids out."""
+        from incident_commander.agent.investigation import alert_subject
+
+        subject = alert_subject(self._CHAIN_ALERT)
+        assert subject is not None
+        run = self._run(
+            self._alerted_chain(),
+            self._chain_reading(self._OTHER_CHAIN_ROOT, (self._OTHER_CHAIN_ROOT,)),
+        )
+        assert _graph_nodes_in_evidence(run.evidence, subject) == frozenset(
+            {self._ROOT, self._UPSTREAM, self._STEP_1}
+        )
 
 
 class TestResolvedRequiresTheAlertedConditionCleared:

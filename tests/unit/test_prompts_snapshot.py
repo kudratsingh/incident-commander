@@ -31,6 +31,7 @@ from incident_commander.llm.prompts.loader import (
     raw_prompt,
 )
 from incident_commander.llm.prompts.shared_rules import (
+    CHAIN_NODE_ACTION_RULE,
     SHARED_RULES,
     STUCK_CHAIN_ROOT_RULE,
     UNRESOLVED_REMAINDER_RULE,
@@ -57,6 +58,17 @@ _REMAINDER_RULE_READERS: Final[tuple[str, ...]] = (
     "briefing_writer",
 )
 
+# WO-R3-284's readers of "which node of a chain an action may name" (ADR 0070). The same
+# three as the stuck-chain rule, and necessarily so: the routing rule says WHICH TOOL a
+# chain's dead-letter row gets and this one says WHICH NODE it is aimed at, so any reader
+# bound by one is answering an incomplete question without the other. Compared against
+# the directory in both directions, as above.
+_CHAIN_NODE_RULE_READERS: Final[tuple[str, ...]] = (
+    "briefing_judge",
+    "investigation_planner",
+    "remediation_planner",
+)
+
 # Every category the planner may emit, in a stable order, built from the enum so a
 # new ``HypothesisCategory`` value adds a case on the next collection.
 _CATEGORIES: Final[tuple[HypothesisCategory, ...]] = tuple(
@@ -76,7 +88,10 @@ _EXPECTED_HASHES: Final[dict[str, str]] = {
     # `llm/prompts/shared_rules.py` and expanded by `load_prompt`. The hashes are taken
     # over the SERVED text, so editing that sentence moves all three at once and a
     # reviewer sees the whole blast radius — which is what the indirection is for.
-    "investigation_planner": ("83cf494ee465539e5a3eea4aed73f23d7fe3466eba6d947902591a0e4c12138a"),
+    # Moved again by WO-R3-284 / ADR 0070, with `remediation_planner` and `briefing_judge`
+    # below: a SECOND shared sentence (`{{rule:chain_node_action}}`) says which node of a
+    # chain an action may name, and it reaches the same three readers for the same reason.
+    "investigation_planner": ("2493301227a2e717539f4e46d58636fd80f9316064f7eefc6b8a7cdd47f07efb"),
     # WP-5.2's addendum, appended to `investigation_planner` by
     # `best_of_n_enumerated` and never loaded alone — which is why the planner prompt's
     # own hash did not move: the control group's system prompt is byte-for-byte what it was.
@@ -94,12 +109,14 @@ _EXPECTED_HASHES: Final[dict[str, str]] = {
     "investigation_planner_revision": (
         "005dea4d2724b11d99734a5d4ebf1ce809358a53f6ad3f80bae7f65e4d1b2c98"
     ),
-    # Moved by WO-R3-230 / WP-11.3 / ADR 0065 — the remainder rule's other reader.
-    "briefing_judge": ("81654a1bf1faacd78964a235a39dd1d0f012885aa57f7838fc11dc078dbb32fa"),
+    # Moved by WO-R3-230 / WP-11.3 / ADR 0065 — the remainder rule's other reader — and
+    # again by WO-R3-284 / ADR 0070, the chain-node rule's third reader.
+    "briefing_judge": ("8da7b5f8bf70b3f7e323334710b7f126a799d5ded80aae7fb67bebcb17e7447c"),
     # Moved by WO-R3-226 / ADR 0056: two sentences cited ADR 0008 for "you get one Tier-1
     # call", which is now true of a PLAN and not of a run. The rules themselves are
-    # unchanged — a plan still proposes exactly one action.
-    "remediation_planner": ("964a5f39b23ee1767b9455ff8017849b8a188c0b78e0bb1e290280c90edbc3b4"),
+    # unchanged — a plan still proposes exactly one action. Moved again by WO-R3-284 /
+    # ADR 0070: the fix table now says which node of the chain the routing is aimed at.
+    "remediation_planner": ("f1a1459d316ad85c51c96c2924ef68d329ed42e5c6a9b2be599b1304c86867ae"),
     "verification_judge": ("6d55bbfb6efebdaa6b5b032839094c9cf7ec0547377df74fcd595ffb9b93d1e3"),
     "output_repair": ("461943691f22c6fb6c0c1b62a1cb356dc43eab3ec963b21db069a5701e86a1a0"),
 }
@@ -937,6 +954,87 @@ class TestSharedRulesReachEveryReader:
         """Anti-vacuity canary for every parametrized case above."""
         assert SHARED_RULES
         assert "stuck_chain_root" in SHARED_RULES
+
+
+class TestTheChainNodeActionRuleReachesEveryReader:
+    """WO-R3-284 (ADR 0070): which node of a chain an action may name, said once.
+
+    ADR 0070 widens ADR 0032's subject guard to admit a node of the alerted chain. A guard
+    that admits what no prompt asks for is the mirror of the failure ADR 0053 § 4 refused
+    to ship — there the prompt asked for an action the guard refused, here the guard would
+    permit an action no prompt names — and both are INC-002's half a rule. So the guard and
+    the steering land together, and the steering lands in the same words for all three
+    readers. Same mechanism and the same two failure modes checked as the stuck-chain rule
+    above: a reader that stops getting the rule, and one that gets a hand-typed copy.
+    """
+
+    _KEY: Final = "chain_node_action"
+    _PLACEHOLDER: Final = "{{rule:chain_node_action}}"
+
+    def test_the_rule_is_one_sentence(self) -> None:
+        rule = CHAIN_NODE_ACTION_RULE.strip()
+        assert rule.endswith("."), rule
+        assert ". " not in rule, (
+            f"the chain-node rule has more than one sentence:\n{rule}\nOne sentence, for "
+            f"O-19's reason: a second is where a paraphrase starts, and a paraphrase in one "
+            f"of three renderings is invisible in a diff because each copy still reads "
+            f"correctly on its own."
+        )
+
+    @pytest.mark.parametrize("name", _CHAIN_NODE_RULE_READERS)
+    def test_every_reader_is_served_the_identical_rule(self, name: str) -> None:
+        assert CHAIN_NODE_ACTION_RULE in load_prompt(name), (
+            f"{name} does not carry the chain-node rule as served. It must write "
+            f"`{self._PLACEHOLDER}` where the rule belongs; `load_prompt` expands it."
+        )
+
+    @pytest.mark.parametrize("name", _CHAIN_NODE_RULE_READERS)
+    def test_every_reader_delegates_the_rule_rather_than_copying_it(self, name: str) -> None:
+        raw = raw_prompt(name)
+        assert self._PLACEHOLDER in raw, (
+            f"{name}.md does not delegate the shared rule. Replace the copied sentence "
+            f"with `{self._PLACEHOLDER}`."
+        )
+        assert CHAIN_NODE_ACTION_RULE not in raw, (
+            f"{name}.md spells the chain-node rule out as well as delegating it. A copy "
+            f"beside the placeholder is a copy that will drift."
+        )
+
+    def test_the_readers_are_exactly_the_stuck_chain_readers(self) -> None:
+        """Both directions, and the set is deliberately the routing rule's own set.
+
+        A reader told which TOOL a chain's row gets and not which NODE it is aimed at has
+        half the answer, and vice versa, so the two lists moving apart is a decision
+        somebody should make on purpose.
+        """
+        carrying = tuple(
+            sorted(name for name in available_prompts() if self._PLACEHOLDER in raw_prompt(name))
+        )
+        assert carrying == _CHAIN_NODE_RULE_READERS, (
+            f"prompts carrying the chain-node rule are {list(carrying)}; ADR 0070 names "
+            f"{list(_CHAIN_NODE_RULE_READERS)}."
+        )
+        assert carrying == _STUCK_CHAIN_RULE_READERS, (
+            "the chain-node rule and the stuck-chain routing rule no longer reach the same "
+            "readers — one says which tool the row gets and the other which node it names, "
+            "so a reader with one of them is answering an incomplete question"
+        )
+
+    def test_the_rule_names_the_read_that_grounds_it(self) -> None:
+        """The pin that keeps the words and the guard about the same thing.
+
+        ``remediation.GRAPH_VIEW_FOR_SUBJECT`` admits a node id found in a `get_dag_state`
+        reading rooted at the alerted job. If the rule stopped naming that read, the
+        steering would be asking for a target on some other authority while the guard kept
+        demanding this one — which is how a refusal nobody expects starts costing re-asks.
+        """
+        from incident_commander.agent.remediation import GRAPH_VIEW_FOR_SUBJECT
+
+        for tool_name in GRAPH_VIEW_FOR_SUBJECT:
+            assert f"`{tool_name}`" in CHAIN_NODE_ACTION_RULE, tool_name
+
+    def test_the_rule_is_in_the_table(self) -> None:
+        assert self._KEY in SHARED_RULES
 
 
 class TestTheUnresolvedRemainderRuleReachesBothReaders:

@@ -1273,6 +1273,82 @@ def _row_decisions_in_evidence(
     return decisions
 
 
+class GraphView(NamedTuple):
+    """The read whose response is a GRAPH the alerted resource roots (ADR 0070).
+
+    Sibling of ``SourceRow``, which describes a listing of independent rows. The
+    difference that earns a second shape: this read's response says which resource it is
+    a view OF, so a node id in it is a claim about the alerted object rather than about
+    the world at large.
+    """
+
+    tool_name: str
+    """Read tool that returns the graph. Keyed by the SUBJECT's probe tool in
+    ``GRAPH_VIEW_FOR_SUBJECT``, so the admission is inert for every subject whose probe
+    returns something else."""
+    subject_field: str
+    """Top-level field echoing the resource the view is rooted at — compared against the
+    alert's subject, which is what scopes a node id to THIS graph."""
+    nodes_field: str
+    """Top-level key holding the nodes. A plain key, for ``SourceRow.rows_field``'s
+    reason."""
+    id_field: str
+    """Field within a node carrying its resource id."""
+
+
+# Which subjects have a graph view, and what it is called. Keyed on the subject's own
+# probe tool (``investigation.ALERT_SUBJECT_PROBES``), so a consumer-group or DLQ-slice
+# subject is untouched by this admission however many chain readings a run holds — which
+# is live run `adcdcadd94a3`'s shape and the thing ADR 0032 exists to refuse.
+#
+# Field names are the pinned contract's, checked against it by
+# ``tests/unit/test_remediation.py::TestAChainNodeActionIsAdmittedByTheChainsOwnReading``:
+# a renamed response field would otherwise make the admission silently inert rather than
+# loud, and an inert admission reads exactly like the refusal it replaced.
+GRAPH_VIEW_FOR_SUBJECT: Final[dict[str, GraphView]] = {
+    "get_dag_state": GraphView("get_dag_state", "seed_id", "nodes", "id"),
+}
+
+
+def _graph_nodes_in_evidence(
+    evidence: Sequence[EvidenceEntry], subject: AlertSubject
+) -> frozenset[str]:
+    """Every node id this run has read in a graph view rooted at ``subject``.
+
+    Empty when the subject has no graph view, when the run holds no such reading, or when
+    every reading it holds is of a DIFFERENT graph — three distinct inert cases that all
+    mean the same thing here, which is "no licence". The ``subject_field`` comparison is
+    what makes the third one true: this suite seeds three stuck chains, so a node id read
+    in one of them is not evidence about another.
+    """
+    view = GRAPH_VIEW_FOR_SUBJECT.get(subject.tool_name)
+    if view is None:
+        return frozenset()
+    nodes: set[str] = set()
+    for entry in evidence:
+        if entry.tool_name != view.tool_name:
+            continue
+        try:
+            parsed = json.loads(entry.result_summary)
+        except (ValueError, TypeError):
+            continue
+        if not isinstance(parsed, Mapping):
+            continue
+        rooted_at = parsed.get(view.subject_field)
+        if not isinstance(rooted_at, str) or rooted_at.strip() != subject.value:
+            continue
+        rows = parsed.get(view.nodes_field)
+        if not isinstance(rows, (list, tuple)):
+            continue
+        for row in rows:
+            if not isinstance(row, Mapping):
+                continue
+            node_id = row.get(view.id_field)
+            if isinstance(node_id, str) and node_id.strip():
+                nodes.add(node_id.strip())
+    return frozenset(nodes)
+
+
 def _subject_action_field(plan: RemediationPlan, subject: AlertSubject) -> str | None:
     """The action argument that narrows on the subject's own dimension, if any.
 
@@ -1308,10 +1384,39 @@ def _unaddressed_alert_subject(plan: RemediationPlan, run_state: RunState) -> Su
     if kind is SubjectKind.RESOURCE:
         if subject.value in acted:
             return None
+        # ADR 0070: a node of the graph the subject ROOTS is the subject's own incident.
+        # Grounded in a reading THIS RUN HOLDS whose own `seed_id` is the subject, so an
+        # invented id, a node of another chain and a batch that reaches outside the graph
+        # are all still refused — and `off_graph` says which, by name, in the steer.
+        nodes = _graph_nodes_in_evidence(run_state.evidence, subject)
+        off_graph = sorted(acted - nodes)
+        if acted and not off_graph:
+            return None
         names = (
             f"it acts on {', '.join(sorted(acted))}"
             if acted
             else "it names no resource of its own at all"
+        )
+        graph_route = (
+            ""
+            if not GRAPH_VIEW_FOR_SUBJECT.get(subject.tool_name)
+            else (
+                f" An action may instead name a node of {subject.value!r}'s own "
+                f"{subject.tool_name} reading — the alerted chain, and only that chain: "
+                + (
+                    f"this run has read {', '.join(sorted(nodes))}"
+                    if nodes
+                    else f"this run holds no {subject.tool_name} reading of "
+                    f"{subject.value!r} at all, so read it first"
+                )
+                + (
+                    f", and {', '.join(off_graph)} "
+                    f"{'is' if len(off_graph) == 1 else 'are'} not among them"
+                    if off_graph and nodes
+                    else ""
+                )
+                + "."
+            )
         )
         return SubjectMiss(
             subject,
@@ -1322,9 +1427,10 @@ def _unaddressed_alert_subject(plan: RemediationPlan, run_state: RunState) -> Su
             f"{subject.tool_name}({subject.argument_field}={subject.value!r}), and a "
             f"Tier-1 action aimed somewhere else leaves the signal you were paged for "
             f"exactly as it was while reporting a fix. Re-plan an action whose own "
-            f"resource argument is {subject.value!r}. If no Tier-1 action can address "
-            f"it, say so — this run escalates naming the subject, which is the honest "
-            f"outcome and a better one than remediating something nobody reported.",
+            f"resource argument is {subject.value!r}.{graph_route} If no Tier-1 action "
+            f"can address it, say so — this run escalates naming the subject, which is "
+            f"the honest outcome and a better one than remediating something nobody "
+            f"reported.",
         )
 
     source = _row_source_for_subject(subject)

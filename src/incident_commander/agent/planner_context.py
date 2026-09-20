@@ -30,6 +30,13 @@ ATTEMPT_FAILED_MARKER: Final[str] = "_remediation_attempt_failed"
 #: incidents.py`` reads both to tell a cause this run acted on from one it only named.
 PLAN_MARKER: Final[str] = "_planner_plan"
 
+#: The ledger entry ``agent/remediation.py`` writes for one verify poll's verdict, as
+#: ``"<verdict>: <reasoning>"`` with ``{attempt, of}`` on its arguments. Named here with the
+#: other two because it now has three readers — the transition that writes it,
+#: ``evals/runner.py``'s not-verified count, and ``agent/run_reporting.py``'s verification
+#: report — and a spelling in three places is a rename that breaks two of them silently.
+VERIFY_JUDGE_MARKER: Final[str] = "_verify_judge"
+
 #: How that block is headed, in the words the model reads.
 ALREADY_ATTEMPTED_HEADING: Final[str] = "Already attempted in this incident — do NOT repeat:"
 

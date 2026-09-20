@@ -41,6 +41,7 @@ from incident_commander.agent.investigation import (
 from incident_commander.agent.planner_context import (
     ATTEMPT_FAILED_MARKER,
     PLAN_MARKER,
+    VERIFY_JUDGE_MARKER,
     render_already_attempted,
 )
 from incident_commander.agent.state import (
@@ -2311,7 +2312,7 @@ def make_llm_verify(
                 timestamp=at_attempt,
             )
             judge_entry = EvidenceEntry(
-                tool_name="_verify_judge",
+                tool_name=VERIFY_JUDGE_MARKER,
                 arguments={"expectation": plan.verify_expectation, **ordinal},
                 result_summary=f"{judgment.verdict}: {judgment.reasoning}",
                 timestamp=at_attempt,

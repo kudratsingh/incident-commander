@@ -75,6 +75,7 @@ from incident_commander.agent.investigation import (
 )
 from incident_commander.agent.loop import run_to_completion
 from incident_commander.agent.orchestrator import TRANSITIONS, Transition
+from incident_commander.agent.planner_context import VERIFY_JUDGE_MARKER
 from incident_commander.agent.reflection import CRITIC_ROLE
 from incident_commander.agent.remediation import (
     make_llm_plan,
@@ -84,6 +85,7 @@ from incident_commander.agent.remediation import (
 from incident_commander.agent.run_reporting import (
     ReportingCheckpointer,
     RunReporter,
+    ToolCallLog,
 )
 from incident_commander.agent.run_reporting import (
     summarize as summarize_reporting,
@@ -1603,6 +1605,10 @@ def run_scenario(
     mcp_client: MCPClientProtocol
     live_mcp_client: MCPClient | None = None
     replay_client: RecordedMCPClient | None = None
+    # What the reporter's steps are made of (ADR 0068's WO-R3-329 amendment): latency, the
+    # outcome and the raw first content block exist at the client seam and nowhere else.
+    # Built only when reporting is on, so a graded run's tracer is byte-identical to today's.
+    tool_log: ToolCallLog | None = None
     if recorded_world is not None:
         # The replay clock is the run's OWN clock, so every age the agent computes is
         # the one the recorder observed (ADR 0044). Built first, so a recording that
@@ -1649,9 +1655,15 @@ def run_scenario(
             # polling: a cascade's second-order effect is not visible instantly.
             if chaos_plan.settle_seconds:
                 time.sleep(chaos_plan.settle_seconds)
+            mcp_hook = tracer.mcp_hook() if tracer else None
+            if settings.agent_run_reporting:
+                tool_log = ToolCallLog()
+                # Beside the JSONL tracer, never instead of it: the trace is the run's own
+                # append-only record and telemetry does not get to displace it.
+                mcp_hook = tool_log.tee(mcp_hook)
             live_mcp_client = make_client(
                 settings,
-                tracer=tracer.mcp_hook() if tracer else None,
+                tracer=mcp_hook,
                 token=mcp_token,
             )
             mcp_client = live_mcp_client
@@ -1863,7 +1875,15 @@ def run_scenario(
             # `run_label`, not `scenario`: the tool's input model forbids unknown fields,
             # so the wrong spelling is a refused report rather than an ignored argument.
             run_label=scenario.name,
+            # Where the per-call steps come from. `None` on a run whose client was built
+            # before reporting was asked for, which reports everything except the steps.
+            tool_log=tool_log,
         )
+        if tool_log is not None:
+            # The scenario's precondition probes went through the agent's own client above,
+            # and they are the EVALUATOR's reads (ADR 0038) taken before the run began.
+            # Reporting them would credit the agent with steps it never took.
+            tool_log.forget()
         reporting_checkpointer = ReportingCheckpointer(checkpointer, reporter)
     run: RunState | None = None
     # Same reason one field further: the post-terminal briefing charge is in no
@@ -2149,7 +2169,7 @@ def _classify_failure(report: GradeReport, final: RunState | None) -> tuple[str,
         action is not None
         and action.passed
         and any(
-            e.tool_name == "_verify_judge" and e.result_summary.startswith("not_verified")
+            e.tool_name == VERIFY_JUDGE_MARKER and e.result_summary.startswith("not_verified")
             for e in evidence
         )
     ):

@@ -342,6 +342,32 @@ services:
     #     DLQ `error_message` gained a count — `bulk api sync failed: all N
     #     endpoint calls failed (0 of N endpoints returned a result)`. Nothing
     #     commander-side pins that text.
+    #
+    # What v0.6.15 changed (plat #228, WO-R3-327): NOTHING on this surface. The
+    # tool list is identical tool for tool and byte for byte against v0.6.14 —
+    # checked mechanically, not read — because its whole delta is the
+    # `lab.world_reset` audit row `make eval-reset` now writes, which the demo
+    # PAGE reads as the boundary between runs and no tool returns.
+    #
+    # What v0.6.16 changed (plat #230, platform ADR 0037, WO-R3-328): NO NEW
+    # TOOL. Still 40 (15 chaos, 16 read), no scope moves, and exactly TWO tools
+    # differ under an exact comparison:
+    #   * `get_consumer_lag` carries the last **15 minutes** of measurements in
+    #     `recent_samples` instead of 5 — same reading, longer window, and the
+    #     SHAPE is unchanged: no output property added or removed, the `required`
+    #     set identical, `$defs.LagSample` byte-identical. Only that field's
+    #     description moved (3,401 → 3,444 chars), which is the whole +43 the
+    #     planner's tool block grew by.
+    #   * `report_agent_run` takes the run itself: `hypotheses` (ranked, the
+    #     order IS the ranking), `plan`, `verification`, `budget`, and a `step`
+    #     the platform APPENDS one per call. All six additive and optional, so
+    #     `required` stays `[run_id, state]`. Its description grew 1,713 → 2,389
+    #     and NONE of that reaches the planner — the `[commander:` filter, 676
+    #     characters of it, which is the reading that pairs with the +43 above.
+    #     `report_agent_briefing` is untouched.
+    #   * ADR 0012 unchanged in both directions: still no read tool for
+    #     `agent_runs`, and the excerpts a step carries are ones the agent's own
+    #     principal cannot read back.
     # Do not switch to `:latest` — the whole point of pinning by digest is
     # that a platform-side prompt or schema change can't shift agent
     # behavior without an explicit bump here.

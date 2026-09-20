@@ -55,8 +55,16 @@ _EXPECTED_READ_TOOLS: Final[frozenset[str]] = frozenset(
 #: no tool joined or left the read surface (still 16) and no tier moved; the platform
 #: re-described `get_postgres_health` around its new `pools` group. Every character of
 #: the growth is that one description.
+#: v0.6.16 (WO-R3-328) moves it the same way and the arithmetic says so exactly: 29,125 →
+#: 29,168, +43 characters, and `get_consumer_lag`'s description grew 3,401 → 3,444 — the
+#: same +43 — around its 15-minute `recent_samples` window. Read surface still 16, no tier
+#: moved. The re-pin's OTHER changed tool is `report_agent_run`, whose description grew
+#: 1,713 → 2,389 and whose input schema gained six fields; NONE of that is here, which is
+#: the `[commander:` filter doing the job ADR 0068 § 4 gave it — the tool the agent's own
+#: token can call stays off the planner's page, and a hash that ignores 676 characters of
+#: telemetry description is the evidence.
 _EXPECTED_TOOL_BLOCK_HASH: Final[str] = (
-    "a9e03919b9c733d5ec619fa1b235d3e60c60d6117d2ad4067a0fbb12633ccdf0"
+    "9ed97579e6f239f8eee6f629f4b444134be6ccaaf953648dfd9bfc3d595562fd"
 )
 
 

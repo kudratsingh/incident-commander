@@ -125,4 +125,4 @@ rule must not fall back to a pairing rule chosen for another mode") is the behav
   is evidence of the demo machine, never of the agent, and it says so in three places on
   every row.
 
-Implemented by PR #316.
+Implemented by PR #317.

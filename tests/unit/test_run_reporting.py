@@ -802,19 +802,29 @@ class TestOneStepPerCall:
         seqs = [args["step"]["seq"] for args in sent if "step" in args]
         assert seqs == [1, 2], "the ledger is ordered by seq, so it never restarts"
 
-    def test_an_entry_is_reported_once_even_though_the_ledger_only_grows(
+    def test_a_call_is_reported_once_even_though_the_ledger_only_grows(
         self, run_state: RunState, now: datetime
     ) -> None:
+        """One call, one step, however many transitions report after it (ADR 0074).
+
+        The step goes out at the seam now, so the double-report this guards against would be
+        the ledger entry reported AGAIN at the next transition — one call arriving twice under
+        two ``seq`` values, which is two rows in the console's ledger.
+        """
+        log = ToolCallLog(clock=_make_clock(now))
         client = _RecordingClient()
-        reporter = _reporter(client, tool_log=ToolCallLog(clock=_make_clock(now)))
+        reporter = _reporter(client, tool_log=log)
         entry = _entry("get_consumer_lag", now, "{}")
         state = _with(run_state, state=IncidentState.INVESTIGATING, evidence=(entry,))
 
+        reporter.report(state)
+        log.observe(_traced("get_consumer_lag"))
         reporter.report(state)
         reporter.report(state)
 
         steps = [args for args in client.arguments_for(REPORT_RUN_TOOL) if "step" in args]
         assert len(steps) == 1
+        assert reporter.steps_sent == 1
 
     def test_the_reporters_own_reports_are_never_steps(self) -> None:
         """Otherwise every report would carry the last one, forever."""
@@ -1494,3 +1504,168 @@ class TestTheSummaryLine:
 
     def test_off_says_off(self) -> None:
         assert summarize(None) == "agent-run reporting: off"
+
+
+class _Clock:
+    """A wall clock somebody else moves. Both the log and the client read it."""
+
+    def __init__(self, start: datetime) -> None:
+        self.now = start
+
+    def tick(self, seconds: float) -> None:
+        self.now = self.now + timedelta(seconds=seconds)
+
+    def __call__(self) -> datetime:
+        return self.now
+
+
+class _TimedClient(_RecordingClient):
+    """Records WHEN each report was sent, by the same clock the events are stamped with."""
+
+    def __init__(self, clock: _Clock) -> None:
+        super().__init__()
+        self._clock = clock
+        self.sent_at: list[datetime] = []
+
+    def call_tool(
+        self,
+        name: str,
+        arguments: Mapping[str, Any],
+        *,
+        timeout_seconds: float | None = None,
+    ) -> ToolResult:
+        self.sent_at.append(self._clock())
+        return super().call_tool(name, arguments, timeout_seconds=timeout_seconds)
+
+
+class TestAReportIsSentWhenItHappens:
+    """ADR 0074 (F2): the step report goes out on the event, not at the next transition.
+
+    The owner's third take: `phase_history` read triage 15:17:59.9, investigating 15:17:59.9,
+    escalated 15:17:59.9, and all four steps plus the terminal state arrived at 15:18:40 in one
+    burst carrying their original timestamps. On the page the run went healthy → escalated with
+    nothing in between. The events were fine; the sending was queued.
+    """
+
+    def _timed(self, now: datetime) -> tuple[_Clock, _TimedClient, ToolCallLog, RunReporter]:
+        clock = _Clock(now)
+        client = _TimedClient(clock)
+        log = ToolCallLog(clock=clock)
+        return clock, client, log, _reporter(client, tool_log=log)
+
+    def test_every_step_report_leaves_when_its_call_returned(
+        self, run_state: RunState, now: datetime
+    ) -> None:
+        """The claim, with a clock nobody but this test moves.
+
+        Each step report's wall time is the moment of the call it describes — the tracer hook
+        fires then — so no report is waiting on a transition that has not happened yet.
+        """
+        clock, client, log, reporter = self._timed(now)
+        reporter.report(_with(run_state, state=IncidentState.INVESTIGATING))
+
+        clock.tick(5)
+        log.observe(_traced("get_consumer_lag", text='{"lag": 30}'))
+        clock.tick(30)
+        log.observe(_traced("list_dlq_messages", text='{"total": 4}'))
+        clock.tick(2)
+        reporter.report(_with(run_state, state=IncidentState.PLANNING))
+
+        reports = list(zip(client.arguments_for(REPORT_RUN_TOOL), client.sent_at, strict=True))
+        steps = [(args["step"], sent) for args, sent in reports if "step" in args]
+        assert len(steps) == 2
+        for step, sent in steps:
+            assert step["at"] == sent.isoformat(), (
+                "a step report was sent at a different moment than the call it describes — "
+                "which is the burst F2 is about"
+            )
+        # And the burst is gone in the form a reader can see: the first step did not wait for
+        # the 30 seconds of work that came after it.
+        assert steps[0][1] == now + timedelta(seconds=5)
+        assert steps[1][1] == now + timedelta(seconds=35)
+
+    def test_the_transition_report_carries_the_transitions_own_time(
+        self, run_state: RunState, now: datetime
+    ) -> None:
+        """A transition reports at the transition, stamped with the run's own clock."""
+        clock, client, _log, reporter = self._timed(now)
+        clock.tick(12)
+        moved = _with(run_state, state=IncidentState.PLANNING)
+
+        reporter.report(moved)
+
+        sent = client.arguments_for(REPORT_RUN_TOOL)
+        assert len(sent) == 1
+        assert sent[0]["state"] == "planning"
+        # The event's own clock, not the reporter's: the platform would otherwise stamp the
+        # moment the report landed, which is a different fact.
+        assert sent[0]["at"] == moved.updated_at.isoformat()
+        assert client.sent_at == [now + timedelta(seconds=12)]
+
+    def test_a_step_carries_the_state_the_run_was_in_while_it_made_the_call(
+        self, run_state: RunState, now: datetime
+    ) -> None:
+        """The honest stamp, and the rule that keeps a terminal run reportable.
+
+        A terminal state closes the run (`agent_run_already_finished` after it), so a step
+        reported mid-transition must carry the state the run was in, never the one it is about
+        to reach.
+        """
+        clock, client, log, reporter = self._timed(now)
+        reporter.report(_with(run_state, state=IncidentState.VERIFYING))
+        clock.tick(3)
+        log.observe(_traced("get_consumer_lag", text='{"lag": 0}'))
+        clock.tick(1)
+        reporter.report(_with(run_state, state=IncidentState.RESOLVED))
+
+        states = [args["state"] for args in client.arguments_for(REPORT_RUN_TOOL)]
+        assert states == ["verifying", "verifying", "resolved"]
+
+    def test_a_call_made_before_the_first_report_is_not_lost(
+        self, run_state: RunState, now: datetime
+    ) -> None:
+        """The one window the live path cannot serve, and it falls back rather than dropping.
+
+        Before the first transition report there is no state to stamp a step with, so the call
+        stays in the log and the next report carries it — the pre-ADR-0074 path, kept for
+        exactly this.
+        """
+        clock, client, log, reporter = self._timed(now)
+        log.observe(_traced("get_consumer_lag", text='{"lag": 30}'))
+        clock.tick(4)
+
+        reporter.report(_with(run_state, state=IncidentState.INVESTIGATING))
+
+        steps = [args for args in client.arguments_for(REPORT_RUN_TOOL) if "step" in args]
+        assert len(steps) == 1
+        assert steps[0]["step"]["tool"] == "get_consumer_lag"
+
+    def test_a_failing_report_never_reaches_the_tool_call(
+        self, run_state: RunState, now: datetime
+    ) -> None:
+        """Fail-open, at the new seam: this runs INSIDE ``call_tool``.
+
+        A raising observer would turn telemetry into a failed tool call, which invariant 5
+        forbids more strongly than anywhere else in this module: the agent is mid-incident.
+        """
+
+        class _Exploding(_TimedClient):
+            def call_tool(
+                self,
+                name: str,
+                arguments: Mapping[str, Any],
+                *,
+                timeout_seconds: float | None = None,
+            ) -> ToolResult:
+                raise RuntimeError("the platform fell over")
+
+        clock = _Clock(now)
+        client = _Exploding(clock)
+        log = ToolCallLog(clock=clock)
+        reporter = _reporter(client, tool_log=log)
+        reporter.report(_with(run_state, state=IncidentState.INVESTIGATING))
+
+        log.observe(_traced("get_consumer_lag", text='{"lag": 30}'))
+
+        assert reporter.failures, "the failure was swallowed without being recorded"
+        assert reporter.steps_sent == 0

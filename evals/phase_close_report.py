@@ -790,12 +790,34 @@ def closing_verdict(reports: Sequence[RunReport]) -> dict[str, Any]:
     """
     development: list[str] = []
     predates: list[str] = []
+    rehearsed: list[str] = []
     for report in reports:
         development.extend(
             f"{report.invocation_id}/{name}" for name in report.development_scenarios
         )
+        rehearsed.extend(f"{report.invocation_id}/{name}" for name in report.rehearsal_scenarios)
         if report.closing is None:
             predates.append(report.invocation_id)
+    if rehearsed:
+        # Ahead of the development check, because it is the stronger disqualification and
+        # the reader's next move differs: a development run measured the agent with the
+        # wrong model and can be re-run under `--model-role benchmark`; a REHEARSAL never
+        # measured the agent at all — the planner was the scenario's own script (ADR 0069) —
+        # so there is nothing to re-role, and the row has to be replaced by a real run.
+        # ``development_runs`` stays empty rather than growing a second key: this verdict's
+        # shape is read by the committed documents, and the sentence carries the names.
+        return {
+            "closing": False,
+            "reason": (
+                f"{len(rehearsed)} run(s) in scope are demo REHEARSALS, not runs of the "
+                f"agent: {', '.join(sorted(rehearsed))}. A rehearsal drives the real "
+                "platform with the scenario's scripted planner and is stamped "
+                "degraded=True with a rehearsal provenance flag precisely so it can never "
+                "close anything (ADR 0069). Replace it with a live run under the benchmark "
+                "role; re-running the same invocation cannot help."
+            ),
+            "development_runs": [],
+        }
     if development:
         return {
             "closing": False,
@@ -888,6 +910,26 @@ def _read_only_block(root: Path, read_only: ReadOnlyPass) -> dict[str, Any]:
     }
 
 
+def rehearsal_leg_refusal(leg: LiveLeg, report: RunReport) -> str | None:
+    """Why this archive cannot be a live leg, or ``None`` when it can.
+
+    A demo REHEARSAL (ADR 0069) drives the real platform with the scenario's own scripted
+    planner, so every number the live-leg table would take off the row — passed, final
+    state, tool calls, diagnosis — is true of the FIXTURE and would be read as true of the
+    agent. Its own function so it can be exercised without staging an archive tree, and
+    refused rather than labelled: the table is the evidence a phase closed on.
+    """
+    rehearsed = report.rehearsal_scenarios
+    if not rehearsed:
+        return None
+    return (
+        f"live leg {leg.order} names archive {leg.archive_id}, which is a demo REHEARSAL of "
+        f"{', '.join(rehearsed)} — the real platform under a scripted planner, stamped "
+        "degraded=True with a rehearsal provenance flag. A rehearsal cannot be a live leg: "
+        "replace it with a paid run of that scenario, or drop the leg."
+    )
+
+
 def _sweep_results(root: Path, scope: PhaseScope) -> dict[str, Any]:
     canned, canned_sha, canned_raw = _read_report(
         archive_dir(root, scope.canned_sweep) / "report.json"
@@ -905,6 +947,8 @@ def _sweep_results(root: Path, scope: PhaseScope) -> dict[str, Any]:
     legs: list[dict[str, Any]] = []
     for leg in scope.live_legs:
         report, sha, _ = _read_report(archive_dir(root, leg.archive_id) / "report.json")
+        if (refusal := rehearsal_leg_refusal(leg, report)) is not None:
+            raise ValueError(refusal)
         outcome = report.outcomes[0]
         row = {
             "order": leg.order,

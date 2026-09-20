@@ -160,11 +160,19 @@ class ExecutionMode(StrEnum):
     while the model calls stay real. Its own value, not ``LIVE`` with a flag (ADR 0013),
     and APPENDED, because archived reports are read back against this enum. Valid for
     diagnosis, plan, candidate metrics and calibration only (plan 02 § 189, 03 § 52).
+
+    ``REHEARSAL`` (ADR 0069) is the other half of that trade: the PLATFORM is real —
+    real seeding, real preconditions, a real Tier-1 action — and the planner is the
+    scenario's scripted one. Its own member for the reason ``RECORDED`` is one: every
+    reader that counts live rows asks ``== "live"``, so a rehearsal that borrowed
+    ``LIVE`` would enter a live count by default, and the one thing this mode must
+    never do is look like a measurement of the agent.
     """
 
     CANNED = "canned"
     LIVE = "live"
     RECORDED = "recorded"
+    REHEARSAL = "rehearsal"
 
 
 class RunProvenance(BaseModel):
@@ -195,6 +203,12 @@ class RunProvenance(BaseModel):
     invocation_id: str
     recorded_at: datetime
     execution_mode: ExecutionMode
+    # Whether this row came out of a demo REHEARSAL (ADR 0069): the real platform under a
+    # scripted planner. Redundant with ``execution_mode`` by construction and carried
+    # anyway, because the readers that must refuse such a row are the ones that predate
+    # the mode — a boolean they can assert on is cheaper to add than a fourth branch in
+    # every mode comparison, and the default keeps every archived report parsing.
+    rehearsal: bool = False
     # The run's OWN ledger: ``max_*`` are the budgets actually seeded, not the
     # documented defaults (ADR 0019's per-scenario cap, and the paid-run protocol's
     # .env-only ceilings), and ``*_used`` are ADR 0015's four meters.
@@ -307,6 +321,7 @@ def build_provenance(
     budget: BudgetLedger,
     recorded_at: datetime | None = None,
     strategy: InvestigationStrategy | None = None,
+    rehearsal: bool = False,
 ) -> RunProvenance:
     """Assemble one run's provenance record from the run's own inputs.
 
@@ -334,6 +349,10 @@ def build_provenance(
         invocation_id=invocation_id or _UNKNOWN,
         recorded_at=recorded_at or datetime.now(UTC),
         execution_mode=execution_mode,
+        # Derived from the mode rather than taken on trust where the caller agrees with it:
+        # the two cannot disagree, and a caller that passes the flag without the mode
+        # (or the reverse) still produces a row that names itself a rehearsal.
+        rehearsal=rehearsal or execution_mode is ExecutionMode.REHEARSAL,
         budget=budget,
     )
 
@@ -610,6 +629,20 @@ class RunReport(BaseModel):
         )
 
     @property
+    def rehearsal_scenarios(self) -> tuple[str, ...]:
+        """Rows produced by a demo rehearsal — the real platform, a scripted planner.
+
+        Beside ``development_scenarios`` and asked the same way (off the ROWS, never off a
+        report-level flag), because the two answer one question for two readers: which rows
+        in here are not the measurement they look like. ADR 0069.
+        """
+        return tuple(
+            outcome.scenario
+            for outcome in self.outcomes
+            if outcome.provenance is not None and outcome.provenance.rehearsal
+        )
+
+    @property
     def non_closing_reason(self) -> str:
         """Why this report cannot close a phase, or "" if it can.
 
@@ -621,6 +654,18 @@ class RunReport(BaseModel):
             return "predates model roles (no run in it records one)"
         if self.closing:
             return ""
+        if rehearsed := self.rehearsal_scenarios:
+            # Ahead of the role, because it is the stronger statement and the remedy is
+            # different: these rows were not produced by a model at all (ADR 0069), so
+            # "re-run under the benchmark role" would be the wrong instruction.
+            shown = ", ".join(rehearsed[:_NON_CLOSING_NAMES_SHOWN])
+            remainder = len(rehearsed) - _NON_CLOSING_NAMES_SHOWN
+            if remainder > 0:
+                shown = f"{shown} (+{remainder} more)"
+            return (
+                f"{len(rehearsed)} run(s) are demo rehearsals — the real platform under a "
+                f"scripted planner, not a measurement of the agent: {shown}"
+            )
         development = self.development_scenarios
         if development:
             # Named but bounded: 40 names is a sentence nobody finishes. The count is
@@ -638,7 +683,7 @@ class RunReport(BaseModel):
     @model_validator(mode="after")
     def _closing_cannot_outrank_its_own_rows(self) -> RunReport:
         """A report may not claim it can close a phase while carrying a
-        development run.
+        development run — or a rehearsal.
 
         The one direction that has to be refused. The other direction is
         legitimate: a report with no development run in it can still be
@@ -646,7 +691,18 @@ class RunReport(BaseModel):
         an incident under investigation). This is the ``degraded_count``
         lesson applied to a second field — a persisted number that can
         contradict the rows beneath it is worse than no number at all.
+
+        The rehearsal half (ADR 0069) is the same rule over a different fact: the model
+        ROLE is a claim about which model ran, and a rehearsal is the case where none did.
+        ``run_all`` never marks a rehearsal closing, so this is the backstop for a report
+        assembled by hand or read back from an archive.
         """
+        if self.closing and self.rehearsal_scenarios:
+            raise ValueError(
+                "closing=True but these runs are demo rehearsals — the real platform "
+                f"under a scripted planner: {', '.join(self.rehearsal_scenarios)}. No "
+                "phase closes on a run the model did not make (ADR 0069)."
+            )
         if self.closing and self.development_scenarios:
             raise ValueError(
                 "closing=True but these runs were made under the "
@@ -1373,6 +1429,7 @@ def run_scenario(
     invocation_id: str = "",
     model_role: ModelRole = ModelRole.DEVELOPMENT,
     recorded_world: Path | None = None,
+    rehearsal: bool = False,
 ) -> ScenarioResult:
     """Drive one scenario end-to-end and grade the result.
 
@@ -1383,6 +1440,13 @@ def run_scenario(
     down; the run stops at the ``PLANNING`` handoff (04:117); and OUTCOME, ACTION and
     SAFETY become not-applicable. NOT the model: its planner calls are real and cost
     live rates. ``model_role`` is recorded, not resolved, and defaults to ``DEVELOPMENT``.
+
+    ``rehearsal`` is RECORDED mode's mirror (ADR 0069): the platform leg is live and the
+    MODEL leg is the scripted one, whatever key the settings carry. It changes three
+    things and nothing else — no live LLM client is built, the row is ``degraded`` and the
+    row's mode is ``REHEARSAL`` — so the world this run makes and the action it takes are
+    the ones a live run would make and take. That is the point: it is the demo's dress
+    rehearsal, and a dress rehearsal that skipped the fault would rehearse nothing.
     """
     tick = clock or (lambda: datetime.now(UTC))
     now = tick()
@@ -1398,6 +1462,18 @@ def run_scenario(
     # file, so every live-platform behaviour this function has — seeding,
     # settling, preconditions, teardown, the real transport — is off.
     recorded = recorded_world is not None
+
+    # The two narrow modes are mutually exclusive and the refusal is here, not only at the
+    # CLI: one replaces the platform and keeps the model, the other keeps the platform and
+    # replaces the model, and a run claiming both would have neither leg real while naming
+    # itself for both. ``run_all`` is driven directly from tests and from ``world_drift``.
+    if recorded and rehearsal:
+        raise ValueError(
+            f"a run cannot be both {ExecutionMode.RECORDED.value} and "
+            f"{ExecutionMode.REHEARSAL.value}: a recording replaces the PLATFORM and keeps "
+            "the model, a rehearsal keeps the platform and replaces the MODEL. Asking for "
+            "both leaves no real leg for the row to be about."
+        )
 
     # ``search`` is refused here, before a client exists, a hook fires or a token is
     # spent (WP-12.1, ADR 0060). ``run_all`` refuses the whole invocation earlier for
@@ -1427,8 +1503,15 @@ def run_scenario(
         and scenario.use_live_mcp
         and not _is_offline_placeholder(str(settings.platform_mcp_url))
     )
-    live_llm_available = scenario.use_live_llm and not _is_offline_api_key(
-        settings.anthropic_api_key.get_secret_value()
+    # ``not rehearsal`` FIRST, and it is not an ``and`` at the end for the reason the MCP
+    # leg's ``not recorded`` is not: this is the whole mode. A rehearsal's settings normally
+    # carry the placeholder key too (``_settings_for_mode``), so the two halves agree — but
+    # the flag alone has to be sufficient, because the failure it rules out is a rehearsal
+    # under a real key quietly spending money on camera.
+    live_llm_available = (
+        not rehearsal
+        and scenario.use_live_llm
+        and not _is_offline_api_key(settings.anthropic_api_key.get_secret_value())
     )
 
     # Tracing (opt-in): when EVAL_TRACE_DIR is set, capture every LLM +
@@ -1930,7 +2013,12 @@ def run_scenario(
         # A recorded run is degraded when the recording missed or refused a call: the
         # field means "this row is not the measurement it looks like" (ADR 0044). NOT
         # true merely for replaying — that is the mode, which ``execution_mode`` says.
-        degraded=(scenario.use_live_mcp and not live_mcp_available and not recorded)
+        # ``or rehearsal`` unconditionally, not as a consequence of the canned model leg:
+        # a scenario declaring ``use_live_llm: false`` would otherwise produce an
+        # UN-degraded rehearsal row, and "this row is not the measurement it looks like" is
+        # true of every rehearsal by definition, whatever the scenario declares (ADR 0069).
+        degraded=rehearsal
+        or (scenario.use_live_mcp and not live_mcp_available and not recorded)
         or (scenario.use_live_llm and not live_llm_available)
         or (replay_client is not None and replay_client.degraded),
         provenance=build_provenance(
@@ -1940,14 +2028,20 @@ def run_scenario(
             invocation_id=invocation_id,
             # From what the legs ACTUALLY did, never from the --live flag, which says
             # what was asked for. ``recorded`` is first because it is the narrowest true
-            # statement, whatever the model leg did.
+            # statement, whatever the model leg did; ``rehearsal`` comes next for the same
+            # reason and ahead of ``LIVE``, whose test it would otherwise satisfy — its
+            # platform leg IS available, and that is exactly the confusion to prevent.
             execution_mode=(
                 ExecutionMode.RECORDED
                 if recorded
                 else (
-                    ExecutionMode.LIVE
-                    if (live_mcp_available or live_llm_available)
-                    else ExecutionMode.CANNED
+                    ExecutionMode.REHEARSAL
+                    if rehearsal
+                    else (
+                        ExecutionMode.LIVE
+                        if (live_mcp_available or live_llm_available)
+                        else ExecutionMode.CANNED
+                    )
                 )
             ),
             # The final ledger: seeded maxima, all four meters, and (WO-R3-260) the
@@ -2070,6 +2164,7 @@ def _crashed_result(
     settings: Settings | None = None,
     model_role: ModelRole = ModelRole.DEVELOPMENT,
     recorded: bool = False,
+    rehearsal: bool = False,
 ) -> ScenarioResult:
     """Synthesize a failed ScenarioResult when run_scenario raises.
 
@@ -2142,7 +2237,11 @@ def _crashed_result(
         # crashed row in a live report claimed canned, and a row that misdescribes how it
         # ran is worse than none. ``recorded`` overrides the declared MCP leg likewise.
         live_mcp=scenario.use_live_mcp and not recorded,
-        live_llm=scenario.use_live_llm,
+        live_llm=scenario.use_live_llm and not rehearsal,
+        # The crash row says it too: a rehearsal that died at seeding is still not a
+        # measurement, and a row reading ``degraded=False`` in a rehearsal archive would
+        # be the one row in it a reader could mistake for one.
+        degraded=rehearsal,
         # Same reasoning one field up: a crash that cannot name its model and revision
         # is a row nobody can act on. ``settings is None`` only for a test that knows no
         # configuration, where the record is absent rather than invented.
@@ -2155,15 +2254,20 @@ def _crashed_result(
                 model_role=model_role,
                 invocation_id=invocation_id,
                 # The DECLARED legs, like the flags above: a crash can precede either
-                # choice. Except ``recorded``, which is the caller's instruction — the
-                # platform leg WAS a replay however early the crash came.
+                # choice. Except ``recorded`` and ``rehearsal``, which are the caller's
+                # instruction — the platform leg WAS a replay, and the model leg WAS the
+                # scripted one, however early the crash came.
                 execution_mode=(
                     ExecutionMode.RECORDED
                     if recorded
                     else (
-                        ExecutionMode.LIVE
-                        if (scenario.use_live_mcp or scenario.use_live_llm)
-                        else ExecutionMode.CANNED
+                        ExecutionMode.REHEARSAL
+                        if rehearsal
+                        else (
+                            ExecutionMode.LIVE
+                            if (scenario.use_live_mcp or scenario.use_live_llm)
+                            else ExecutionMode.CANNED
+                        )
                     )
                 ),
                 # The partial ledger when the crash carried one (what the
@@ -2224,8 +2328,14 @@ def run_all(
     on_result: Callable[[ScenarioResult], None] | None = None,
     model_role: ModelRole = ModelRole.DEVELOPMENT,
     recorded_worlds: Mapping[str, Path] | None = None,
+    rehearsal: bool = False,
 ) -> tuple[RunReport, tuple[Trajectory, ...], tuple[EscalationBriefing, ...]]:
     """Run every scenario and assemble the report.
+
+    ``rehearsal`` applies to the WHOLE invocation (ADR 0069), unlike ``recorded_worlds``
+    which is per scenario: the model leg is a property of the process, not of one
+    scenario's world, and a suite half of whose rows were rehearsed is a report nobody
+    can read.
 
     ``recorded_worlds`` maps a scenario name to the recording to replay it
     against (WP-3.3). A scenario absent from the mapping runs in whatever mode it
@@ -2271,6 +2381,7 @@ def run_all(
                 invocation_id=invocation_id,
                 model_role=model_role,
                 recorded_world=recorded_world,
+                rehearsal=rehearsal,
             )
         except ChaosSetupFailed as exc:
             # NOT a graded row (plan 01 § 4): the world was never built, so a
@@ -2287,6 +2398,7 @@ def run_all(
                 settings=settings,
                 model_role=model_role,
                 recorded=recorded_world is not None,
+                rehearsal=rehearsal,
             )
         results.append(result)
         if on_result is not None:
@@ -2323,7 +2435,11 @@ def run_all(
         only_patterns=only_patterns,
         # From the role every row was stamped with, so the console line, the report and
         # the archive agree by construction (``degraded_count``'s discipline, A-01).
-        closing=model_role is ModelRole.BENCHMARK,
+        # ``and not rehearsal``: the role says which model WOULD have been billed, and a
+        # rehearsal bills none, so a rehearsal under `--model-role benchmark` would
+        # otherwise mark itself closing and the model validator would then refuse the
+        # report — after the fault had already been seeded (ADR 0069).
+        closing=model_role is ModelRole.BENCHMARK and not rehearsal,
         outcomes=outcomes,
         ungraded=tuple(ungraded),
     )
@@ -2615,10 +2731,20 @@ def _print_summary(report: RunReport) -> None:
     # From the persisted field, so the console and the artifact agree by construction —
     # their divergence was finding A-01.
     if (report.degraded_count or 0) > 0:
-        print(
-            f"degraded: {report.degraded_count} scenarios fell back to canned "
-            "(PLATFORM_MCP_URL or ANTHROPIC_API_KEY is offline placeholder)"
-        )
+        if first is not None and first.rehearsal:
+            # Same field, different sentence, because the same words would read as a
+            # misconfiguration: a rehearsal's canned model leg is the mode, not a fallback,
+            # and "fix your .env" is the wrong next move (ADR 0069).
+            print(
+                f"degraded: {report.degraded_count} scenarios, every one of them "
+                "BY DESIGN — this is a rehearsal, so the planner was scripted. No row "
+                "here is a measurement of the agent."
+            )
+        else:
+            print(
+                f"degraded: {report.degraded_count} scenarios fell back to canned "
+                "(PLATFORM_MCP_URL or ANTHROPIC_API_KEY is offline placeholder)"
+            )
     if report.judged_count > 0 and report.judge_mean_overall is not None:
         print(
             f"judge: {report.judge_useful_count}/{report.judged_count} useful, "
@@ -2703,8 +2829,24 @@ def _repo_relative(path: Path) -> str:
         return str(path)
 
 
-def _settings_for_mode(live: bool) -> Settings:
-    """Live mode reads real env; offline uses the eval placeholder."""
+def _settings_for_mode(live: bool, *, rehearsal: bool = False) -> Settings:
+    """Live mode reads real env; offline uses the eval placeholder; rehearsal is neither.
+
+    The third branch is the narrow one (ADR 0069). A REHEARSAL reads the real environment,
+    because its platform leg is real and ``_eval_defaults`` hardcodes ``eval.local`` — and
+    then REPLACES the model key with the same placeholder an offline run carries. Two
+    properties come out of that one substitution: the scripted planner is selected by the
+    seam offline runs already use rather than by a second branch beside it, and these
+    settings hold no key a live LLM client could be built from at all, so the guarantee
+    does not depend on every future call site remembering the flag.
+
+    ``model_copy``, not a second construction: re-reading the environment would be a
+    second chance for the platform half to differ from the half already validated.
+    """
+    if rehearsal:
+        return Settings().model_copy(  # type: ignore[call-arg]
+            update={"anthropic_api_key": SecretStr(_EVAL_PLACEHOLDER_API_KEY)}
+        )
     if live:
         return Settings()  # type: ignore[call-arg]
     return _eval_defaults()
@@ -2753,9 +2895,14 @@ def _parse_model_role(argv: Sequence[str]) -> tuple[ModelRole | None, str]:
         return None, f"MODEL ROLE FAIL: --model-role {raw!r} is not one of: {roles}"
 
 
-#: The one value ``--mode`` takes. The other two are selected by what the run can
-#: reach, and flag spellings for them would be two ways to ask for one thing.
+#: The two values ``--mode`` takes, each a mode that cannot be inferred from what the run
+#: can reach: a recording is a FILE the caller names, and a rehearsal is a real platform
+#: the caller deliberately does not let the model see. ``live`` and ``canned`` have no
+#: spelling here, because they ARE inferable and a second way to ask for them would be a
+#: second thing that could disagree with the first.
 RECORDED_MODE: Final[str] = "recorded"
+REHEARSAL_MODE: Final[str] = "rehearsal"
+_MODES: Final[tuple[str, ...]] = (RECORDED_MODE, REHEARSAL_MODE)
 
 
 def _parse_mode(argv: Sequence[str]) -> tuple[str | None, str]:
@@ -2774,13 +2921,15 @@ def _parse_mode(argv: Sequence[str]) -> tuple[str | None, str]:
     if raw is None:
         return "", ""
     value = raw.strip()
-    if value == RECORDED_MODE:
+    if value in _MODES:
         return value, ""
     return None, (
-        f"MODE FAIL: --mode {raw!r} is not a mode this runner takes. The only value "
-        f"is --mode {RECORDED_MODE} (replay a recorded world). A live run is "
-        "--live, and a canned run is the default — those are selected by what the "
-        "run can reach, not by this flag."
+        f"MODE FAIL: --mode {raw!r} is not a mode this runner takes. The values are "
+        f"--mode {RECORDED_MODE} (replay a recorded world: real model, no platform) and "
+        f"--mode {REHEARSAL_MODE} (the real platform under the scripted planner: no "
+        "model, no spend, and no row that may be read as live). A live run is --live, "
+        "and a canned run is the default — those are selected by what the run can "
+        "reach, not by this flag."
     )
 
 
@@ -2916,11 +3065,39 @@ def main() -> int:
             "run the whole suite canned under placeholder settings)"
         )
         return 3
-    if live and (blocked := chaos_block_reason()) is not None:
+    # Before the settings load AND before the world latch below, because the latch's
+    # question is "does this invocation reach the shared world?" and the mode is half the
+    # answer. Costs nothing and depends on no environment: a mistyped mode must not be
+    # able to outrank a contaminated world, or vice versa.
+    mode, mode_refusal = _parse_mode(sys.argv[1:])
+    if mode is None:
+        print(mode_refusal)
+        print("no scenarios ran, nothing was spent")
+        return 2
+    recorded = mode == RECORDED_MODE
+    rehearsal = mode == REHEARSAL_MODE
+    if rehearsal and (live or smoke):
+        # A rehearsal is defined by what it withholds from the model, so combining it with
+        # the flag that buys a real model is a contradiction, not a narrowing — and
+        # `--live` would then refuse at exit 3 anyway for a reason that reads like a
+        # misconfiguration. `--smoke` is a read-only stage: a rehearsal seeds and acts.
+        asked = " and ".join(flag for flag in ("--live", "--smoke") if flag in sys.argv[1:])
+        print(
+            f"MODE FAIL: --mode {REHEARSAL_MODE} cannot be combined with {asked}. A "
+            "rehearsal runs the real platform with the SCRIPTED planner and spends "
+            f"nothing; --live buys a real model, and --smoke is the read-only stage. "
+            f"For the paid take drop --mode {REHEARSAL_MODE}."
+        )
+        print("no scenarios ran, nothing was spent")
+        return 2
+    if (live or rehearsal) and (blocked := chaos_block_reason()) is not None:
         # A previous teardown did not complete, so the next live run's baseline carries
         # a fault nobody intended. Refused before settings, guards and spend: a refusal
         # that arrives after the money is gone is a report. Offline runs share no world.
-        print(f"CONTAMINATED WORLD: live runs are blocked — {blocked}")
+        # A REHEARSAL is blocked for the same reason it is gated everywhere a live run is:
+        # it seeds into the same shared world, and it is the run most likely to be started
+        # in a hurry with a camera pointed at it.
+        print(f"CONTAMINATED WORLD: live and rehearsal runs are blocked — {blocked}")
         print(
             "Restore the world — the reset clears the block on success:\n"
             "  make eval-reset PURGE_IDEMPOTENCY=1\n"
@@ -2929,14 +3106,6 @@ def main() -> int:
         )
         print("no scenarios ran, nothing was spent")
         return 10
-    # Before the settings load, like the refusals around it: a mistyped mode
-    # must cost nothing, and this parse depends on no environment.
-    mode, mode_refusal = _parse_mode(sys.argv[1:])
-    if mode is None:
-        print(mode_refusal)
-        print("no scenarios ran, nothing was spent")
-        return 2
-    recorded = mode == RECORDED_MODE
     world = _parse_world(sys.argv[1:])
     if world is not None and not recorded:
         print(
@@ -2983,11 +3152,26 @@ def main() -> int:
         print("Name exactly one scenario, e.g. make eval-live ONLY=remediate_dlq_backlog_success")
         print("no scenarios ran, nothing was spent")
         return 2
+    if rehearsal and not only_patterns:
+        # The same refusal for the same reason, one flag along: a rehearsal spends nothing
+        # and still seeds a real fault into the one shared world, so an unfiltered
+        # selection is every scenario's chaos plan fired in sequence with nothing resetting
+        # between them. Spend is not the only thing worth refusing structurally.
+        print(
+            f"REHEARSAL FAIL: --mode {REHEARSAL_MODE} requires --only <scenario_name>. "
+            "An unfiltered rehearsal seeds every scenario's fault into one shared "
+            "platform with no reset between them — free, and still destructive."
+        )
+        print("Name exactly one scenario, e.g. make demo-live MODE=dlq_backlog")
+        print("no scenarios ran, nothing was spent")
+        return 2
     try:
         # A recorded run reads the real environment, which is why it costs money: the
         # platform is a replay, the MODEL is not. ``PLATFORM_MCP_URL`` is read and
-        # ignored — ``run_scenario`` forces the live MCP leg off for any recording.
-        settings = _settings_for_mode(live or recorded)
+        # ignored — ``run_scenario`` forces the live MCP leg off for any recording. A
+        # rehearsal reads it for the opposite half: the platform is real and the model key
+        # is replaced on the way in (``_settings_for_mode``).
+        settings = _settings_for_mode(live or recorded, rehearsal=rehearsal)
     except ValidationError as err:
         # Exit 3 is the preflight/env code; a raw traceback would exit 1, which is
         # reserved for "a scenario failed" (A-15).
@@ -3005,6 +3189,21 @@ def main() -> int:
     # probe knobs surface even on a run that goes on to be refused. Never an exit code.
     if live and (msg := _canned_equivalent_knob_warning(settings)) is not None:
         print(msg)
+    if rehearsal and _is_offline_placeholder(str(settings.platform_mcp_url)):
+        # The exact mirror of `--mode recorded`'s placeholder-KEY refusal below: a
+        # rehearsal is the real platform, so a placeholder platform makes it a canned run
+        # wearing a rehearsal label — and the row it wrote would carry the mode, the
+        # rehearsal flag and `degraded`, all three of them describing something that never
+        # happened. Refused where a live run's own degraded-leg preflight refuses, and for
+        # its reason (A-01/S-09): a report indistinguishable from a real one is the failure.
+        print(
+            f"PREFLIGHT FAIL (env): --mode {REHEARSAL_MODE} but PLATFORM_MCP_URL is the "
+            "offline placeholder. A rehearsal's platform leg is the whole point of it: "
+            "with no platform this is a canned run labelled as a rehearsal of one. "
+            "Point PLATFORM_MCP_URL at the running stack (`make demo`)."
+        )
+        print("no scenarios ran, nothing was spent")
+        return 3
     mcp_token: str | None = None
     if smoke:
         # An empty secret is UNSET, not a token: `is None` alone let `SecretStr("")`
@@ -3065,7 +3264,7 @@ def main() -> int:
             )
             print("no scenarios ran, nothing was spent")
             return 2
-        if live and not smoke:
+        if (live or rehearsal) and not smoke:
             # On the spend path a pattern must be a scenario's FULL NAME.
             # `ONLY=dlq_backlog` used to take `remediate_dlq_backlog_success` too, the
             # read-only one drained the seeded replay_safe pool, and the report blamed
@@ -3073,6 +3272,8 @@ def main() -> int:
             # mutating. Exact match FIRST, so a name that is a prefix of another stays
             # runnable. `--smoke` and offline keep substring matching: no spend, no
             # shared platform, and `make eval-reg`/`baseline` refuse ONLY outright.
+            # A REHEARSAL is on this side of the line: the thing the exact match protects
+            # is the shared world, and a rehearsal reaches it exactly as a live run does.
             known = {s.name for s in scenarios}
             widened = [p for p in only_patterns if p not in known]
             if widened:
@@ -3081,9 +3282,10 @@ def main() -> int:
                     f"scenario names: {', '.join(widened)}"
                 )
                 print(
-                    "A live run selects by full scenario name — one named scenario "
-                    "per pattern — because a substring silently widens the selection "
-                    "past the ADR 0020 one-mutating-scenario gate. Did you mean:"
+                    "A run against the shared platform selects by full scenario name — "
+                    "one named scenario per pattern — because a substring silently widens "
+                    "the selection past the ADR 0020 one-mutating-scenario gate. "
+                    "Did you mean:"
                 )
                 for pattern in widened:
                     for name in matched[pattern]:
@@ -3142,7 +3344,27 @@ def main() -> int:
             )
             print("no scenarios ran, nothing was spent")
             return 8
-    if live:
+    if rehearsal:
+        # The rehearsal's own half of the gate above, and STRICTER than `canned_only`: that
+        # asks whether BOTH legs are canned, and here the model leg is canned by
+        # definition, so the only question left is the platform one. A scenario declaring
+        # `use_live_mcp: false` would be rehearsed entirely out of its own fixtures — a
+        # `make eval` with a different word on the row.
+        no_platform = sorted(s.name for s in scenarios if not s.use_live_mcp)
+        if no_platform:
+            print(
+                f"REHEARSAL FAIL: {len(no_platform)} selected scenario(s) declare "
+                f"use_live_mcp false — {', '.join(no_platform)}. A rehearsal is the real "
+                "platform under a scripted planner; with no platform leg there is nothing "
+                "left of it to rehearse."
+            )
+            print(
+                "Run them offline instead:\n"
+                + "\n".join(f"  make eval ONLY={name}" for name in no_platform)
+            )
+            print("no scenarios ran, nothing was spent")
+            return 8
+    if live or rehearsal:
         # One state-mutating scenario per invocation, enforced rather than remembered
         # (ADR 0020): the remediation scenarios share ONE platform and one seeded
         # replay_safe row, so in a single invocation a CORRECT agent greens one and reds
@@ -3155,14 +3377,22 @@ def main() -> int:
         ]
         if len(mutating) > 1:
             print(
-                f"LIVE FAIL: {len(mutating)} state-mutating scenarios selected — "
-                f"{', '.join(sorted(mutating))}. Each of these changes the world the "
-                "next one reads, and nothing resets between them inside one run."
+                f"{'LIVE' if live else 'REHEARSAL'} FAIL: {len(mutating)} state-mutating "
+                f"scenarios selected — {', '.join(sorted(mutating))}. Each of these changes "
+                "the world the next one reads, and nothing resets between them inside one "
+                "run."
+            )
+            # The runnable form of the mode that was asked for, not of the one this gate was
+            # written for: a refusal that hands over the wrong command gets worked around.
+            alone = (
+                "make eval-live ONLY={name}"
+                if live
+                else f"uv run python -m evals.runner --mode {REHEARSAL_MODE} --only {{name}}"
             )
             print(
                 "Run them one at a time, resetting in between:\n"
                 + "\n".join(
-                    f"  make eval-live ONLY={name} && make eval-reset" for name in sorted(mutating)
+                    f"  {alone.format(name=name)} && make eval-reset" for name in sorted(mutating)
                 )
             )
             print("no scenarios ran, nothing was spent")
@@ -3199,6 +3429,18 @@ def main() -> int:
             "Run `make world-drift WORLD=<id>` before reporting any number from this "
             "run: a recording is only evidence while the world it came from still "
             "matches it (docs/runbook.md)."
+        )
+    if rehearsal:
+        # Printed where the recorded banner is printed, and saying the same kind of thing:
+        # what is real, what is not, and what the row may therefore be used for. The last
+        # sentence is the one that matters on a day somebody finds this report in six
+        # months (ADR 0069).
+        print(
+            f"mode: {REHEARSAL_MODE} — the platform is REAL (this seeds a fault, acts on "
+            "the world and resets it) and the planner is the scenario's scripted one. "
+            "Nothing is spent. Every row is stamped degraded=True with a rehearsal "
+            "provenance flag: this report measures the DEMO, never the agent, and no "
+            "phase-close or research report will count it."
         )
     offline_mcp = _is_offline_placeholder(str(settings.platform_mcp_url))
     offline_llm = _is_offline_api_key(settings.anthropic_api_key.get_secret_value())
@@ -3265,8 +3507,15 @@ def main() -> int:
     # full spend. Each half asks about the scope its half of the selection needs, keyed
     # off the ADR 0020 gate's two fields: `expected_action_tools` alone missed a
     # chaos-only scenario, and `actions:execute` is the wrong scope for seeding.
+    # A REHEARSAL is on this side too, and it is the stronger case rather than a tolerated
+    # one: it seeds under the chaos principal and executes a real Tier-1 action, so both
+    # halves of the two-principal check — the agent can act and cannot seed, the evaluator
+    # can seed — are exactly as load-bearing as on a paid run. A guard skipped because the
+    # run was free would be discovered by the paid take, on camera.
     live_platform = (
-        live and not smoke and not _is_offline_placeholder(str(settings.platform_mcp_url))
+        (live or rehearsal)
+        and not smoke
+        and not _is_offline_placeholder(str(settings.platform_mcp_url))
     )
     write_guard_required = live_platform and any(
         s.expectation.expected_action_tools for s in scenarios
@@ -3361,6 +3610,7 @@ def main() -> int:
             on_result=_after_scenario,
             model_role=model_role,
             recorded_worlds=recorded_worlds,
+            rehearsal=rehearsal,
         )
     finally:
         if scan_client is not None:
@@ -3424,8 +3674,9 @@ def main() -> int:
     # failed one because "the agent failed" is exactly what did not happen. All of them
     # land AFTER the archive and report are on disk — evidence first, verdict second.
     # The LATCH, not only the report rows: a scenario abandoned at SEEDING has no row to
-    # carry ``teardown_error``. Live only, like the pre-run refusal.
-    if live and (report.contaminated_scenarios or chaos_block_reason() is not None):
+    # carry ``teardown_error``. Live and rehearsal only, like the pre-run refusal: both
+    # seed into the shared world, and an offline run has no world to contaminate.
+    if (live or rehearsal) and (report.contaminated_scenarios or chaos_block_reason() is not None):
         named = ", ".join(report.contaminated_scenarios) or (chaos_block_reason() or "")
         print(
             "TEARDOWN FAIL: the shared world is contaminated and further live runs "

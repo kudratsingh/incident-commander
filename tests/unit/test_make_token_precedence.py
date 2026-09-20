@@ -99,12 +99,14 @@ def test_empty_smoke_secret_is_unset_and_refuses_the_stage(
     monkeypatch.setattr(runner_module, "make_client", _boom)
     monkeypatch.setattr(runner_module, "preflight_auth", _boom)
     monkeypatch.setattr(runner_module, "load_scenarios", _boom)
-    monkeypatch.setattr(runner_module, "_settings_for_mode", lambda _live: _smoke_settings(None))
+    monkeypatch.setattr(
+        runner_module, "_settings_for_mode", lambda _live, **_kw: _smoke_settings(None)
+    )
     monkeypatch.setattr(sys, "argv", ["evals.runner", "--live", "--smoke"])
     assert runner_module.main() == 3, "sanity: an absent token already exits 3"
 
     monkeypatch.setattr(
-        runner_module, "_settings_for_mode", lambda _live: _smoke_settings(SecretStr(""))
+        runner_module, "_settings_for_mode", lambda _live, **_kw: _smoke_settings(SecretStr(""))
     )
     assert runner_module.main() == 3
     assert "PLATFORM_SMOKE_TOKEN is not set" in capsys.readouterr().out

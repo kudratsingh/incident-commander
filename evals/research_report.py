@@ -156,6 +156,18 @@ class TwoModelsRefused(ValueError):
     """The scope names two ``agent_model`` ids, so it has no one table."""
 
 
+class RehearsalRefused(ValueError):
+    """The scope contains a demo rehearsal, which is not a run of the agent.
+
+    Refused rather than labelled, unlike every other limit in this document (ADR 0069). A
+    limit is a sentence about rows that ARE measurements; a rehearsal row is the real
+    platform under the scenario's own scripted planner, so its pass, its tool count and its
+    diagnosis were all written by the fixture. Averaged into a leaderboard it does not
+    weaken a number, it invents one — and the flag it carries exists exactly so this
+    assembler can say no by construction rather than by a reader noticing.
+    """
+
+
 # --------------------------------------------------------------------------
 # Reading the archives
 # --------------------------------------------------------------------------
@@ -255,6 +267,11 @@ class Row:
     judge_overall: float | None
     #: The recording this row replayed, or ``None`` off recorded mode (``recorded_fingerprint``).
     recorded_world: str | None = None
+    #: Whether the row came out of a demo rehearsal — the real platform under a SCRIPTED
+    #: planner (ADR 0069). Read off ``provenance.rehearsal`` rather than derived from
+    #: ``execution_mode``, because the flag is the claim the provenance makes about itself
+    #: and this document's job is to refuse it, not to re-derive it.
+    rehearsal: bool = False
 
     @property
     def arm(self) -> tuple[str, str, str]:
@@ -367,6 +384,7 @@ def build_row(
         wall_seconds=provenance.budget.wall_seconds_used,
         judge_overall=outcome.judge_score.overall if outcome.judge_score else None,
         recorded_world=recorded_fingerprint(outcome),
+        rehearsal=provenance.rehearsal,
     )
 
 
@@ -396,6 +414,27 @@ def refusal_for(rows: Sequence[Row]) -> str | None:
     return regression.model_refusal(
         {archive: frozenset(models) for archive, models in sorted(by_archive.items())},
         remedy=_REFUSAL_REMEDY,
+    )
+
+
+def rehearsal_refusal(rows: Sequence[Row]) -> str | None:
+    """Why this scope cannot be a research report, or ``None`` when no row is a rehearsal.
+
+    Named by archive AND scenario, because the remedy is to take the archive out of
+    ``SCOPE``: a rehearsal archive reaches this document only by somebody adding it, and
+    the sentence has to say which one to remove.
+    """
+    rehearsed = sorted(f"{row.archive}/{row.scenario}" for row in rows if row.rehearsal)
+    if not rehearsed:
+        return None
+    return (
+        f"{len(rehearsed)} row(s) in scope are demo REHEARSALS, not runs of the agent: "
+        f"{', '.join(rehearsed)}. A rehearsal is the real platform under the scenario's "
+        "own scripted planner (ADR 0069), so its pass, its tool count and its diagnosis "
+        "came from the fixture — averaging them into a leaderboard invents a number "
+        "rather than weakening one. Remove those archives from SCOPE; every rehearsal row "
+        "carries provenance.rehearsal and degraded=True so this is checkable without "
+        "reading the run."
     )
 
 
@@ -1863,6 +1902,11 @@ def assemble(root: Path, archives: Sequence[str] = SCOPE) -> dict[str, Any]:
         raise ValueError("no rows in scope: a research report over nothing is not a report")
     if (refusal := refusal_for(rows)) is not None:
         raise TwoModelsRefused(refusal)
+    # Before the model refusal's sibling checks and before one number is computed: a
+    # rehearsal row is not a weaker measurement, it is not one, so there is nothing for
+    # the rest of this function to do with it (ADR 0069).
+    if (refusal := rehearsal_refusal(rows)) is not None:
+        raise RehearsalRefused(refusal)
     model = next(iter({row.agent_model for row in rows}))
 
     sections: dict[str, Any] = {
@@ -2493,9 +2537,11 @@ def main(argv: Sequence[str] | None = None) -> int:
             for path in write(document, root=args.root):
                 print(f"wrote {path.relative_to(args.root)}")
             return 0
-    except TwoModelsRefused as refusal:
+    except (TwoModelsRefused, RehearsalRefused) as refusal:
         # Exit 2 with nothing printed above it, as the gate refuses: the report's
-        # output IS the table, so the refusal precedes the first line of it.
+        # output IS the table, so the refusal precedes the first line of it. Both
+        # refusals are "this scope has no one table", one about models and one about
+        # whether the rows are measurements at all.
         print(f"RESEARCH REPORT REFUSED: {refusal}")
         return 2
     except (OSError, ValueError) as error:

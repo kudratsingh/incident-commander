@@ -56,6 +56,14 @@ _DECIDED: Final[Mapping[str, tuple[Category, ...] | None]] = {
     "noise_low_severity": None,
     "noise_missing_severity": None,
     "planner_stops_immediately": None,
+    # WO-R3-331 (INC-004, ADR 0073). The abstention is a decision, not an omission, and it is
+    # the first one whose world holds a real fault: the backlog is genuinely climbing and the
+    # scripted planner names `consumer_saturation` correctly at every step. That correctness is
+    # the PREMISE — what the scenario measures is how many times the loop lets the planner
+    # re-read the signal it already has — so a ROOT_CAUSE grade here would score a script for
+    # agreeing with the fixture written beside it. Admissible on the family
+    # (``_UNDIAGNOSABLE_FAMILIES``), and the reasoning is in the YAML.
+    "planner_confirms_forever": None,
     "postgres_slow": (Category.DB_QUERY_LATENCY,),
     "redis_saturation": (Category.REDIS_SATURATION,),
     "remediate_consumer_lag_success": (Category.CONSUMER_SATURATION,),
@@ -224,12 +232,15 @@ class TestEveryScenarioCarriesADecision:
         """The number in the PR body, checked against the corpus that produced it."""
         corpus = _corpus()
         graded = [s for s in corpus if s.root_cause_graded]
-        assert (len(graded), len(corpus)) == (54, 63), (
+        assert (len(graded), len(corpus)) == (54, 64), (
             f"{len(graded)} of {len(corpus)} scenarios are root-cause graded; "
             "WO-R3-261 landed 32 of 41, WO-R3-202 took it to 36 of 45, WO-R3-214 "
             "to 40 of 49, WO-R3-226 to 44 of 53, WO-R3-228 to 46 of 55, WO-R3-236 to "
             "48 of 57, WO-R3-229 to 49 of 58, WO-R3-221 to 53 of 62 and WO-R3-284 to "
-            "54 of 63 — every "
+            "54 of 63 — and WO-R3-331's INC-004 reproduction is the first "
+            "scenario since to move the denominator alone, taking it to 54 of 64: it "
+            "abstains on its family, and the world it does have is the premise its "
+            "scripted planner is right about rather than the thing under test. Every "
             "`jobs_not_progressing`, `temporal_recovery`, `workflow_stuck`, "
             "`api_latency`, retry, multi-fault and cascading scenario carries a label, "
             "because ADR 0038 makes one mandatory for a new scenario. Update this "

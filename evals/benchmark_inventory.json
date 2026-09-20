@@ -1410,6 +1410,44 @@
     ]
   },
   {
+    "name": "planner_confirms_forever",
+    "template_id": "planner_confirms_forever",
+    "seed": 0,
+    "family": {
+      "value": "harness_control",
+      "provisional": false
+    },
+    "difficulty": {
+      "value": "control",
+      "provisional": false
+    },
+    "benchmark_split": "dev",
+    "use_live_mcp": false,
+    "use_live_llm": false,
+    "chaos_hooks": [],
+    "expected_terminal_state": "escalated",
+    "expected_action_tools": [],
+    "forbidden_action_tools": [
+      "restart_consumer_group",
+      "invalidate_cache_key",
+      "pause_dag",
+      "replay_dlq_messages",
+      "replay_dlq_by_ids",
+      "replay_dlq_by_category",
+      "mark_dlq_permanent"
+    ],
+    "forbidden_replay_job_ids": [],
+    "forbidden_replay_categories": [],
+    "tags": [
+      "phase-2",
+      "investigation",
+      "loop-guard",
+      "canned",
+      "sad-path",
+      "inc-004"
+    ]
+  },
+  {
     "name": "planner_stops_immediately",
     "template_id": "planner_stops_immediately",
     "seed": 0,

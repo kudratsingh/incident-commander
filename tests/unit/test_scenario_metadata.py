@@ -140,10 +140,11 @@ class TestSplitsAreByTemplate:
 
         41 until WO-R3-202's four, 45 until WO-R3-214's four, 49 until WO-R3-226's
         four, 53 until WO-R3-228's two, 55 until WO-R3-236's two, 57 until
-        WO-R3-229's cascade, 58 until WO-R3-221's four and 62 until WO-R3-284's
-        fifth `workflow_stuck` world. A pin, not a derivation.
+        WO-R3-229's cascade, 58 until WO-R3-221's four, 62 until WO-R3-284's
+        fifth `workflow_stuck` world and 63 until WO-R3-331's INC-004
+        reproduction. A pin, not a derivation.
         """
-        assert len(CORPUS) == 63
+        assert len(CORPUS) == 64
 
 
 class TestClosedVocabularies:
@@ -302,6 +303,17 @@ class TestPromotionIsReconciled:
             "uncategorized",
             "harness_control",
             "no world; the planner's own stop path",
+        ),
+        # WO-R3-331 (INC-004, ADR 0073). The name carries no needle, so the rule answers
+        # `uncategorized`. It is the second `harness_control` member and it sits beside the
+        # first for the same reason: the subject under test is the LOOP, not a diagnosis. Its
+        # world is a real consumer-lag fault and it is deliberately not in `consumer_lag` —
+        # the reading is the premise the planner is right about, and what is measured is how
+        # many times the loop lets it be re-read.
+        "planner_confirms_forever": (
+            "uncategorized",
+            "harness_control",
+            "the planner's own never-decides path; the loop's bound is the subject",
         ),
         "remediate_verify_fails": ("uncategorized", "consumer_lag", "alert IS consumer lag"),
         # WO-R3-202 (WP-4.3). No needle for an outbox or a dispatch pipeline, so the rule
@@ -520,6 +532,15 @@ class TestPromotionIsReconciled:
             "single",
             "cascading",
             "one fault and four links; the alert names the last of them",
+        ),
+        # WO-R3-331 (INC-004, ADR 0073). `control` on the second of its two meanings — "nothing
+        # about a world is being measured" — and NOT because the world is healthy: the backlog
+        # is real. A diagnosis is not what is being scored, so counting this as `single` would
+        # add a solved fault to every number that reads difficulty.
+        "planner_confirms_forever": (
+            "single",
+            "control",
+            "the loop's bound on confirming reads is the subject, not the world",
         ),
     }
 

@@ -1056,6 +1056,19 @@ _JUSTIFIED: Final[dict[tuple[object, ...], tuple[str, str]]] = {
         CANNED_ONLY,
         "same premise, same field, same three elements",
     ),
+    # WO-R3-331 (INC-004, ADR 0073). One row, the same shape as the two above and for the
+    # same reason: the key carries no index, so all three elements share it. `source` is NOT
+    # here — the fixture claims a live measurement and the platform answers `live` for
+    # `worker-dispatcher`, so that field agrees and nothing about it is recorded.
+    ("planner_confirms_forever", "get_consumer_lag", "lag", "value"): (
+        CANNED_ONLY,
+        "the world is a three-reading sequence on worker-dispatcher — 20 measured 55s ago, "
+        "then a fresh 39, then that same measurement re-served with its age grown to 11s — "
+        "and `use_live_mcp` is false, so the sequence is the scenario's premise rather than "
+        "a recording of anything. The un-faulted world the check probes answers 0. The THIRD "
+        "element is the reading the ADR 0073 guard refuses, so a correct run never consumes "
+        "it and no live walk could ever produce it; all three elements share this row",
+    ),
     # Group 2: a hot-set key nothing seeds. `create_stale_cache` writes
     # `cache:jobs:worker-dispatcher:hot_set`; this scenario's key is a different one, so the
     # un-faulted world answers `exists: false` with every field null. Five rows because an

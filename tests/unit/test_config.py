@@ -31,6 +31,7 @@ _DOCUMENTED_ENV_VARS = frozenset(
         "AGENT_ENABLED",
         "AGENT_MAX_CONCURRENT_RUNS",
         "AGENT_MODEL",
+        "AGENT_RUN_REPORTING",
         "ANTHROPIC_API_KEY",
         "BENCHMARK_MODEL",
         "BUDGET_MAX_SECONDS",

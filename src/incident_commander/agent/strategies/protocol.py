@@ -13,7 +13,9 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Protocol
 
-from incident_commander.agent.hypothesis import InvestigationStep, ProbeAction
+from pydantic import BaseModel
+
+from incident_commander.agent.hypothesis import InvestigationStep, ProbeAction, without_probe
 from incident_commander.agent.state import RunState
 from incident_commander.agent.strategies.records import StepRecord, StepSink
 from incident_commander.llm.client import LLMClientProtocol
@@ -68,6 +70,24 @@ class StrategyContext:
     #: wired ONLY in recorded mode. ``None`` is the refusal — ``search`` stops rather than
     #: degrading into a strategy that explores without reading (ADR 0060).
     branch_prober: BranchProber | None = None
+    #: Whether a probe is on offer this step (ADR 0074). ``False`` when the loop has withdrawn
+    #: it — the ranking has settled on an actionable answer and the alerted resource's own
+    #: newest reading is fresh and shows the fault — and every strategy must then make its
+    #: planner call with the narrowed schema. A flag the LOOP sets rather than a decision a
+    #: strategy makes: the conditions are the remediate gate's own inputs, which is policy and
+    #: stays in ``investigation.py`` (ADR 0036).
+    offer_probe: bool = True
+
+    def step_model[T: BaseModel](self, model: type[T]) -> type[T]:
+        """The step schema THIS call is made with: ``model``, or ``model`` minus ``probe``.
+
+        Every strategy's planner call goes through this rather than naming
+        ``InvestigationStep`` directly, so a narrowing reaches the arm that generates N
+        candidates and the one that revises its own step as surely as it reaches ``baseline``.
+        The argument is the model the arm would have used, because two arms do not use the same
+        one (``CandidateStep`` carries the candidate set).
+        """
+        return model if self.offer_probe else without_probe(model)
 
 
 class InvestigationStrategy(Protocol):

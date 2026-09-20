@@ -11,9 +11,9 @@
     "no-hook": "the fixture describes a fault no chaos hook can produce, so the canned value is the scenario's premise and the check probes a world that never had it. Not a defect; the fix, if that scenario is ever to run live, is a platform hook"
   },
   "_counts": {
-    "recorded": 184,
+    "recorded": 185,
     "fixture-defect": 10,
-    "explained": 174
+    "explained": 175
   },
   "known_drift": [
     {
@@ -575,6 +575,14 @@
       "kind": "value",
       "context": "canned-only",
       "why": "the world is a three-reading sequence on worker-dispatcher \u2014 20 measured 55s ago, then a fresh 39, then that same measurement re-served with its age grown to 11s \u2014 and `use_live_mcp` is false, so the sequence is the scenario's premise rather than a recording of anything. The un-faulted world the check probes answers 0. The THIRD element is the reading the ADR 0073 guard refuses, so a correct run never consumes it and no live walk could ever produce it; all three elements share this row"
+    },
+    {
+      "scenario": "planner_probes_elsewhere_forever",
+      "tool": "get_consumer_lag",
+      "path": "lag",
+      "kind": "value",
+      "context": "canned-only",
+      "why": "the world is one reading of worker-dispatcher \u2014 30, measured 8s ago, over samples reading 0, 10, 30 \u2014 plus that same measurement re-served with its age grown to 52s, and `use_live_mcp` is false, so the pair is the scenario's premise rather than a recording of anything. The un-faulted world the check probes answers 0. The SECOND element is the fourth ask for the group that ADR 0074 refuses by withdrawing the probe, so a correct run never consumes it and no live walk could produce it; both elements share this row"
     },
     {
       "scenario": "postgres_slow",

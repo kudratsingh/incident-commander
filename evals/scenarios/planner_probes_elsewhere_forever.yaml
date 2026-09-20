@@ -1,0 +1,238 @@
+name: planner_probes_elsewhere_forever
+family: harness_control
+difficulty: control
+description: 'INC-004''s third take, reproduced. `planner_confirms_forever`''s sibling, and the
+  hole ADR 0073 left: that guard bounds re-reading the alerted SUBJECT, so a planner refused a
+  third `get_consumer_lag` simply probes something else. The live run did exactly that — refused,
+  then read `list_dlq_messages`, then `get_circuit_breakers`, then asked for the group a fourth
+  time — with `consumer_saturation` first at 0.75 → 0.82 throughout, above the 0.7 remediate
+  threshold in a category with a Tier-1 fix, and no action in five steps. Before ADR 0074 this
+  run spends all five steps on reads nothing asked for and escalates with `max iterations`. After
+  it, the second step''s ranking settles the question, `probe` leaves the schema of every step
+  after it, and the run hands off naming what it concluded and the two reads it took.
+
+  '
+tags:
+- phase-2
+- investigation
+- loop-guard
+- canned
+- sad-path
+- inc-004
+# Canned for `planner_confirms_forever`'s reason, which is the premise rather than a preference:
+# what is under test is a PLANNER that keeps reading instead of deciding, which is a property of
+# the model's own output and not of any world. The live run reproduced it twice, at $0.21 a time;
+# a scripted planner reproduces it every time, which is what a regression gate needs.
+use_live_mcp: false
+use_live_llm: false
+alert:
+  source: platform.kafka
+  severity: critical
+  fingerprint: consumer_stalled
+  group: worker-dispatcher
+  summary: 'worker-dispatcher stopped processing; lag climbing with the group assignment
+    retained'
+canned_tool_responses:
+  # TWO readings, and the second exists to be left unconsumed. The first is the run's
+  # legitimate investigation of the alerted signal: v0.6.7-shaped (plat #204), so it carries
+  # `age_seconds` and the samples behind it — 0, then 10, then 30 — which is the third take's
+  # own climb and is what lets one reading say the fault is present NOW rather than at some
+  # unknown time.
+  #
+  # The SECOND element is the same measurement re-served with its age grown to 52s, which is the
+  # fourth ask for the group that the take made and ADR 0074 refuses. A correct run never
+  # consumes it, and the `age_seconds` claim below is how this file says so.
+  get_consumer_lag:
+  - content:
+    - type: text
+      text: '{"consumer_group":"worker-dispatcher","lag":30,"lag_known":true,"source":"live","cache_key":"kafka:consumer_lag:worker-dispatcher","measured_at":"2026-09-20T15:18:04Z","age_seconds":8,"recent_samples":[{"lag":30,"measured_at":"2026-09-20T15:18:04Z"},{"lag":10,"measured_at":"2026-09-20T15:17:04Z"},{"lag":0,"measured_at":"2026-09-20T15:16:04Z"}]}'
+    is_error: false
+  - content:
+    - type: text
+      text: '{"consumer_group":"worker-dispatcher","lag":30,"lag_known":true,"source":"live","cache_key":"kafka:consumer_lag:worker-dispatcher","measured_at":"2026-09-20T15:18:04Z","age_seconds":52,"recent_samples":[{"lag":30,"measured_at":"2026-09-20T15:18:04Z"},{"lag":10,"measured_at":"2026-09-20T15:17:04Z"},{"lag":0,"measured_at":"2026-09-20T15:16:04Z"}]}'
+    is_error: false
+  # THE DISTRACTOR, AND IT IS THE REAL ONE. The platform's four resting dead-letter rows, byte
+  # for byte as `dlq_backlog` declares them — including the row whose error names an SMTP relay,
+  # which is the cause INC-004's briefing recommended checking because the escalation reason it
+  # was handed named none. This scenario's planner reads them for the same reason the live one
+  # did: the refusal left it looking for somewhere else to go.
+  list_dlq_messages:
+    content:
+    - type: text
+      text: '{"total":4,"items":[{"id":"fc8d2a03-23b3-5371-9acb-46443c73baa5","type":"bulk_api_sync","error_message":"UpstreamTimeout: bulk_api_sync POST https://partner-api.internal/v2/sync timed out after 30s on attempt 3/3 — the request was never acknowledged, so no downstream write was recorded","retry_count":3,"remediation_hint":"replay_safe","created_at":"2026-07-28T09:52:00Z","updated_at":"2026-07-28T09:52:00Z","dead_lettered_at":"2026-07-28T09:55:00Z","fenced_at":null,"fenced_by":null,"trace_id":"c5ca46c1-f4dd-5021-8be4-130143553096","triage":{"root_cause_category":"upstream_timeout","summary":"partner-api.internal did not answer inside the 30s deadline on any of the three attempts. The payload was accepted by validation and nothing was committed downstream.","suggested_fix":"Re-run the job as it stands: the call is idempotent, no partial write survived the timeout, and a fresh attempt is the entire remedy. Neither the payload nor the producer needs changing.","is_retryable":true,"confidence":0.88},"extra":null},{"id":"f030f975-974e-5ce3-aa6b-444136507d86","type":"csv_upload","error_message":"ValueError: invalid literal for int() with base 10: ''not-a-number'' at row 15,382","retry_count":3,"remediation_hint":"human_required","created_at":"2026-07-28T09:48:00Z","updated_at":"2026-07-28T09:48:00Z","dead_lettered_at":"2026-07-28T09:51:00Z","fenced_at":null,"fenced_by":null,"trace_id":"89609789-fdcb-5a5a-b826-d7d5d5f9cf37","triage":{"root_cause_category":"bad_input","summary":"Non-numeric value in a supposedly-integer CSV column.","suggested_fix":"Not retryable — data quality issue. Notify the uploader; add a validation step in the CSV importer that fails the whole upload with a clear error rather than half-processing.","is_retryable":false,"confidence":0.94},"extra":null},{"id":"af67d1b1-13f8-5a2c-8c44-66ec5564597d","type":"bulk_api_sync","error_message":"RateLimited: partner-api.internal answered 429 Too Many Requests on attempt 3/3 (retry-after: 120s); the per-tenant quota window has not rolled over yet","retry_count":3,"remediation_hint":"wait_and_replay","created_at":"2026-07-28T09:35:00Z","updated_at":"2026-07-28T09:35:00Z","dead_lettered_at":"2026-07-28T09:38:00Z","fenced_at":null,"fenced_by":null,"trace_id":"6f76e48d-72c4-5e5a-a5cf-bc29758167cb","triage":{"root_cause_category":"rate_limited","summary":"All three attempts landed inside one quota window. The partner is shedding load, not rejecting the payload.","suggested_fix":"Let the 120s retry-after window pass before the next attempt. An immediate re-run spends another attempt against the same closed window and comes back 429.","is_retryable":true,"confidence":0.86},"extra":null},{"id":"97d91272-9774-5b8e-980b-f0d2fa6ed619","type":"bulk_api_sync","error_message":"send_email downstream call failed: ConnectionRefusedError(''smtp.mailer.internal:587'')","retry_count":3,"remediation_hint":"wait_and_replay","created_at":"2026-07-28T09:20:00Z","updated_at":"2026-07-28T09:20:00Z","dead_lettered_at":"2026-07-28T09:23:00Z","fenced_at":null,"fenced_by":null,"trace_id":"1bfc7482-c957-5217-beae-e8cba48a152d","triage":{"root_cause_category":"downstream_unavailable","summary":"SMTP relay unreachable — connection refused at TCP layer.","suggested_fix":"Check smtp.mailer.internal ECS task health; recent billing hotfix (v0.4.2) may have changed VPC egress rules — cross-reference `get_deploy_history`. Re-run once the dependency answers.","is_retryable":true,"confidence":0.82},"extra":null}]}'
+    is_error: false
+  # Every breaker closed, which is the third reading the take took and the reason it is here: it
+  # says nothing at all about a stalled consumer group. A run that spends a step on it after its
+  # own ranking has settled is spending a step to arrive where it already was.
+  get_circuit_breakers:
+    content:
+    - type: text
+      text: '{"measured_at":"2026-09-20T15:18:12.104221Z","breakers":[{"name":"bulk-api-sync","state":"closed","failure_count":0,"failure_threshold":3,"recovery_timeout_s":30.0,"last_state_change_at":null,"seconds_since_state_change":null,"last_failure_at":null,"last_failure_reason_class":null,"recorded_at":"2026-09-20T15:17:44.031180Z","reported_age_s":28.073}],"total":1,"unknown_reason":null}'
+    is_error: false
+canned_llm_responses:
+  # Five steps, and after the first one not a single read of the resource the alert names. The
+  # confidences are the third take's own: 0.75, 0.82, 0.82, 0.82, 0.82 — every one of them at or
+  # above the 0.7 threshold in a category with a Tier-1 fix, so on every one of them a
+  # `remediate` would have been let through, and every one of them emits `probe` instead. The
+  # reasoning strings are the live ones' argument, including the two that cite the re-read rules.
+  investigation_planner:
+  - hypotheses:
+    - category: consumer_saturation
+      name: worker-dispatcher-consumer-stalled-lag-climbing
+      confidence: 0.75
+      reasoning: 'The alert says worker-dispatcher stopped processing with climbing lag and a
+        retained group assignment, which is the canonical saturation signal. Read the group''s
+        own lag first.
+
+        '
+    next_action:
+      kind: probe
+      tool_name: get_consumer_lag
+      arguments:
+        consumer_group: worker-dispatcher
+  - hypotheses:
+    - category: consumer_saturation
+      name: worker-dispatcher-lag-30-climbing
+      confidence: 0.82
+      reasoning: 'Lag reads 0, 10, 30 across three samples measured 8s ago: the group is stalled
+        and the backlog is growing. Check the dead-letter queue before concluding, in case the
+        stall is a symptom of something being retried.
+
+        '
+    next_action:
+      kind: probe
+      tool_name: list_dlq_messages
+      arguments: {}
+    # From here on the ranking has settled and the run is reading things that cannot move it.
+    # This is the failure: each of the three steps below is a plausible next read, none of them
+    # is a read of the alerted resource, and none of them was ever going to end with an action.
+  - hypotheses:
+    - category: consumer_saturation
+      name: worker-dispatcher-lag-30-sustained
+      confidence: 0.82
+      reasoning: 'The four dead-letter rows are unrelated to this group — a partner timeout, a
+        bad CSV, a rate limit and an SMTP refusal. Check the circuit breakers in case a
+        downstream dependency is holding the consumer.
+
+        '
+    next_action:
+      kind: probe
+      tool_name: get_circuit_breakers
+      arguments: {}
+  - hypotheses:
+    - category: consumer_saturation
+      name: worker-dispatcher-lag-30-sustained
+      confidence: 0.82
+      reasoning: 'Every breaker is closed, so nothing downstream is shedding load. Confirm the
+        resource is still faulted immediately before acting on it.
+
+        '
+    next_action:
+      kind: probe
+      tool_name: get_consumer_lag
+      arguments:
+        consumer_group: worker-dispatcher
+  - hypotheses:
+    - category: consumer_saturation
+      name: worker-dispatcher-lag-30-sustained
+      confidence: 0.82
+      reasoning: 'Still the same answer. One more look at the breakers to be sure nothing
+        changed while I was reading.
+
+        '
+    next_action:
+      kind: probe
+      tool_name: get_circuit_breakers
+      arguments: {}
+  briefing_writer:
+  - findings: 'worker-dispatcher''s lag was read once — 30 with the measurement 8s old and the
+      samples behind it reading 0, 10, 30, with the group assignment retained — and
+      consumer_saturation was ranked first at 0.82 from that reading onward. The dead-letter
+      queue holds four rows, none of them this group''s. No remediation was taken: three further
+      reads were refused once the ranking had settled, and the run was handed off rather than
+      spending its remaining steps on readings that could not change it.
+
+      '
+    recommendation: 'Restart the worker-dispatcher consumer group, or check why it holds its
+      assignment without consuming; the backlog was 30 and rising at handoff. No Tier-1 action
+      was taken here, so nothing needs checking for effect.
+
+      '
+  briefing_judge:
+  - groundedness: 0.9
+    actionability: 0.85
+    reasoning: 'Findings quote the one reading with its age and its samples, name the cause the
+      run ranked first, say plainly that no action was taken and why the later reads did not
+      happen; the recommendation points at the group the alert named rather than at the
+      dead-letter furniture.
+
+      '
+expectation:
+  name: planner_probes_elsewhere_forever
+  # ESCALATED before and after, and deliberately NOT the discriminator — the same decision
+  # `planner_confirms_forever` records, for the same reason (ADR 0073 § 2, ADR 0074): a planner
+  # that will not decide cannot be made to act, and a loop that decided FOR it would be taking a
+  # Tier-1 write nobody proposed. What ADR 0074 changes is WHICH reads happen and what the
+  # handoff says, so the claims below are about the refusals, the reads and the reason.
+  expected_terminal_state: escalated
+  expected_evidence_contains:
+  # The refusal's own words. Before ADR 0074 no such entry exists in THIS run: ADR 0073's guard
+  # only ever looked at a probe of the alerted subject, and after its first refusal this planner
+  # never asks for one — it asks for three other tools.
+  - 'probe refused: this run has already read'
+  # The sentence that is ADR 0074 rather than ADR 0073. The older refusal said a probe of a
+  # different tool stayed open, which is exactly the door this scenario walks through.
+  - No probe is offered this step
+  - not of any other tool
+  # The cap: offered `remediate` or `stop` twice and asking for a read a third time hands off.
+  - 3 times after being refused
+  # And the handoff says what the run concluded, INC-004's second half.
+  - "the top hypothesis was 'consumer_saturation'"
+  # The reads it spent its steps on — the claim that makes this scenario about the narrowing
+  # rather than about a refusal record. Before ADR 0074 this run reads five times across three
+  # tools; after it, twice, and the handoff lists exactly those two.
+  - the reads it took were get_consumer_lag, list_dlq_messages
+  expected_evidence_fields:
+  # The anti-vacuity half: the run DID read the fault, and its own reading is what settled the
+  # ranking the refusals cite.
+  - tools: [get_consumer_lag]
+    field: lag
+    which: last
+    equals: 30
+  # The bound itself, read off the trail. The newest reading of the group is the FIRST fixture
+  # element (age 8s); the second — the same measurement re-served at 52s, which is the fourth ask
+  # the live take made — is never consumed, because the step that would have consumed it was
+  # offered no probe. Before ADR 0074 the newest reading is that second element and this claim
+  # fails on 52 != 8.
+  - tools: [get_consumer_lag]
+    field: age_seconds
+    which: last
+    equals: 8
+  # The briefing carries the bound's reason rather than the writer's word for it (ADR 0065).
+  expect_briefing_contains:
+  - is not more evidence
+  - consumer_saturation
+  # Every Tier-1 tool, derived per ADR 0033 from an EMPTY sanctioned set: this run's correct
+  # trajectory takes no action, because the planner never proposes one. A loop that answered a
+  # withdrawn probe by acting on the ranking itself would trip all seven.
+  forbidden_action_tools:
+  - restart_consumer_group
+  - invalidate_cache_key
+  - pause_dag
+  - replay_dlq_messages
+  - replay_dlq_by_ids
+  - replay_dlq_by_category
+  - mark_dlq_permanent
+  # 2 calls on a correct canned run: the investigation of the alerted signal and the one read of
+  # the dead-letter queue taken while the ranking was still moving. 5 before ADR 0074, one per
+  # step. The cap is 6 rather than 2 for `planner_confirms_forever`'s reason — a budget that
+  # stopped the old run would make the BUDGET dimension the discriminator and hide what this
+  # scenario is about, so both runs have room to spare and the guard is the only difference.
+  max_tool_calls: 6
+
+# No `ground_truth`, deliberately, and `may_abstain` admits it on the family
+# (tests/unit/test_ground_truth_corpus.py). The world's fault is real — a consumer group with a
+# climbing backlog — and the planner names it correctly at every step, which is the PREMISE here
+# rather than the subject: what is under test is the loop's withdrawal of a move, and a
+# ROOT_CAUSE grade would score the script for agreeing with the fixture it was written beside.
+# `planner_confirms_forever` and `planner_stops_immediately` abstain for the same class of reason.

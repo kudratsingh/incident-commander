@@ -38,8 +38,15 @@ the shape of this module rather than details of it:
 * **The steps come from the client seam, not from the evidence ledger.** Latency, the
   outcome and the raw first content block exist nowhere else: the ledger holds a parsed
   summary, no timing, and no entry at all for a call the platform refused. ``ToolCallLog``
-  is the ``MCPClient`` tracer hook that collects them; the ledger still decides the ORDER
-  and supplies the verifications.
+  is the ``MCPClient`` tracer hook that collects them, and it supplies the ORDER too: the
+  order the calls happened in. The ledger still supplies the verifications.
+* **And they are sent the moment the call returns** (ADR 0074, amending ADR 0072). Queueing
+  them to the next transition is what made the owner's third take unwatchable: all four steps
+  and the terminal state arrived in one burst at the end, carrying their original timestamps,
+  so the page went healthy → escalated with nothing in between. A step is an event, the tracer
+  hook fires on it, and that is where the report goes out. A transition still reports at the
+  transition — the checkpoint seam is immediate already — and the only batching left is the
+  one the platform forces: a terminal state closes the run, so the terminal report goes LAST.
 
 **Forward compatibility is deliberate.** The widened fields are additive and optional, and
 the platform's input model forbids unknown ones, so a commander built against v0.6.16 and
@@ -326,9 +333,28 @@ class ToolCallLog:
         # here, immediately after the call returned.
         self.clock = clock
         self._calls: list[ObservedCall] = []
+        #: Who to hand a call to the moment it is observed (ADR 0074). ``None`` until a
+        #: ``RunReporter`` subscribes, and a sink that answers ``False`` leaves the call
+        #: buffered for the next transition — which is what the reporter says before it has a
+        #: state to stamp a step with.
+        self._sink: Callable[[ObservedCall], bool] | None = None
+
+    def subscribe(self, sink: Callable[[ObservedCall], bool]) -> None:
+        """Report each call as it returns rather than at the next transition (ADR 0074).
+
+        One subscriber, because one reporter reports one run. The sink must not raise — this
+        runs inside ``call_tool`` — and ``RunReporter`` swallows everything by contract; the
+        ``tee`` guard below is the second belt.
+        """
+        self._sink = sink
 
     def observe(self, record: Mapping[str, Any]) -> None:
-        """Record one traced call. Takes the tracer's own record shape."""
+        """Record one traced call. Takes the tracer's own record shape.
+
+        Handed straight to the subscriber when there is one, and buffered only when it says it
+        could not send: a call that was reported must not sit here as well, or the next
+        transition would report it a second time under a second ``seq``.
+        """
         tool = record.get("tool_name")
         if not isinstance(tool, str) or tool in self.skip:
             return
@@ -340,16 +366,17 @@ class ToolCallLog:
             refused = bool(result.get("is_error")) if isinstance(result, Mapping) else False
             outcome = "refused" if refused else "ok"
             excerpt = _first_text_block(result)
-        self._calls.append(
-            ObservedCall(
-                tool=tool,
-                arguments=dict(record.get("arguments") or {}),
-                result_excerpt=_excerpt(excerpt, _MAX_RESULT_EXCERPT_CHARS),
-                outcome=outcome,
-                latency_ms=_latency_ms(record.get("duration_seconds")),
-                at=self.clock(),
-            )
+        call = ObservedCall(
+            tool=tool,
+            arguments=dict(record.get("arguments") or {}),
+            result_excerpt=_excerpt(excerpt, _MAX_RESULT_EXCERPT_CHARS),
+            outcome=outcome,
+            latency_ms=_latency_ms(record.get("duration_seconds")),
+            at=self.clock(),
         )
+        if self._sink is not None and self._sink(call):
+            return
+        self._calls.append(call)
 
     def tee(
         self, inner: Callable[[dict[str, Any]], None] | None
@@ -654,6 +681,10 @@ class RunReporter:
         #: Where the steps come from. ``None`` reports everything except them, which is
         #: what a run whose client is not traced can honestly say.
         self._tool_log = tool_log
+        #: The run as the last report saw it, so a step reported mid-transition can carry the
+        #: hypotheses, the budget and the state that were true when the call was made. ``None``
+        #: before the first report, which is the one window where a step is buffered instead.
+        self._last_state: RunState | None = None
         #: Whether the widened fields are still being sent. Latched off by the first
         #: refusal that does not name a run-level code — an older platform.
         self._widened = True
@@ -679,6 +710,11 @@ class RunReporter:
         self.steps_sent = 0
         self.verifications_sent = 0
         self.briefing_sent = False
+        if tool_log is not None:
+            # ADR 0074: the tracer hook fires when a call returns, so that is when its step is
+            # reported. Subscribed here rather than wired by the runner, so nobody can build a
+            # reporter with a log and get the old queued behaviour by omission.
+            tool_log.subscribe(self._report_call)
 
     @property
     def run_id(self) -> str:
@@ -691,12 +727,17 @@ class RunReporter:
         return self._widened
 
     def report(self, run_state: RunState) -> None:
-        """Report where the run is now, and every step it took getting here.
+        """Report where the run is now, and anything that happened since the last report.
 
-        One call per pending step or verdict, plus the run's own state on the last of
-        them; a transition that made no calls is one call. Upsert by ``run_id``, so
-        repeating a state is safe and appends nothing to the platform's phase history.
+        One call per pending verdict, plus the run's own state on the last of them; a
+        transition whose events were all reported as they happened is one call. Upsert by
+        ``run_id``, so repeating a state is safe and appends nothing to the platform's phase
+        history.
         """
+        # Before the pending list is built: a step reported from here on may stamp itself with
+        # this state, and a call made during the NEXT transition belongs to that transition's
+        # state rather than to the one before it.
+        self._last_state = run_state
         pending = self._pending(run_state)
         if not self._widened:
             # The narrow payload carries no step, so N of them would say the same thing N
@@ -730,20 +771,48 @@ class RunReporter:
         if self._call(REPORT_BRIEFING_TOOL, arguments).ok:
             self.briefing_sent = True
 
+    # -- reporting one call, the moment it returns ---------------------------
+
+    def _report_call(self, call: ObservedCall) -> bool:
+        """Report one observed call as its own step, now (ADR 0074).
+
+        ``False`` means "not sent, keep it": before the first transition report there is no
+        state to stamp a step with, and on a narrowed platform there is no step field to send
+        it in. Both leave the call in the log, where the next transition's report picks it up —
+        the pre-ADR-0074 path, kept for exactly the cases where the live one cannot run.
+
+        Never raises. It is called from inside ``MCPClient.call_tool``'s tracer hook, so an
+        exception here would surface as a failed tool call in the run this is describing.
+        """
+        state = self._last_state
+        if state is None or not self._widened:
+            return False
+        try:
+            item = self._step_of(call)
+            # An intermediate report: the state it carries is the one the run was in while it
+            # made this call, and `at` is the call's own moment, never the report's.
+            self._deliver(self._payload(state, item=item, final=False), narrow_retry=False)
+        except Exception as err:  # noqa: BLE001 - telemetry may never fail a tool call
+            self._note(f"{REPORT_RUN_TOOL}: reporting a live step failed: {err}")
+        return True
+
     # -- assembling one report ----------------------------------------------
 
     def _pending(self, run_state: RunState) -> list[_Pending]:
-        """Everything that happened since the last report, in the order it happened.
+        """Everything since the last report that has not already been reported, in order.
 
-        The evidence ledger decides the order and names the verdicts; the tool log supplies
-        what the client measured. A call the ledger never recorded — one the platform
-        refused, or one whose transition escalated instead of writing an entry — is still a
-        call the agent made, so the leftovers are reported after the ledger's own items
-        rather than dropped.
+        The verdicts come from the evidence ledger, which is the only place they exist: a
+        verify judgement is an LLM call, not a tool call, so no client seam sees it.
+
+        The STEPS normally do not appear here at all any more (ADR 0074): each was reported the
+        moment its call returned. What is left in the log is what the live path could not send —
+        a call made before the first transition report — plus, on a run with no tool log at all,
+        nothing, in which case the ledger's own entries are the honest source of steps.
         """
         entries = run_state.evidence[self._reported_entries :]
         self._reported_entries = len(run_state.evidence)
         observed = deque(self._tool_log.drain() if self._tool_log is not None else [])
+        live_steps = self._tool_log is not None
         pending: list[_Pending] = []
         for entry in entries:
             if entry.tool_name == VERIFY_JUDGE_MARKER:
@@ -757,6 +826,10 @@ class RunReporter:
                 )
                 continue
             if entry.tool_name.startswith("_"):
+                continue
+            if live_steps:
+                # Its step went out when the call returned; a second one here would be the
+                # same call under a second `seq`.
                 continue
             pending.append(self._step(entry, _take(observed, entry.tool_name)))
         pending.extend(self._step_of(call) for call in observed)

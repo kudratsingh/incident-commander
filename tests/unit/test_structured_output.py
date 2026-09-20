@@ -262,13 +262,20 @@ class TestEveryRecordOutputModel:
         A model reaching ``call`` without ``StructuredOutput`` escalates on its wrapping.
         """
         names: set[str] = set()
+        # ``ctx.step_model(X)`` is the same call site one hop further (ADR 0074): the loop
+        # decides whether X reaches the model whole or with `probe` withdrawn, and the model
+        # under the hop is the one this list is about.
+        call_site = re.compile(
+            r"output_model=(?:ctx\.step_model\()?([A-Za-z_][A-Za-z0-9_]*)\s*[,)]"
+        )
         for root in ("src", "evals"):
             for path in (_REPO_ROOT / root).rglob("*.py"):
-                names.update(
-                    re.findall(r"output_model=([A-Za-z_][A-Za-z0-9_]*)\s*,", path.read_text())
-                )
-        # ``llm/repair.py`` forwards its own ``output_model``: a pass-through.
+                names.update(call_site.findall(path.read_text()))
+        # ``llm/repair.py`` forwards its own ``output_model``: a pass-through. ``step_model`` is
+        # the other one — ``strategies/reflection.py`` resolves the schema once and hands the
+        # same object to both of its calls, so the model itself is named at the resolution.
         names.discard("output_model")
+        names.discard("step_model")
         assert names == {model.__name__ for model in RECORD_OUTPUT_MODELS}, (
             "the record_output call sites and RECORD_OUTPUT_MODELS disagree; "
             "a new structured-output model must inherit StructuredOutput and "

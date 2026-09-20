@@ -98,6 +98,22 @@ class StructuredOutput(BaseModel):
     Adds one ``mode="before"`` validator, no ``model_config``.
     """
 
+    @classmethod
+    def output_refused(cls, error: Exception) -> bool:
+        """Whether this failure is the SCHEMA refusing a move, not a payload it cannot read.
+
+        ADR 0074's hook, and the reason it lives on the model: a step model handed to the
+        planner with a choice narrowed (``hypothesis.without_probe``) rejects the withdrawn
+        move at validation, and that is not the malformation ADR 0035's one bounded re-ask
+        exists for — "your output was invalid" is the wrong sentence for "that move was not on
+        offer". ``llm/repair.py`` asks the model rather than inspecting the error itself, so
+        the knowledge of what a model offers stays with the model, and every caller that passes
+        a narrowed schema gets the behaviour without knowing about it.
+
+        ``False`` by default: every model that narrows nothing keeps ADR 0035 exactly.
+        """
+        return False
+
     @model_validator(mode="before")
     @classmethod
     def _decode_stringified_containers(cls, data: Any) -> Any:

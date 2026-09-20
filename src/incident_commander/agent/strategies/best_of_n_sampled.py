@@ -194,7 +194,7 @@ class BestOfNSampledStrategy:
                         ctx.llm_client,
                         system_prompt=self._system_prompt,
                         user_message=user_message,
-                        output_model=InvestigationStep,
+                        output_model=ctx.step_model(InvestigationStep),
                         model=ctx.model,
                         temperature=self._temperature,
                     )

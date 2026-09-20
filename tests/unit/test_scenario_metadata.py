@@ -136,15 +136,15 @@ class TestSplitsAreByTemplate:
         }
 
     def test_the_shipped_corpus_loads(self) -> None:
-        """63 scenarios, no straddle. The check is inert until it is not.
+        """65 scenarios, no straddle. The check is inert until it is not.
 
         41 until WO-R3-202's four, 45 until WO-R3-214's four, 49 until WO-R3-226's
         four, 53 until WO-R3-228's two, 55 until WO-R3-236's two, 57 until
         WO-R3-229's cascade, 58 until WO-R3-221's four, 62 until WO-R3-284's
-        fifth `workflow_stuck` world and 63 until WO-R3-331's INC-004
-        reproduction. A pin, not a derivation.
+        fifth `workflow_stuck` world, 63 until WO-R3-331's INC-004 reproduction
+        and 64 until WO-R3-332's sibling of it. A pin, not a derivation.
         """
-        assert len(CORPUS) == 64
+        assert len(CORPUS) == 65
 
 
 class TestClosedVocabularies:
@@ -314,6 +314,14 @@ class TestPromotionIsReconciled:
             "uncategorized",
             "harness_control",
             "the planner's own never-decides path; the loop's bound is the subject",
+        ),
+        # WO-R3-332 (ADR 0074). The third `harness_control` member, beside its sibling and for
+        # the same reason: the planner probes a DIFFERENT tool each step, which is the door ADR
+        # 0073's refusal left open, and what is measured is which reads the loop still offers.
+        "planner_probes_elsewhere_forever": (
+            "uncategorized",
+            "harness_control",
+            "the planner's own probe-elsewhere path; the withdrawn move is the subject",
         ),
         "remediate_verify_fails": ("uncategorized", "consumer_lag", "alert IS consumer lag"),
         # WO-R3-202 (WP-4.3). No needle for an outbox or a dispatch pipeline, so the rule
@@ -541,6 +549,13 @@ class TestPromotionIsReconciled:
             "single",
             "control",
             "the loop's bound on confirming reads is the subject, not the world",
+        ),
+        # WO-R3-332 (ADR 0074), the sibling, `control` on the same second meaning: its backlog
+        # is real too, and a diagnosis is not what is scored.
+        "planner_probes_elsewhere_forever": (
+            "single",
+            "control",
+            "the schema the settled step is offered is the subject, not the world",
         ),
     }
 

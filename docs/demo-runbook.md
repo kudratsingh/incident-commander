@@ -39,6 +39,14 @@ scenario, every time. No make target sets `YES_SPEND`.
       `scripts/bootstrap_agent_token.py` — never typed into a file that gets committed).
       **Reload it after step 1's reset**: the reset writes the page's own boundary row, and a
       page loaded before it is still showing the previous run.
+- [ ] `PLATFORM_SMOKE_TOKEN` set, and this one is a REFUSAL rather than a degradation
+      (ADR 0074): every read the runner makes — the baseline wait, the fault watch, the
+      precondition poll, the drain wait, and `make traffic`'s own `--until-lag` read — is made
+      under the read-only principal, and the script stops with
+      `PLATFORM_SMOKE_TOKEN is not set … it will not fall back` if it is missing. The fallback
+      it replaced is what flooded the 2026-09-20 take's action ledger: a `get_consumer_lag`
+      every three seconds under the AGENT principal, which the page cannot tell from the
+      agent's own four reads.
 - [ ] Nothing else running: no `make traffic`, no `evals.runner`, no merge in flight. Step 1
       audits for exactly this and stops if it finds one.
 - [ ] Screen recorder ready but **not started** — step 4 tells you when (step 2 with
@@ -175,6 +183,15 @@ every MCP read by ANY service account, so the world audit's own reads are in the
 principal id is what separates them — the agent acts under
 `PLATFORM_AGENT_PRINCIPAL_ID`, the audit reads under `PLATFORM_SMOKE_PRINCIPAL_ID`, and
 `agent.run_reported` only ever comes from the agent.
+
+Measured on the 2026-09-20 rehearsal after ADR 0074 (`consumer_outage`, run
+`459f8a15-12da-5283-81f4-eed3c65b40c4`): **five** rows under the agent principal and nothing
+else — `get_consumer_lag` ×3 (the precondition probe, the pre-action re-read, the verify read),
+`restart_consumer_group` ×1, and one `mark_dlq_permanent` that ERRORED, which is the eval
+runner's own principal guard proving what that token cannot do (`evals/guards.py`). Every
+polling read the runner made is under the smoke principal. That last row is the one thing this
+still needs from the platform: it is the lab's probe wearing the agent's token on purpose, and
+WO-R3-333 gives it its own `lab.probe` action so the page can leave it out.
 
 ## Steps 1–6, and what each is for
 

@@ -356,7 +356,12 @@ class _Climb:
         ``except`` arm charges what the failed call billed and escalates (ADR 0015, ADR 0035).
         """
         planned, step, planner = _plan_next_step(
-            run_state, self.at, self.ctx.llm_client, self.ctx.model
+            run_state,
+            self.at,
+            self.ctx.llm_client,
+            self.ctx.model,
+            # As the control group runs it, narrowing included (ADR 0074).
+            self.ctx.step_model(InvestigationStep),
         )
         self.billed = (planner.billed_usage,)
         self.planner_input_tokens += planner.context_tokens

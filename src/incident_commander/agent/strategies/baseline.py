@@ -57,7 +57,15 @@ class BaselineStrategy:
         Exceptions propagate as before the seam: the loop's ``except`` arm charges what the
         failed call billed and escalates (ADR 0015, ADR 0035).
         """
-        updated, step, call = _plan_next_step(run_state, at, ctx.llm_client, ctx.model)
+        updated, step, call = _plan_next_step(
+            run_state,
+            at,
+            ctx.llm_client,
+            ctx.model,
+            # The step schema THIS call is made with. Whole unless the loop withdrew the
+            # probe for this step (ADR 0074); the arm itself decides nothing.
+            ctx.step_model(InvestigationStep),
+        )
         record = self._record(run_state, updated, step, call, ctx)
         if ctx.record_step is not None:
             ctx.record_step(record)

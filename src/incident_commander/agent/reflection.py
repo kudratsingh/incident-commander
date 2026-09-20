@@ -317,17 +317,22 @@ def revise_step(
     *,
     user_message: str,
     model: str,
+    output_model: type[InvestigationStep] = InvestigationStep,
 ) -> RepairedCall[InvestigationStep]:
     """The second and last planner call of the step: the same schema, plus the critique.
 
     Takes the rendered turn (``format_revision_context``) rather than rendering it, so the
     caller can measure the string that was sent instead of a second render of it.
+
+    ``output_model`` is that same schema, passed in rather than named here: when the loop has
+    withdrawn the probe for this step (ADR 0074) the revision is held to the narrowed model
+    too, or a critique would be a way to get the withdrawn move back.
     """
     return call_with_output_repair(
         llm_client,
         system_prompt=revision_system_prompt(),
         user_message=user_message,
-        output_model=InvestigationStep,
+        output_model=output_model,
         model=model,
     )
 

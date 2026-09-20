@@ -22,6 +22,7 @@ from incident_commander.llm.client import (
     LLMUsage,
 )
 from incident_commander.llm.prompts.loader import load_prompt
+from incident_commander.llm.structured import StructuredOutput
 
 #: Re-asks before escalating; cap as in
 #: ``remediation._MAX_ARGUMENT_REFUSALS``.
@@ -53,6 +54,28 @@ _REPAIRABLE: Final[tuple[type[Exception], ...]] = (
     ValidationError,
     ValueError,
 )
+
+
+class OutputNotOffered(LLMError):
+    """The model asked for a move its own output schema did not offer (ADR 0074).
+
+    Raised INSTEAD of re-asking, and that is the decision: a re-ask carries "your output was
+    invalid", which is the wrong sentence for a payload that was perfectly readable and named a
+    move the caller had withdrawn. It is also the wrong ACTION — the re-ask would spend a
+    second billed call to be told the same thing, and against a scripted planner it would
+    consume the next step's answer as this step's correction.
+
+    An ``LLMError`` so nothing that escalated on a failed planner call stops escalating; every
+    caller that means to steer rather than escalate catches this type first (the investigation
+    loop does, and records the refusal).
+    """
+
+    def __init__(self, failure: Exception) -> None:
+        super().__init__(str(failure))
+        self.usage = usage_of(failure)
+        self.record_id = getattr(failure, "record_id", None)
+        #: The validation failure itself, so a caller can say which move was refused.
+        self.failure = failure
 
 
 class OutputRepairExhausted(LLMError):
@@ -98,6 +121,11 @@ def call_with_output_repair[T: BaseModel](
 
     Raises ``OutputRepairExhausted`` when the repair fails too; a transport
     ``LLMError`` passes through; the loop bound caps ``MAX_OUTPUT_REPAIRS + 1``.
+
+    One failure is never re-asked: a payload ``output_model`` itself calls a REFUSED move
+    rather than an unreadable one (``StructuredOutput.output_refused``, ADR 0074) raises
+    ``OutputNotOffered`` straight away, so the caller that narrowed the schema can steer
+    instead of paying for a second call to hear the same answer.
     """
     failures: list[Exception] = []
     message = user_message
@@ -115,6 +143,8 @@ def call_with_output_repair[T: BaseModel](
                 temperature=temperature,
             )
         except _REPAIRABLE as err:
+            if _refused_by(output_model, err):
+                raise OutputNotOffered(err) from err
             failures.append(err)
             # Each re-ask carries the ORIGINAL turn plus the latest error, never
             # a stack of previous corrections.
@@ -123,6 +153,15 @@ def call_with_output_repair[T: BaseModel](
             continue
         return RepairedCall(result=result, failures=tuple(failures))
     raise OutputRepairExhausted(failures) from failures[-1]
+
+
+def _refused_by(output_model: type[BaseModel], error: Exception) -> bool:
+    """Whether ``output_model`` reads this failure as a refused move (ADR 0074).
+
+    Asks the model, and only a ``StructuredOutput`` has an opinion: every other output model is
+    an ordinary Pydantic one and keeps ADR 0035's re-ask exactly as it was.
+    """
+    return issubclass(output_model, StructuredOutput) and output_model.output_refused(error)
 
 
 def repair_message(user_message: str, error: Exception) -> str:

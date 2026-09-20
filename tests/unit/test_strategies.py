@@ -714,6 +714,11 @@ class TestStrategiesHoldNoExecutionPolicy:
             "selector_llm_client",
             "critic_llm_client",
             "branch_prober",
+            # ADR 0074: a BOOLEAN, and the direction matters. The loop says whether a probe is
+            # on offer this step; the strategy renders that into the schema it asks with
+            # (`ctx.step_model`). Nothing here lets a strategy decide it — the conditions are
+            # the remediate gate's own inputs and stay in `investigation.py` (ADR 0036).
+            "offer_probe",
         }
         assert all("client" not in name or name.endswith("llm_client") for name in fields), (
             f"a non-LLM client reached StrategyContext: {sorted(fields)}. A "

@@ -1,6 +1,6 @@
 # Live demo: full platform footprint sufficient for remediation eval.
 #
-# Pinned to the incident-platform v0.6.13 release by digest so the agent's
+# Pinned to the incident-platform v0.6.14 release by digest so the agent's
 # contract expectations don't shift under us. Every platform-code service
 # below uses the SAME pinned digest. Bump the digest whenever the platform
 # ships a new release and rerun `make eval-live` to catch drift.
@@ -137,7 +137,7 @@ services:
     # One-shot schema migration, mirroring the dev compose's migrate
     # service: with two app-code services (mcp + api) neither should
     # race `alembic upgrade head` at boot.
-    image: ghcr.io/kudratsingh/incident-platform:v0.6.13@sha256:328f44a7fe9549149e5ee3771ad6f00ad99fd37cf5eb8035c756477bc078c992
+    image: ghcr.io/kudratsingh/incident-platform:v0.6.14@sha256:b10a1c1786e31955816998f1e10a75de4da16a4683d1caf12cea05d7c22f83cb
     platform: linux/amd64
     environment:
       DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/incident_platform
@@ -149,7 +149,7 @@ services:
     restart: "no"
 
   platform:
-    # incident-platform v0.6.13 (INDEX digest published by the platform
+    # incident-platform v0.6.14 (INDEX digest published by the platform
     # release, confirmed with `docker buildx imagetools inspect` — the
     # top-level `Digest:`, not a per-platform child manifest).
     #
@@ -306,11 +306,47 @@ services:
     #     REST) is the only reader.
     # Tool count with CHAOS_ENABLED=true: 38 → 40 (15 of them chaos, 2 of them
     # `[commander:`); the agent's read surface unchanged at 16.
+    #
+    # What v0.6.14 changed (plat #225 + #226 + #227, platform ADRs 0033 and
+    # 0036, ADR 0031 amended): NO NEW TOOL. The count stays at 40 (15 chaos,
+    # 16 read) and no scope moves. One read tool's output grew, one hook's
+    # description lost a clause, and two behaviours changed with no schema to
+    # show it.
+    #   * `get_postgres_health` gains `pools` — one entry per process that has
+    #     published its own connection pool recently (`$defs.PoolGaugeReading`:
+    #     `process`, `size`, `checked_out`, `overflow`, `max_overflow`,
+    #     `wait_timeouts_1m`, `written_at`, `reported_age_s`) — and
+    #     `pool_gauges_unknown_reason`, which is null exactly when at least one
+    #     process reported. This is the fix for the hole ADR 0030 left open: the
+    #     five flat `pool_*` fields describe only the process that ANSWERED the
+    #     call, which is the MCP server, while `saturate_db_pool` holds the
+    #     api/worker pool — so until now the fault was real and unreadable from
+    #     the agent's surface (platform ADR 0033, WO-R3-289). A reading is a
+    #     SAMPLE on a ten-second cadence with a 60 s TTL, not a live number, so
+    #     a process that stops publishing drops out of the list rather than
+    #     freezing at its last healthy figure — and an absent process says
+    #     nothing about its pool. The tool's description is rewritten around
+    #     that (WHOSE POOL, TELLING SLOW QUERIES FROM A FULL POOL, UNKNOWN IS
+    #     NULL and a new AN ABSENT PROCESS IS NOT A HEALTHY ONE).
+    #   * `saturate_db_pool`'s description drops the clause this made false —
+    #     it used to say a pool reading taken in the MCP process "does not show
+    #     this fault", which `pools` now contradicts. Its schema is unchanged.
+    #   * Behaviour with no schema to show it, so read it here and not from the
+    #     contract diff. (a) `make eval-reset` now reports `hot_set_reseeded`,
+    #     `breakers_reset` and `agent_runs_closed`, rewrites `breaker:state:*`
+    #     CLOSED rather than deleting it (an absent record is unknown, not
+    #     closed), and raises `breaker:reset:at` so the worker's in-memory
+    #     breaker registry forgets without a process restart (platform ADR
+    #     0036). (b) A `bulk_api_sync` job whose EVERY endpoint call failed now
+    #     raises unconditionally and dead-letters, flag or no flag, and the
+    #     DLQ `error_message` gained a count — `bulk api sync failed: all N
+    #     endpoint calls failed (0 of N endpoints returned a result)`. Nothing
+    #     commander-side pins that text.
     # Do not switch to `:latest` — the whole point of pinning by digest is
     # that a platform-side prompt or schema change can't shift agent
     # behavior without an explicit bump here.
-    image: ghcr.io/kudratsingh/incident-platform:v0.6.13@sha256:328f44a7fe9549149e5ee3771ad6f00ad99fd37cf5eb8035c756477bc078c992
-    # v0.6.12 is an OCI index, but it still lists linux/amd64 ONLY (plus an
+    image: ghcr.io/kudratsingh/incident-platform:v0.6.14@sha256:b10a1c1786e31955816998f1e10a75de4da16a4683d1caf12cea05d7c22f83cb
+    # v0.6.14 is an OCI index, but it still lists linux/amd64 ONLY (plus an
     # attestation manifest) — being an index is not the same as being
     # multi-arch, and this one is not. On Apple Silicon this runs under
     # Rosetta (slower cold start, correct output) — REQUIRED there; without
@@ -414,7 +450,7 @@ services:
     # Env copied deliberately from the dev compose's `app` service
     # (drift between services is platform bug #69's class); minio/jaeger
     # endpoints omitted with the services (see header note).
-    image: ghcr.io/kudratsingh/incident-platform:v0.6.13@sha256:328f44a7fe9549149e5ee3771ad6f00ad99fd37cf5eb8035c756477bc078c992
+    image: ghcr.io/kudratsingh/incident-platform:v0.6.14@sha256:b10a1c1786e31955816998f1e10a75de4da16a4683d1caf12cea05d7c22f83cb
     platform: linux/amd64
     ports:
       - "${DEMO_API_HOST_PORT:-8000}:8000"
@@ -493,7 +529,7 @@ services:
     # No `depends_on: service_healthy` on api, deliberately: nginx resolves
     # the upstream per request, so the console coming up first only means a
     # 502 until the backend is ready, and `make demo` waits on both anyway.
-    image: ghcr.io/kudratsingh/incident-platform-console:v0.6.13@sha256:725dc45591bea07bfda49d15b97c6a4db11a6724102cd30124c35b7e0ab13d14
+    image: ghcr.io/kudratsingh/incident-platform-console:v0.6.14@sha256:4db338694503061fa1328ae281b5ec61e71b30dc3dbfb20be57fc2aacd74b8e4
     platform: linux/amd64
     environment:
       API_UPSTREAM: http://api:8000

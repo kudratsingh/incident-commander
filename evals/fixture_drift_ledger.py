@@ -1693,6 +1693,97 @@ _JUSTIFIED: Final[dict[tuple[object, ...], tuple[str, str]]] = {
         "same reason as `healthy`: nothing burns fast on a stack where nothing failed, "
         "and a fast burn is what raised this world's alert",
     ),
+    # v0.6.14 (plat #227, WO-R3-289, platform ADR 0033) gave `get_postgres_health` a
+    # `pools` group and `pool_gauges_unknown_reason`, and the five canned fixtures of that
+    # tool predate both. Ten rows, all FIXTURE_DEFECT and deliberately so: unlike every
+    # other word in this file these are WORK, the fixture is silent about a reading that
+    # exists, and `test_the_committed_burn_down_list_is_empty` names exactly these ten so
+    # the regrowth is visible rather than absolved.
+    #
+    # Why they are not fixed here, which is the part worth reading. v0.6.11's twelve
+    # fields were written straight into the fixture and the runbook says to do that again.
+    # It is not mechanical this time. An absent `pools` parses as an EMPTY group with a
+    # null `pool_gauges_unknown_reason`, and the tool's own description says that null
+    # means at least one process reported — so the canned world contradicts itself, and
+    # writing it out means deciding which processes each world publishes and how stale
+    # their samples are. Worse, `postgres_slow`'s canned planner script REASONS from the
+    # old reading's blind spot in three places ("this reading cannot say whether any other
+    # process's pool is near its limit", "they have to be read from those processes,
+    # because this probe cannot see them"), which v0.6.14 makes false. Re-recording the
+    # group therefore rewrites a canned LLM script, i.e. a graded trajectory, which is a
+    # behaviour change and belongs in its own PR with its own eval-reg reading — the same
+    # call WO-R3-261 records for v0.6.11's `postgres_slow` script.
+    #
+    # `written_at` and `reported_age_s` are the two that can never be canned at all (a
+    # clock and an age, exactly like `get_circuit_breakers`' `breakers.recorded_at` and
+    # `breakers.reported_age_s`), so whoever writes the fixture declares those volatile
+    # and leaves the counters guarded. Recorded here so that decision is not rediscovered.
+    ("api_latency_db_query", "get_postgres_health", "pools", "live_only_field"): (
+        FIXTURE_DEFECT,
+        "the fixture was written against v0.6.13, which had no pool group; live answers "
+        "one idle entry per process (`api_worker` and `mcp`, 0 of 5 checked out). Nothing "
+        "in this world holds pool connections, so the reading a re-record wants is the "
+        "idle one — the work is the re-record, not a judgement about the world",
+    ),
+    (
+        "api_latency_db_query",
+        "get_postgres_health",
+        "pool_gauges_unknown_reason",
+        "live_only_field",
+    ): (
+        FIXTURE_DEFECT,
+        "the group's companion, and the half that makes the silence self-contradicting: "
+        "absent parses as null, and null means at least one process DID report",
+    ),
+    ("api_latency_downstream", "get_postgres_health", "pools", "live_only_field"): (
+        FIXTURE_DEFECT,
+        "same pin, same silence. This world's fault is a degraded downstream dependency, "
+        "not the pool, so its entries are idle too",
+    ),
+    (
+        "api_latency_downstream",
+        "get_postgres_health",
+        "pool_gauges_unknown_reason",
+        "live_only_field",
+    ): (
+        FIXTURE_DEFECT,
+        "same companion field, same reason",
+    ),
+    ("api_latency_healthy_control", "get_postgres_health", "pools", "live_only_field"): (
+        FIXTURE_DEFECT,
+        "same pin, and on the control it is worth naming: the world's claim is that every "
+        "shared dependency is at baseline, and after v0.6.14 that claim covers a group the "
+        "fixture does not carry — the control asserts health over a reading it omits",
+    ),
+    (
+        "api_latency_healthy_control",
+        "get_postgres_health",
+        "pool_gauges_unknown_reason",
+        "live_only_field",
+    ): (
+        FIXTURE_DEFECT,
+        "same companion field, same reason",
+    ),
+    ("api_latency_redis", "get_postgres_health", "pools", "live_only_field"): (
+        FIXTURE_DEFECT,
+        "same pin, same silence; this world's fault is Redis and its pool entries are idle",
+    ),
+    ("api_latency_redis", "get_postgres_health", "pool_gauges_unknown_reason", "live_only_field"): (
+        FIXTURE_DEFECT,
+        "same companion field, same reason",
+    ),
+    ("postgres_slow", "get_postgres_health", "pools", "live_only_field"): (
+        FIXTURE_DEFECT,
+        "the costly one of the ten, and the reason none of them is fixed in the re-pin: "
+        "this scenario's canned planner script argues from what the OLD reading could not "
+        "say about other processes' pools, so writing the group in rewrites a graded "
+        "trajectory. Its own PR, with its own eval-reg reading",
+    ),
+    ("postgres_slow", "get_postgres_health", "pool_gauges_unknown_reason", "live_only_field"): (
+        FIXTURE_DEFECT,
+        "same companion field; here the contradiction is sharpest, because the script "
+        "concludes the pool question is unanswerable from a reading that now answers it",
+    ),
 }
 
 

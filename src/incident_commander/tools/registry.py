@@ -175,6 +175,35 @@ class ListIncidentsOutput(BaseModel):
 
 
 # --- get_postgres_health / get_redis_health -----------------------------
+#
+# v0.6.14 (plat #227, WO-R3-289, platform ADR 0033) adds the `pools` group below.
+# It is a SAMPLE, not a live reading: every process rewrites its own entry on a
+# fixed cadence under a 60 s TTL, so `reported_age_s` of a few seconds is normal,
+# and a process that stopped publishing leaves the list rather than freezing at its
+# last healthy number. An absent process is therefore not a healthy one, which is
+# the one inference this group invites and forbids.
+
+
+class PoolGaugeReading(BaseModel):
+    model_config = ConfigDict(extra="ignore", frozen=True)
+    # Declaration order IS the snapshot's `required` order; the mirror test checks.
+    # `api_worker` (REST + the background workers, one pool) or `mcp` (this tool
+    # surface). A plain string on the platform side, so a Literal here would reject
+    # a process a later release adds.
+    process: str
+    size: int
+    # A 0 here is a measurement: that pool was idle. Read against `size` +
+    # `max_overflow`; on its own the number says nothing.
+    checked_out: int
+    overflow: int
+    max_overflow: int | None = None
+    # Callers in THAT process that waited for a connection and gave up in the 60 s
+    # before the reading was written. 0 is a measurement, not an unknown.
+    wait_timeouts_1m: int
+    # That process's own clock, not the clock of the process answering the call, so
+    # a second either way between `written_at` and `reported_age_s` is noise.
+    written_at: datetime
+    reported_age_s: float
 
 
 class PostgresHealthOutput(BaseModel):
@@ -194,8 +223,8 @@ class PostgresHealthOutput(BaseModel):
     error: str | None = None
     # WHOSE POOL: the pool of the process that ANSWERED the call — the MCP
     # service — and no other. The api service hosts the worker loops and has its
-    # own pool, so a pool exhausted there reads healthy here. ADR 0030 leaves
-    # that gap open deliberately; WO-R3-289 is the per-process gauge.
+    # own pool, so a pool exhausted there reads healthy in these five fields. The
+    # gap ADR 0030 left open is closed by `pools` below, not by these (v0.6.14).
     pool_size: int | None = None
     # Includes the connection this very call holds, so an otherwise idle process
     # reads 1, never 0. Only meaningful against `pool_size` + `pool_max_overflow`.
@@ -219,6 +248,13 @@ class PostgresHealthOutput(BaseModel):
     p95_query_ms_1m: float | None = None
     slow_query_count_1m: int | None = None
     query_stats_unknown_reason: str | None = None
+    # v0.6.14: where a pool held in ANOTHER process shows up — the flat `pool_*`
+    # fields above cannot show it. Not a page: no cap, nothing truncated.
+    pools: tuple[PoolGaugeReading, ...] = ()
+    # Null exactly when at least one process reported. So an empty `pools` with this
+    # null is a response the platform does not produce, and an empty `pools` with it
+    # SET means nothing could be read about any pool — which is not "no pool is busy".
+    pool_gauges_unknown_reason: str | None = None
 
 
 class RedisHealthOutput(BaseModel):

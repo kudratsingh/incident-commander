@@ -11,8 +11,8 @@
     "no-hook": "the fixture describes a fault no chaos hook can produce, so the canned value is the scenario's premise and the check probes a world that never had it. Not a defect; the fix, if that scenario is ever to run live, is a platform hook"
   },
   "_counts": {
-    "recorded": 173,
-    "fixture-defect": 0,
+    "recorded": 183,
+    "fixture-defect": 10,
     "explained": 173
   },
   "known_drift": [
@@ -90,6 +90,22 @@
     },
     {
       "scenario": "api_latency_db_query",
+      "tool": "get_postgres_health",
+      "path": "pool_gauges_unknown_reason",
+      "kind": "live_only_field",
+      "context": "fixture-defect",
+      "why": "the group's companion, and the half that makes the silence self-contradicting: absent parses as null, and null means at least one process DID report"
+    },
+    {
+      "scenario": "api_latency_db_query",
+      "tool": "get_postgres_health",
+      "path": "pools",
+      "kind": "live_only_field",
+      "context": "fixture-defect",
+      "why": "the fixture was written against v0.6.13, which had no pool group; live answers one idle entry per process (`api_worker` and `mcp`, 0 of 5 checked out). Nothing in this world holds pool connections, so the reading a re-record wants is the idle one \u2014 the work is the re-record, not a judgement about the world"
+    },
+    {
+      "scenario": "api_latency_db_query",
       "tool": "get_slo_status",
       "path": "objectives[].total[]",
       "kind": "not_live_reachable",
@@ -111,6 +127,22 @@
       "kind": "not_live_reachable",
       "context": "post-fault",
       "why": "`degrade_downstream(mode=fail)` makes every endpoint behind the bulk-api-sync dependency answer 503 and the shipped breaker opens itself at its own threshold of three; the check probes a world where nothing has called that dependency, so the breaker reads `closed`. This is the world's central reading and the scenario grades it `not_equals: closed`, because `half_open` during a recovery probe is equally correct"
+    },
+    {
+      "scenario": "api_latency_downstream",
+      "tool": "get_postgres_health",
+      "path": "pool_gauges_unknown_reason",
+      "kind": "live_only_field",
+      "context": "fixture-defect",
+      "why": "same companion field, same reason"
+    },
+    {
+      "scenario": "api_latency_downstream",
+      "tool": "get_postgres_health",
+      "path": "pools",
+      "kind": "live_only_field",
+      "context": "fixture-defect",
+      "why": "same pin, same silence. This world's fault is a degraded downstream dependency, not the pool, so its entries are idle too"
     },
     {
       "scenario": "api_latency_downstream",
@@ -170,11 +202,43 @@
     },
     {
       "scenario": "api_latency_healthy_control",
+      "tool": "get_postgres_health",
+      "path": "pool_gauges_unknown_reason",
+      "kind": "live_only_field",
+      "context": "fixture-defect",
+      "why": "same companion field, same reason"
+    },
+    {
+      "scenario": "api_latency_healthy_control",
+      "tool": "get_postgres_health",
+      "path": "pools",
+      "kind": "live_only_field",
+      "context": "fixture-defect",
+      "why": "same pin, and on the control it is worth naming: the world's claim is that every shared dependency is at baseline, and after v0.6.14 that claim covers a group the fixture does not carry \u2014 the control asserts health over a reading it omits"
+    },
+    {
+      "scenario": "api_latency_healthy_control",
       "tool": "get_slo_status",
       "path": "objectives[].total[]",
       "kind": "not_live_reachable",
       "context": "traffic-stack",
       "why": "same premise, and on the control it is load-bearing twice: without traffic the world's central claim (both budgets intact) would be asserted over no samples, which is INC-003's mistake in its strongest form"
+    },
+    {
+      "scenario": "api_latency_redis",
+      "tool": "get_postgres_health",
+      "path": "pool_gauges_unknown_reason",
+      "kind": "live_only_field",
+      "context": "fixture-defect",
+      "why": "same companion field, same reason"
+    },
+    {
+      "scenario": "api_latency_redis",
+      "tool": "get_postgres_health",
+      "path": "pools",
+      "kind": "live_only_field",
+      "context": "fixture-defect",
+      "why": "same pin, same silence; this world's fault is Redis and its pool entries are idle"
     },
     {
       "scenario": "api_latency_redis",
@@ -519,6 +583,22 @@
       "kind": "value",
       "context": "no-hook",
       "why": "the fixture's world is a database serving slowly, so its longest running query is 1.84s; the check probes a world where nothing is running at all and pg_stat_activity answers null. `inject_latency` delays a consumer and `saturate_db_pool` holds connections, which is the fault this one is deliberately NOT about; v0.6.12's `slow_db_queries` would produce it, and converting this scenario to seed it is a change of its own (WO-R3-221 declined to bundle it)"
+    },
+    {
+      "scenario": "postgres_slow",
+      "tool": "get_postgres_health",
+      "path": "pool_gauges_unknown_reason",
+      "kind": "live_only_field",
+      "context": "fixture-defect",
+      "why": "same companion field; here the contradiction is sharpest, because the script concludes the pool question is unanswerable from a reading that now answers it"
+    },
+    {
+      "scenario": "postgres_slow",
+      "tool": "get_postgres_health",
+      "path": "pools",
+      "kind": "live_only_field",
+      "context": "fixture-defect",
+      "why": "the costly one of the ten, and the reason none of them is fixed in the re-pin: this scenario's canned planner script argues from what the OLD reading could not say about other processes' pools, so writing the group in rewrites a graded trajectory. Its own PR, with its own eval-reg reading"
     },
     {
       "scenario": "remediate_consumer_lag_success",

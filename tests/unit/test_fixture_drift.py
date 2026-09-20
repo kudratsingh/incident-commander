@@ -916,17 +916,36 @@ class TestLedgerContext:
         monkeypatch.setitem(_JUSTIFIED, key, (POST_FAULT, "hypothetical reclassification"))
         assert defect_count(path) == 0
 
-    def test_the_committed_burn_down_list_is_empty(self) -> None:
-        """The ratchet's terminal state, pinned so a regrowth is visible.
+    def test_the_committed_burn_down_list_is_exactly_the_work_that_is_open(self) -> None:
+        """The ratchet, pinned so a regrowth is visible — by NAME, not by a count.
 
-        Wave-10 took the last thirteen off: six saga_stuck `get_dag_state` entries became
-        post-fault and seven alert_storm entries became canned-only.
+        Wave-10 emptied it: six saga_stuck `get_dag_state` entries became post-fault and
+        seven alert_storm entries became canned-only. The v0.6.14 re-pin put ten back, and
+        they are listed here rather than absolved, because absolving them is the one thing
+        that must not happen quietly. `get_postgres_health` gained a `pools` group (plat
+        #227, platform ADR 0033) and its five canned fixtures predate it; writing the group
+        in also rewrites `postgres_slow`'s canned planner script, which argues from what
+        the old reading could NOT say about other processes' pools, so it is a graded
+        trajectory change and belongs in its own PR. `_JUSTIFIED` carries the reason per
+        row. When that PR lands, these ten leave and this list goes back to empty.
         """
-        defects = [entry.key for entry in load_entries() if entry.is_defect]
-        assert defects == [], (
-            f"{len(defects)} fixture defect(s) are back on the burn-down list: "
-            f"{defects}. Either fix the fixture, or justify the entry in "
-            "_JUSTIFIED and update this test."
+        open_work = frozenset(
+            (scenario, "get_postgres_health", path, "live_only_field")
+            for scenario in (
+                "api_latency_db_query",
+                "api_latency_downstream",
+                "api_latency_healthy_control",
+                "api_latency_redis",
+                "postgres_slow",
+            )
+            for path in ("pools", "pool_gauges_unknown_reason")
+        )
+        defects = {entry.key for entry in load_entries() if entry.is_defect}
+        assert defects == open_work, (
+            f"the burn-down list moved. Unexpected: {sorted(defects - open_work)}; "
+            f"already fixed but still listed: {sorted(open_work - defects)}. Either fix "
+            "the fixture, or justify the entry in _JUSTIFIED — and either way update this "
+            "list, which is what keeps the work visible instead of counted."
         )
 
     def test_the_original_array_format_still_parses(self, tmp_path: Path) -> None:

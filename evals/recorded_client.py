@@ -79,6 +79,11 @@ SHIFTED_CLOCK_FIELDS: Final[Mapping[str, frozenset[str]]] = {
             "breakers.recorded_at",
         }
     ),
+    # v0.6.14 (plat #227). The pool group's only clock, and it is the PUBLISHING
+    # process's, not the answering one's — same split as `breakers.recorded_at`
+    # above and shifted for the same reason: the skew between two processes is
+    # part of the world the recording caught, so one rigid offset keeps it.
+    "get_postgres_health": frozenset({"pools.written_at"}),
     # One clock only: an objective's window is `window_hours` back from the
     # reading, so moving the reading moves the window with it.
     "get_slo_status": frozenset({"measured_at"}),
@@ -121,11 +126,13 @@ HELD_DURATION_FIELDS: Final[Mapping[str, frozenset[str]]] = {
             "breakers.reported_age_s",
         }
     ),
-    # Not listed and deliberately so: `get_postgres_health`'s v0.6.11 durations
-    # are spelled `_ms` (`longest_active_query_ms`, `slow_query_threshold_ms`,
+    # v0.6.14 (plat #227): the pool group's age, relative to the reading and so
+    # right unchanged. Its v0.6.11 durations stay unlisted and deliberately so —
+    # they are spelled `_ms` (`longest_active_query_ms`, `slow_query_threshold_ms`,
     # `p95_query_ms_1m`), which the coverage walk does not read as durations and
-    # this table does not have to name — everything not in SHIFTED_CLOCK_FIELDS
-    # is already held byte-identical, which is what those readings want.
+    # this table does not have to name; everything not in SHIFTED_CLOCK_FIELDS is
+    # already held byte-identical, which is what those readings want.
+    "get_postgres_health": frozenset({"pools.reported_age_s"}),
 }
 
 

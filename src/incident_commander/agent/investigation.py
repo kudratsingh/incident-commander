@@ -8,7 +8,8 @@ from __future__ import annotations
 
 import json
 import time
-from collections.abc import Callable, Mapping
+from collections import Counter
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import replace
 from datetime import datetime
 from enum import StrEnum
@@ -50,7 +51,12 @@ from incident_commander.llm.repair import (
     usage_of,
 )
 from incident_commander.tools.mcp_client import MCPClientProtocol, MCPError, ToolResult
-from incident_commander.tools.policies import Tier, is_cached_read, tier_of
+from incident_commander.tools.policies import (
+    CACHED_READ_FRESHNESS_SECONDS,
+    Tier,
+    is_cached_read,
+    tier_of,
+)
 from incident_commander.tools.registry import TOOL_REGISTRY
 from incident_commander.tools.wire import wire_arguments
 
@@ -61,6 +67,11 @@ _ESCALATION_MARKER: Final[str] = "_investigate_escalate"
 # Marker for ADR 0041's refusal, distinct from `_handoff_refused` (ADR 0031/0032):
 # a run can collect one of each, naming different missing reads.
 _WHOLE_QUEUE_REFUSED_MARKER: Final[str] = "_handoff_refused_unlisted_queue"
+# Marker for ADR 0073's refusal, and the only one of the three that refuses a READ rather
+# than a handoff. Its own name for the reason the two above have theirs: a run can collect
+# one of each, and they name different things — a subject never read, a queue never read
+# whole, and one reading too many of a subject already read.
+_CONFIRMING_READ_REFUSED_MARKER: Final[str] = "_probe_refused_confirming_read"
 _DEFAULT_MAX_ITERATIONS: Final[int] = 5
 # The bar a hypothesis must clear before the loop will act on it. Public because three
 # other readers need the SAME number: ADR 0059's resolve gate in `remediation.py`, the
@@ -74,6 +85,27 @@ _MAX_SUBJECT_PROBE_REFUSALS: Final[int] = 2
 # Same, for never having read the dead-letter queue whole (ADR 0041). ONE where the sibling
 # above is two: `list_dlq_messages()` has no argument to get wrong, so a re-ask adds nothing.
 _MAX_WHOLE_QUEUE_REFUSALS: Final[int] = 1
+
+# ADR 0073's three numbers. INC-004: five planner steps ranked `consumer_saturation` first at
+# 0.80 / 0.72 / 0.82 / 0.85 / 0.82 — above the bar, in a category with a Tier-1 fix — and every
+# one of them emitted `probe`. Two prompt rules ("re-read the alerted signal before you
+# conclude", ADR 0009; "re-read the resource immediately before you act", ADR 0071) were
+# satisfiable forever, because nothing bounded HOW MANY TIMES.
+#
+# How many readings of the alert's own subject a run may take before a further one is refused.
+# TWO: the first read IS the investigation of the alerted signal, the second is the confirming
+# re-read both rules ask for, and a third is the one no rule asks for.
+_CONFIRMING_READS_ALLOWED: Final[int] = 2
+
+# How many planner steps in a row must rank the same actionable answer first before the guard
+# arms. TWO: one step is a ranking, two in a row is a ranking that did not move — and a run
+# whose top hypothesis is still changing has a reason to read again.
+_SETTLED_RANKING_STEPS: Final[int] = 2
+
+# How many further reads may be refused before the run escalates instead. Two, like
+# `_MAX_SUBJECT_PROBE_REFUSALS`: the first refusal names the two moves that remain, the second
+# allows for a planner that mis-read it, and a third ask means the steer is not landing.
+_MAX_CONFIRMING_READ_REFUSALS: Final[int] = 2
 
 
 # Single source of truth for category → Tier-1 tool routing: categories here auto-remediate
@@ -316,6 +348,152 @@ def alert_subject(alert: Mapping[str, Any]) -> AlertSubject | None:
     return None
 
 
+class FaultPresentReading(NamedTuple):
+    """How one read tool says "the fault this resource was paged for is present NOW".
+
+    The mirror of ``attribution.RecoveredReading`` and deliberately not the same object.
+    Three differences, each of them the reason this exists (ADR 0073):
+
+    * **Opposite direction, different risk.** A reading that says "recovered" may be a
+      measurement taken before the fault existed, which is why ``RECOVERED_READING`` declares
+      ``get_consumer_lag`` INERT (ADR 0009: a 60s-cached zero once killed a correct
+      diagnosis). A reading that says "the fault is here", taken inside its own freshness
+      window, carries no such trap — a backlog nobody measured does not report as 39.
+    * **Different question.** That map answers "may this run claim the recovery?" for a
+      briefing and a grade. This one answers "is another reading of this resource worth a
+      step?" for the loop, before anything is claimed.
+    * **Different direction of import.** ``agent/attribution.py`` imports this module, so this
+      module cannot import it back; a shared map would have to live in a third place that
+      neither the loop nor the grader owns.
+    """
+
+    tool_name: str
+    """Read tool that observes the resource."""
+    argument_field: str
+    """The argument carrying the resource name — the same field ``SubjectProbe`` names,
+    checked equal to it before the entry is used, so this map cannot describe a reading of
+    something else."""
+    field: str
+    """The field in the reading that answers it."""
+    recovered_value: object
+    """The value of that field which means the fault is GONE. Expressed this way round
+    because "present" is everything else, and enumerating everything else is how a
+    predicate stops being total."""
+    known_field: str | None
+    """A boolean field that must read ``True`` before the field above means anything, or
+    ``None`` where the reading is always a measurement. ``lag: null, lag_known: false`` is
+    the platform saying it has no measurement, which is not a fault and not a recovery."""
+    why: str
+    """What makes this reading a fault-present one, quoted into the refusal so a human is
+    never asked to take the predicate on trust."""
+
+
+#: Single source of truth for "this reading shows the fault still present".
+#:
+#: TOTAL over every read tool ``ALERT_SUBJECT_PROBES`` names, and ``None`` is a DECLARED inert
+#: entry with its reason, never an omission — ``tests/unit/test_llm_investigation.py::
+#: TestTheFaultPresentReadingMap`` pins the totality, so a new subject probe arrives as a
+#: decision rather than as silence. One active entry today, which is the honest state: the
+#: guard fires where a reading can say the fault is here, and stays inert everywhere else.
+FAULT_PRESENT_READING: Final[dict[str, FaultPresentReading | None]] = {
+    # The backlog is still there. `lag_known` is the guard on the measurement's existence and
+    # `age_seconds` (v0.6.7) is what makes the reading current; both are required, because
+    # "the fault is present" has to be a statement about NOW to be a reason not to look again.
+    "get_consumer_lag": FaultPresentReading(
+        "get_consumer_lag",
+        "consumer_group",
+        "lag",
+        0,
+        "lag_known",
+        "the platform reports the group's own backlog with the age of the measurement, so a "
+        "non-zero lag inside its freshness window is the alerted condition happening now",
+    ),
+    # INERT: a key's presence is not a fault. What makes `remediate_stale_cache_success`'s hot
+    # set stale is a missing expiry AND a miss ratio AND records it references but cannot find
+    # — a judgement over three fields and a second reading, not a field with a faulted value.
+    # An entry claiming `exists: true` means "the fault is present" would arm this guard on
+    # every healthy key in the corpus.
+    "get_cache_key_info": None,
+    # INERT: a chain's fault is WHICH node is dead-lettered and which are waiting behind it
+    # (ADR 0070), which is a statement about a list of nodes. `get_dag_state` is also the read
+    # a stuck chain is diagnosed from rather than confirmed with — the routing read is the
+    # root's own dead-letter row (ADR 0054) — so a bound on re-reading the chain view would
+    # bind the wrong read.
+    "get_dag_state": None,
+    # INERT: a trace records work that already finished. It does not become present or absent,
+    # and reading it twice returns the same record by construction.
+    "get_trace": None,
+    # INERT, for INC-001's and INC-002's reason: an absence from a listing proves only the page
+    # that was read, a filtered page proves only its slice, and a fenced row is still listed
+    # (ADR 0033). The queue is also the read ADR 0041 REQUIRES before a dead-letter action, so
+    # a bound here would collide with a guard that demands the read.
+    "list_dlq_messages": None,
+}
+
+
+#: The field a platform reading carries its own measurement age in (v0.6.7, plat #204 —
+#: WO-R3-254's root fix: "the lag reading carries time"). Named because two readers need the
+#: same spelling: the freshness test below and the refusal that quotes the number.
+READING_AGE_FIELD: Final[str] = "age_seconds"
+
+
+def _same_value(value: object, expected: object) -> bool:
+    """Value equality that does not let ``0`` satisfy ``False``.
+
+    The sibling of ``attribution._matches`` (S-20's lesson), spelled again here rather than
+    imported because that module imports this one.
+    """
+    if isinstance(expected, bool):
+        return value is expected
+    return value == expected
+
+
+def _parsed_reading(entry: EvidenceEntry) -> Mapping[str, Any] | None:
+    """One evidence entry's summary as the mapping the platform returned, or ``None``."""
+    try:
+        parsed = json.loads(entry.result_summary)
+    except (ValueError, TypeError):
+        return None
+    return parsed if isinstance(parsed, Mapping) else None
+
+
+def reads_fault_present(entry: EvidenceEntry, reading: FaultPresentReading) -> bool | None:
+    """Whether one reading shows the fault present. ``None`` when it cannot say.
+
+    ``None`` is the third answer and it is load-bearing in the safe direction: an unparseable
+    summary, a missing field, or a ``known_field`` that is not ``True`` all mean "this reading
+    is not evidence of anything", and the guard that reads this stays inert rather than
+    refusing a read the run may genuinely need.
+    """
+    parsed = _parsed_reading(entry)
+    if parsed is None or reading.field not in parsed:
+        return None
+    if reading.known_field is not None and parsed.get(reading.known_field) is not True:
+        return None
+    return not _same_value(parsed[reading.field], reading.recovered_value)
+
+
+def reading_is_fresh(entry: EvidenceEntry, tool_name: str) -> bool:
+    """Whether one reading is current enough to be acted on (ADR 0009).
+
+    A tool with no declared staleness window is measured at call time, so its reading is fresh
+    by construction. A DECLARED cached read must carry its own age and that age must sit inside
+    the window: a reading whose age the platform did not report cannot be shown to be current,
+    and this returns ``False`` there — the inert direction, because every caller uses freshness
+    to justify NOT reading again.
+    """
+    window = CACHED_READ_FRESHNESS_SECONDS.get(tool_name)
+    if window is None:
+        return True
+    parsed = _parsed_reading(entry)
+    if parsed is None:
+        return False
+    age = parsed.get(READING_AGE_FIELD)
+    if isinstance(age, bool) or not isinstance(age, (int, float)):
+        return False
+    return 0 <= age <= window
+
+
 def make_investigate(
     mcp_client: MCPClientProtocol,
 ) -> Callable[[RunState, datetime], RunState]:
@@ -479,6 +657,11 @@ def make_llm_investigate(
         subject = alert_subject(run_state.alert)
         refusals_spent = 0
         whole_queue_refusals_spent = 0
+        confirming_refusals_spent = 0
+        # How many planner steps in a row have ranked the same actionable answer first
+        # (ADR 0073). Reset by any step that does not, so the count is a streak and never a
+        # total: a run whose ranking moved has earned another reading.
+        settled_steps = 0
         for iteration in range(max_iterations):
             if run_state.budget.is_exhausted:
                 return _escalate_investigation(run_state, at, "budget exhausted mid-investigation")
@@ -510,6 +693,8 @@ def make_llm_investigate(
                 return _escalate_investigation(
                     run_state, at, f"{INVESTIGATION_PLANNER_INVALID}: {err}"
                 )
+
+            settled_steps = settled_steps + 1 if _ranks_an_actionable_answer(step.hypotheses) else 0
 
             killed = _cached_probe_contradiction(prior_hypotheses, step.hypotheses, last_probe)
             if (
@@ -610,6 +795,38 @@ def make_llm_investigate(
                     run_state, at, f"planner proposed unknown tool: {action.tool_name}"
                 )
 
+            # Fifth guard, and the only one that refuses a READ (ADR 0073, INC-004): a
+            # confirming re-read of the alerted subject is bounded. Two prompt rules ask for
+            # one, and a model can satisfy "re-read before you conclude" forever — so the
+            # bound is here, where the reads are counted, and not in the prompt. Refuses
+            # rather than escalating, in ADR 0032/0033's shape: the planner keeps its turn
+            # and is offered the two moves that remain.
+            confirming = (
+                _confirming_read_exhausted(run_state, subject, action, settled_steps)
+                if subject is not None
+                else None
+            )
+            if confirming is not None and subject is not None:
+                if confirming_refusals_spent >= _MAX_CONFIRMING_READ_REFUSALS:
+                    return _finalize(
+                        run_state,
+                        at,
+                        (
+                            f"planner asked to re-read {subject.alert_field}="
+                            f"{subject.value!r} {confirming_refusals_spent + 1} times after "
+                            f"being refused: {_ranking_sentence(run_state)}, and "
+                            f"{_reads_taken_sentence(run_state.evidence)}. A further reading "
+                            f"of a resource this run has already read is not more evidence, "
+                            f"and no step will be spent on one; escalating with the readings "
+                            f"it has"
+                        ),
+                    )
+                confirming_refusals_spent += 1
+                run_state = _refuse_confirming_read(
+                    run_state, at, subject, *confirming, settled_steps
+                )
+                continue
+
             if run_state.budget.is_exhausted:
                 return _escalate_investigation(run_state, at, "budget exhausted before probe")
 
@@ -619,7 +836,9 @@ def make_llm_investigate(
                 return run_state
             last_probe = action
 
-        return _escalate_investigation(run_state, at, f"max iterations ({max_iterations}) exceeded")
+        return _escalate_investigation(
+            run_state, at, _iterations_exhausted_reason(run_state, max_iterations)
+        )
 
     return transition_llm_investigate
 
@@ -878,7 +1097,12 @@ def _note_freshness_reprobe(
 
 
 def _alert_subject_probed(run_state: RunState, subject: AlertSubject) -> bool:
-    """True when some probe in the evidence trail actually read the alert's subject.
+    """True when some probe in the evidence trail actually read the alert's subject."""
+    return bool(subject_reads(run_state, subject))
+
+
+def subject_reads(run_state: RunState, subject: AlertSubject) -> tuple[EvidenceEntry, ...]:
+    """Every entry in the trail that read the alert's subject, in ledger order.
 
     Matching is on the tool AND the argument value, never the tool alone: on 2026-08-30 the
     agent answered a ``group="unknown-consumer"`` alert with ``get_consumer_lag`` and no
@@ -890,19 +1114,224 @@ def _alert_subject_probed(run_state: RunState, subject: AlertSubject) -> bool:
     Under ``SubjectMatch.UNFILTERED`` the comparison inverts: the qualifying probe is the one
     that did NOT narrow. Absent key, explicit ``null``, non-string and whitespace all read as
     unfiltered, the same collapse ``remediation._scope_value`` makes for ADR 0028.
+
+    The SET rather than the boolean, because two guards ask different questions of it: ADR
+    0032's asks whether it is empty, and ADR 0073's asks how many there are and what the last
+    one says. One matching rule for both, or the second guard would count reads the first does
+    not accept.
     """
-    for entry in run_state.evidence:
-        if entry.tool_name != subject.tool_name:
-            continue
-        raw = entry.arguments.get(subject.argument_field)
-        narrowed = str(raw).strip() if isinstance(raw, (str, UUID)) else ""
-        if subject.match is SubjectMatch.UNFILTERED:
-            if not narrowed:
-                return True
-            continue
-        if narrowed == subject.value:
-            return True
-    return False
+    return tuple(
+        entry
+        for entry in run_state.evidence
+        if entry.tool_name == subject.tool_name and _names_the_subject(entry.arguments, subject)
+    )
+
+
+def _names_the_subject(arguments: Mapping[str, Any], subject: AlertSubject) -> bool:
+    """Whether one call's WIRED arguments read the subject. See ``subject_reads``."""
+    raw = arguments.get(subject.argument_field)
+    narrowed = str(raw).strip() if isinstance(raw, (str, UUID)) else ""
+    if subject.match is SubjectMatch.UNFILTERED:
+        return not narrowed
+    return narrowed == subject.value
+
+
+def _probe_would_read_the_subject(action: ProbeAction, subject: AlertSubject) -> bool:
+    """Whether the probe the planner just proposed would read the alert's subject again.
+
+    Judged on the WIRED arguments — the same bytes ``subject_reads`` reads back off the
+    ledger — because the fill is the whole point: ``get_consumer_lag`` with no
+    ``consumer_group`` default-fills to the alerted group, so omitting the argument is not a
+    different read and must not be a way past the bound. Invalid arguments answer ``False``:
+    such a call never reaches the platform (``_execute_probe`` escalates on it), so it is not
+    a reading of anything.
+    """
+    if action.tool_name != subject.tool_name:
+        return False
+    spec = TOOL_REGISTRY.get(action.tool_name)
+    if spec is None:
+        return False
+    try:
+        arguments = wire_arguments(spec, action.arguments)
+    except ValidationError:
+        return False
+    return _names_the_subject(arguments, subject)
+
+
+def _ranks_an_actionable_answer(hypotheses: Sequence[Hypothesis]) -> bool:
+    """Whether this step's top hypothesis is one the loop would act on.
+
+    The remediate gate's own two conditions, asked of a step that did not emit ``remediate``:
+    a ``FIX_MAP`` category at or above the threshold. Read with ``>=``, which is the gate's
+    own comparison (``top.confidence < REMEDIATE_CONFIDENCE_THRESHOLD`` escalates), so the
+    streak counts exactly the steps on which a ``remediate`` would have been let through.
+    """
+    if not hypotheses:
+        return False
+    top = hypotheses[0]
+    return top.category in FIX_MAP and top.confidence >= REMEDIATE_CONFIDENCE_THRESHOLD
+
+
+def _confirming_read_exhausted(
+    run_state: RunState,
+    subject: AlertSubject,
+    action: ProbeAction,
+    settled_steps: int,
+) -> tuple[EvidenceEntry, FaultPresentReading] | None:
+    """The reading that makes a further read of the subject pointless, or ``None``.
+
+    ADR 0073's trigger, and every clause of it is load-bearing:
+
+    1. ``settled_steps >= _SETTLED_RANKING_STEPS`` — the top hypothesis has been the same
+       actionable answer for two planner steps running. One step is a ranking; two is a
+       ranking that did not move.
+    2. The proposed probe would read THE ALERT'S OWN SUBJECT again — the same tool with the
+       same value. Any other read is a different question and is never refused.
+    3. The run has already taken ``_CONFIRMING_READS_ALLOWED`` readings of it, so the refused
+       one is the THIRD. Never a first (that read is the investigation) and never a second
+       (that one is what ADR 0009 and ADR 0071 ask for).
+    4. A DECLARED reading of that subject can say the fault is present, and the newest one
+       does (``reads_fault_present``), and it is FRESH (``reading_is_fresh``, ADR 0009).
+
+    Every "cannot say" answers ``None``: a reading that shows the fault gone, one whose age
+    the platform did not report, one outside its freshness window, an unparseable summary and
+    a subject no map entry covers all leave the loop exactly as it was. The guard exists to
+    stop a read that is certainly redundant, not to ration reads in general.
+    """
+    if settled_steps < _SETTLED_RANKING_STEPS:
+        return None
+    reading = FAULT_PRESENT_READING.get(subject.tool_name)
+    # The map is keyed by tool; the entry must describe a reading of THIS subject's
+    # resource, the same equality `attribution.alerted_subject` makes.
+    if reading is None or reading.argument_field != subject.argument_field:
+        return None
+    if not _probe_would_read_the_subject(action, subject):
+        return None
+    reads = subject_reads(run_state, subject)
+    if len(reads) < _CONFIRMING_READS_ALLOWED:
+        return None
+    newest = reads[-1]
+    if reads_fault_present(newest, reading) is not True:
+        return None
+    if not reading_is_fresh(newest, subject.tool_name):
+        return None
+    return newest, reading
+
+
+def _refuse_confirming_read(
+    run_state: RunState,
+    at: datetime,
+    subject: AlertSubject,
+    newest: EvidenceEntry,
+    reading: FaultPresentReading,
+    settled_steps: int,
+) -> RunState:
+    """Refuse one more reading of the alerted subject and narrow the planner's choice.
+
+    NOT a terminal transition, and the same shape as the two refusals above: the state stays
+    INVESTIGATING, the reason is rendered into the next planner context, and the marker is
+    underscore-prefixed so the briefing trail and the grader's tool set exclude it. What it
+    adds to their shape is the narrowed choice — a refusal that only said "not that read"
+    would leave the planner to guess, and guessing is what spent five steps in INC-004.
+    """
+    taken = len(subject_reads(run_state, subject))
+    age = (_parsed_reading(newest) or {}).get(READING_AGE_FIELD)
+    measured = f" measured {age:g}s ago" if isinstance(age, (int, float)) else ""
+    top = run_state.hypotheses[0]
+    reason = (
+        f"probe refused: this run has already read {subject.alert_field}="
+        f"{subject.value!r} {taken} times, and your top hypothesis has been "
+        f"{top.category.value!r} at or above the {REMEDIATE_CONFIDENCE_THRESHOLD} "
+        f"remediate threshold — a category with a Tier-1 fix — for {settled_steps} steps in "
+        f"a row. The newest of those readings, "
+        f"{reading.tool_name}({reading.argument_field}={subject.value!r}) -> "
+        f"{newest.result_summary}, shows the fault present{measured}: "
+        f"{reading.why}. One fresh reading that shows the fault is the whole demand of "
+        f"'re-read before you conclude' and of 'read the resource again before you act' — a "
+        f"second is not more evidence, it is the same evidence and one step you cannot get "
+        f"back. Decide on what you have: emit `remediate` to act on "
+        f"{top.category.value!r}, or `stop` to hand off with the readings you took. A probe "
+        f"of a DIFFERENT tool is still open if some other reading would change your ranking; "
+        f"this resource will not be read again."
+    )
+    entry = EvidenceEntry(
+        tool_name=_CONFIRMING_READ_REFUSED_MARKER,
+        arguments={
+            "alert_field": subject.alert_field,
+            "refused_tool": subject.tool_name,
+            "refused_value": subject.value,
+            "reads_already_taken": taken,
+            "settled_steps": settled_steps,
+            "remaining_decisions": ["remediate", "stop"],
+        },
+        result_summary=reason,
+        timestamp=at,
+    )
+    return run_state.model_copy(
+        update={
+            "evidence": (*run_state.evidence, entry),
+            "updated_at": at,
+        }
+    )
+
+
+def _ranking_sentence(run_state: RunState) -> str:
+    """What this run ranked first, and whether it was something the loop could have acted on.
+
+    One sentence, written once, for the two escalations that must not leave a reader guessing
+    what the run concluded (ADR 0073): an exhausted iteration budget and a refused confirming
+    read. INC-004's briefing recommended checking an SMTP relay because the escalation reason
+    it was handed said only "max iterations (5) exceeded" — true, and silent about the
+    `consumer_saturation` the run had ranked first at every one of those five steps.
+    """
+    if not run_state.hypotheses:
+        return "this run produced no ranking, so it names no cause"
+    top = run_state.hypotheses[0]
+    standing = (
+        (
+            f"at or above the {REMEDIATE_CONFIDENCE_THRESHOLD} remediate threshold in a "
+            f"category with a Tier-1 fix, so this run ended holding an answer it could "
+            f"have acted on"
+        )
+        if _ranks_an_actionable_answer(run_state.hypotheses)
+        else "not an answer this run could have acted on autonomously"
+    )
+    return (
+        f"the top hypothesis was {top.category.value!r} / {top.name!r} at confidence "
+        f"{top.confidence:.2f}, which is {standing}"
+    )
+
+
+def _reads_taken_sentence(evidence: Sequence[EvidenceEntry]) -> str:
+    """The reads this run spent its steps on, counted per tool.
+
+    Bookkeeping markers are excluded the way every other reader of the trail excludes them
+    (the underscore prefix), so this counts calls the platform actually answered.
+    """
+    counted = Counter(entry.tool_name for entry in evidence if not entry.tool_name.startswith("_"))
+    if not counted:
+        return "no read was taken"
+    listed = ", ".join(
+        f"{tool} x{count}" if count > 1 else tool for tool, count in sorted(counted.items())
+    )
+    return f"the reads it took were {listed}"
+
+
+def _iterations_exhausted_reason(run_state: RunState, max_iterations: int) -> str:
+    """Why the loop ran out of steps, with the ranking it ran out holding (ADR 0073).
+
+    Opens with the words it has always opened with, because archives, reports and one test
+    match on them; what follows is the part INC-004 showed was missing. The last sentence is
+    the one the briefing writer needs: the ranking is this run's conclusion, and a cause that
+    is not in it is not a finding of this run (ADR 0065's slots carry the same claim
+    structurally).
+    """
+    return (
+        f"max iterations ({max_iterations}) exceeded with no action taken: "
+        f"{_ranking_sentence(run_state)}, and "
+        f"{_reads_taken_sentence(run_state.evidence)}. That ranking is this run's own "
+        f"conclusion — no cause outside it was established by those reads."
+    )
 
 
 def _whole_queue_listed(run_state: RunState) -> bool:

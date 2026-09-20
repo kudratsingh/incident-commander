@@ -2,16 +2,25 @@ from __future__ import annotations
 
 import json
 from collections.abc import Callable, Mapping
-from datetime import datetime
+from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
 from uuid import UUID
 
 import pytest
 
+from incident_commander.agent.briefing import render_briefing, trail_of
 from incident_commander.agent.hypothesis import HypothesisCategory
-from incident_commander.agent.investigation import alert_subject, make_llm_investigate
-from incident_commander.agent.state import IncidentState, RunState
+from incident_commander.agent.investigation import (
+    _CONFIRMING_READ_REFUSED_MARKER,
+    _MAX_CONFIRMING_READ_REFUSALS,
+    ALERT_SUBJECT_PROBES,
+    FAULT_PRESENT_READING,
+    alert_subject,
+    make_llm_investigate,
+    reads_fault_present,
+)
+from incident_commander.agent.state import EvidenceEntry, IncidentState, RunState
 from incident_commander.llm.client import LLMResult
 from incident_commander.llm.fakes import CannedLLMClient, CannedUsage
 from incident_commander.tools import policies
@@ -1560,3 +1569,518 @@ class TestAlertSubjectDerivation:
         subject = alert_subject({"job_id": job_id})
         assert subject is not None
         assert subject.value == str(job_id)
+
+
+def _timed_lag_response(
+    lag: int | None,
+    *,
+    age_seconds: float | None = 3,
+    group: str = "worker-dispatcher",
+    lag_known: bool = True,
+) -> ToolResult:
+    """A v0.6.7-shaped lag reading: the number, and the age of the measurement.
+
+    ``age_seconds`` is what ADR 0009's window is judged against and what INC-004's guard
+    needs; ``None`` omits it, which is the pre-v0.6.7 platform and the shape every other
+    fixture in this file has.
+    """
+    payload: dict[str, Any] = {
+        "consumer_group": group,
+        "lag": lag,
+        "lag_known": lag_known,
+        "source": "live",
+        "cache_key": f"kafka:consumer_lag:{group}",
+        "measured_at": "2026-07-15T19:59:57Z",
+    }
+    if age_seconds is not None:
+        payload["age_seconds"] = age_seconds
+    return ToolResult(content=[{"type": "text", "text": json.dumps(payload)}])
+
+
+def _lag_mcp(readings: list[ToolResult]) -> _FakeMCPClient:
+    """``get_consumer_lag`` answers ``readings`` in order, the last repeating."""
+    seen = {"n": 0}
+
+    def handler(name: str, _args: Mapping[str, Any]) -> ToolResult:
+        if name != "get_consumer_lag":
+            return _dlq_response()
+        index = min(seen["n"], len(readings) - 1)
+        seen["n"] += 1
+        return readings[index]
+
+    return _FakeMCPClient(handler)
+
+
+def _saturation_probe(confidence: float, group: str = "worker-dispatcher") -> dict[str, Any]:
+    """One planner step: an actionable top hypothesis, and another read of the subject."""
+    return {
+        "hypotheses": [_hyp("consumer_saturation", confidence)],
+        "next_action": _lag_probe(group),
+    }
+
+
+class TestConfirmingReadBound:
+    """ADR 0073 (INC-004): a confirming read of the alerted subject is bounded.
+
+    The live failure: five planner steps, `consumer_saturation` first at 0.80 / 0.72 / 0.82 /
+    0.85 / 0.82 — above the bar, in a category with a Tier-1 fix — and `probe` every time. The
+    prompt rules that produced it ("re-read the alerted signal before you conclude", ADR 0009;
+    "re-read the resource immediately before you act", ADR 0071) are satisfiable forever, so
+    the bound is in the loop where the reads are counted.
+    """
+
+    def _refusals(self, result: RunState) -> tuple[EvidenceEntry, ...]:
+        return tuple(
+            entry
+            for entry in result.evidence
+            if entry.tool_name == "_probe_refused_confirming_read"
+        )
+
+    def _lag_reads(self, result: RunState) -> tuple[EvidenceEntry, ...]:
+        return tuple(entry for entry in result.evidence if entry.tool_name == "get_consumer_lag")
+
+    def test_the_third_read_of_the_subject_is_refused(
+        self, run_state: RunState, now: datetime
+    ) -> None:
+        """The marquee case. Two readings land; the third is refused, not executed."""
+        llm = CannedLLMClient(
+            [
+                _saturation_probe(0.80),
+                _saturation_probe(0.72),
+                _saturation_probe(0.82),
+                {
+                    "hypotheses": [_hyp("consumer_saturation", 0.82)],
+                    "next_action": {"kind": "stop", "reason": "handing off"},
+                },
+            ]
+        )
+        mcp = _lag_mcp([_timed_lag_response(20, age_seconds=55), _timed_lag_response(39)])
+        transition = make_llm_investigate(mcp, llm, model="m")
+
+        result = transition(_investigating(run_state, group="worker-dispatcher"), now)
+
+        assert [name for name, _ in mcp.calls] == ["get_consumer_lag"] * 2, (
+            "the third read reached the platform"
+        )
+        refusals = self._refusals(result)
+        assert len(refusals) == 1
+        reason = refusals[0].result_summary
+        assert "probe refused" in reason
+        assert "is not more evidence" in reason
+        # The narrowed choice, which is the half a bare refusal would leave out.
+        assert "`remediate`" in reason and "`stop`" in reason
+        assert refusals[0].arguments["remaining_decisions"] == ["remediate", "stop"]
+        assert refusals[0].arguments["reads_already_taken"] == 2
+        # The refusal is not terminal: the planner kept its turn and used it.
+        assert result.state is IncidentState.ESCALATED
+        assert result.evidence[-1].tool_name == "_planner_stop"
+
+    def test_the_first_and_second_reads_are_never_refused(
+        self, run_state: RunState, now: datetime
+    ) -> None:
+        """The bound is on the THIRD. Two readings is what the two prompt rules ask for."""
+        llm = CannedLLMClient([_saturation_probe(0.80), _saturation_probe(0.90)])
+        mcp = _lag_mcp([_timed_lag_response(20, age_seconds=55), _timed_lag_response(39)])
+        transition = make_llm_investigate(mcp, llm, model="m", max_iterations=2)
+
+        result = transition(_investigating(run_state, group="worker-dispatcher"), now)
+
+        assert len(self._lag_reads(result)) == 2
+        assert self._refusals(result) == ()
+
+    def test_a_probe_of_a_different_tool_is_allowed(
+        self, run_state: RunState, now: datetime
+    ) -> None:
+        """Only the subject's own read is bounded: another tool is another question.
+
+        This is the difference between a bound and a ration, and it is what keeps the guard
+        off a run that is genuinely still investigating.
+        """
+        llm = CannedLLMClient(
+            [
+                _saturation_probe(0.80),
+                _saturation_probe(0.90),
+                _probe_step("list_dlq_messages", {}, category="consumer_saturation"),
+                {
+                    "hypotheses": [_hyp("consumer_saturation", 0.9)],
+                    "next_action": {"kind": "stop", "reason": "done"},
+                },
+            ]
+        )
+        mcp = _lag_mcp([_timed_lag_response(20, age_seconds=55), _timed_lag_response(39)])
+        transition = make_llm_investigate(mcp, llm, model="m")
+
+        result = transition(_investigating(run_state, group="worker-dispatcher"), now)
+
+        assert [name for name, _ in mcp.calls] == [
+            "get_consumer_lag",
+            "get_consumer_lag",
+            "list_dlq_messages",
+        ]
+        assert self._refusals(result) == ()
+
+    def test_an_omitted_argument_is_still_a_read_of_the_subject(
+        self, run_state: RunState, now: datetime
+    ) -> None:
+        """Judged on the WIRED arguments, so dropping the argument is not a way past it.
+
+        ``get_consumer_lag`` with no ``consumer_group`` default-fills to ``worker-dispatcher``
+        — the 2026-08-30 failure, and the reason ``subject_reads`` compares the wired bytes.
+        """
+        bare = {
+            "hypotheses": [_hyp("consumer_saturation", 0.82)],
+            "next_action": {"kind": "probe", "tool_name": "get_consumer_lag", "arguments": {}},
+        }
+        llm = CannedLLMClient([bare, bare, bare, bare])
+        mcp = _lag_mcp([_timed_lag_response(20, age_seconds=55), _timed_lag_response(39)])
+        transition = make_llm_investigate(mcp, llm, model="m", max_iterations=3)
+
+        result = transition(_investigating(run_state, group="worker-dispatcher"), now)
+
+        assert len(mcp.calls) == 2
+        assert len(self._refusals(result)) == 1
+
+    def test_a_ranking_below_the_bar_is_not_bounded(
+        self, run_state: RunState, now: datetime
+    ) -> None:
+        """Under the threshold the run has not settled on anything, so it may read again."""
+        llm = CannedLLMClient(
+            [_saturation_probe(0.6), _saturation_probe(0.6), _saturation_probe(0.6)]
+        )
+        mcp = _lag_mcp([_timed_lag_response(39)])
+        transition = make_llm_investigate(mcp, llm, model="m", max_iterations=3)
+
+        result = transition(_investigating(run_state, group="worker-dispatcher"), now)
+
+        assert len(self._lag_reads(result)) == 3
+        assert self._refusals(result) == ()
+
+    def test_a_category_with_no_tier_1_fix_is_not_bounded(
+        self, run_state: RunState, now: datetime
+    ) -> None:
+        """Nothing to act on means "remediate or stop" is not a choice worth forcing.
+
+        Such a run's only move is `stop`, and it is entitled to keep reading until it is sure.
+        """
+        step = {
+            "hypotheses": [_hyp("resolver_stall", 0.95)],
+            "next_action": _lag_probe("worker-dispatcher"),
+        }
+        llm = CannedLLMClient([step, step, step])
+        mcp = _lag_mcp([_timed_lag_response(39)])
+        transition = make_llm_investigate(mcp, llm, model="m", max_iterations=3)
+
+        result = transition(_investigating(run_state, group="worker-dispatcher"), now)
+
+        assert len(self._lag_reads(result)) == 3
+        assert self._refusals(result) == ()
+
+    def test_a_ranking_that_moved_resets_the_streak(
+        self, run_state: RunState, now: datetime
+    ) -> None:
+        """Over, under, over is not two steps running. The count is a streak, not a total."""
+        llm = CannedLLMClient(
+            [_saturation_probe(0.85), _saturation_probe(0.4), _saturation_probe(0.85)]
+        )
+        mcp = _lag_mcp([_timed_lag_response(39)])
+        transition = make_llm_investigate(mcp, llm, model="m", max_iterations=3)
+
+        result = transition(_investigating(run_state, group="worker-dispatcher"), now)
+
+        assert len(self._lag_reads(result)) == 3
+        assert self._refusals(result) == ()
+
+    def test_a_reading_that_shows_the_fault_gone_is_not_bounded(
+        self, run_state: RunState, now: datetime
+    ) -> None:
+        """A drained backlog is a different run (ADR 0071), and it may be re-read.
+
+        The guard's claim is "you already know the fault is there". It says nothing about a
+        resource whose newest reading is healthy, where reading again is how a run finds out
+        whether the recovery holds.
+        """
+        llm = CannedLLMClient(
+            [_saturation_probe(0.85), _saturation_probe(0.85), _saturation_probe(0.85)]
+        )
+        mcp = _lag_mcp([_timed_lag_response(0)])
+        transition = make_llm_investigate(mcp, llm, model="m", max_iterations=3)
+
+        result = transition(_investigating(run_state, group="worker-dispatcher"), now)
+
+        assert len(self._lag_reads(result)) == 3
+        assert self._refusals(result) == ()
+
+    def test_a_stale_reading_is_not_bounded(self, run_state: RunState, now: datetime) -> None:
+        """ADR 0009's window, applied: outside it the reading may predate anything.
+
+        61 seconds against a declared 60-second window. A guard that refused here would be
+        telling a run to act on a measurement it has been told not to trust.
+        """
+        assert policies.CACHED_READ_FRESHNESS_SECONDS["get_consumer_lag"] == 60
+        llm = CannedLLMClient(
+            [_saturation_probe(0.85), _saturation_probe(0.85), _saturation_probe(0.85)]
+        )
+        mcp = _lag_mcp([_timed_lag_response(39, age_seconds=61)])
+        transition = make_llm_investigate(mcp, llm, model="m", max_iterations=3)
+
+        result = transition(_investigating(run_state, group="worker-dispatcher"), now)
+
+        assert len(self._lag_reads(result)) == 3
+        assert self._refusals(result) == ()
+
+    def test_a_reading_with_no_age_is_not_bounded(self, run_state: RunState, now: datetime) -> None:
+        """A cached read whose age the platform did not report cannot be shown to be current.
+
+        Pre-v0.6.7 fixtures are this shape, which is why the guard is inert across the rest of
+        this file rather than quietly changing what those tests measure.
+        """
+        llm = CannedLLMClient(
+            [_saturation_probe(0.85), _saturation_probe(0.85), _saturation_probe(0.85)]
+        )
+        mcp = _lag_mcp([_timed_lag_response(39, age_seconds=None)])
+        transition = make_llm_investigate(mcp, llm, model="m", max_iterations=3)
+
+        result = transition(_investigating(run_state, group="worker-dispatcher"), now)
+
+        assert len(self._lag_reads(result)) == 3
+        assert self._refusals(result) == ()
+
+    def test_an_unknown_lag_is_not_bounded(self, run_state: RunState, now: datetime) -> None:
+        """``lag: null, lag_known: false`` is the platform having no measurement at all."""
+        llm = CannedLLMClient(
+            [_saturation_probe(0.85), _saturation_probe(0.85), _saturation_probe(0.85)]
+        )
+        mcp = _lag_mcp([_timed_lag_response(None, lag_known=False)])
+        transition = make_llm_investigate(mcp, llm, model="m", max_iterations=3)
+
+        result = transition(_investigating(run_state, group="worker-dispatcher"), now)
+
+        assert len(self._lag_reads(result)) == 3
+        assert self._refusals(result) == ()
+
+    def test_an_alert_naming_no_subject_leaves_the_guard_inert(
+        self, run_state: RunState, now: datetime
+    ) -> None:
+        """No subject, no bound: a whole-queue depth alert names a condition, not a resource."""
+        llm = CannedLLMClient(
+            [_saturation_probe(0.85), _saturation_probe(0.85), _saturation_probe(0.85)]
+        )
+        mcp = _lag_mcp([_timed_lag_response(39)])
+        transition = make_llm_investigate(mcp, llm, model="m", max_iterations=3)
+        subjectless = run_state.model_copy(
+            update={
+                "state": IncidentState.INVESTIGATING,
+                "alert": {"source": "kafka", "severity": "high"},
+            }
+        )
+
+        result = transition(subjectless, now)
+
+        assert alert_subject(subjectless.alert) is None
+        assert len(self._lag_reads(result)) == 3
+        assert self._refusals(result) == ()
+
+    def test_a_third_ask_after_two_refusals_escalates_naming_the_ranking(
+        self, run_state: RunState, now: datetime
+    ) -> None:
+        """The cap. A planner that will not take either offered move gets a handoff.
+
+        And the handoff says what the run concluded — the whole point of INC-004's second
+        half: "max iterations exceeded" told a briefing writer nothing, and it invented a
+        cause.
+        """
+        llm = CannedLLMClient([_saturation_probe(0.80)] + [_saturation_probe(0.82)] * 4)
+        mcp = _lag_mcp([_timed_lag_response(20, age_seconds=55), _timed_lag_response(39)])
+        transition = make_llm_investigate(mcp, llm, model="m")
+
+        result = transition(_investigating(run_state, group="worker-dispatcher"), now)
+
+        assert len(mcp.calls) == 2
+        assert len(self._refusals(result)) == _MAX_CONFIRMING_READ_REFUSALS
+        assert result.state is IncidentState.ESCALATED
+        reason = result.evidence[-1].result_summary
+        assert "3 times after being refused" in reason
+        assert "'consumer_saturation'" in reason
+        assert "0.82" in reason
+        assert "get_consumer_lag x2" in reason
+
+    def test_the_refusal_marker_is_bookkeeping(self, run_state: RunState, now: datetime) -> None:
+        """Underscore-prefixed, so the briefing trail and the grader's tool set exclude it.
+
+        The same property `_handoff_refused` has: a refusal is not a probe the agent made, and
+        a trail that listed it would credit the run with a read it never took.
+        """
+        assert _CONFIRMING_READ_REFUSED_MARKER.startswith("_")
+        llm = CannedLLMClient(
+            [_saturation_probe(0.80), _saturation_probe(0.82), _saturation_probe(0.82)]
+        )
+        mcp = _lag_mcp([_timed_lag_response(20, age_seconds=55), _timed_lag_response(39)])
+        transition = make_llm_investigate(mcp, llm, model="m", max_iterations=3)
+
+        result = transition(_investigating(run_state, group="worker-dispatcher"), now)
+
+        assert trail_of(result.evidence) == tuple(
+            probe for probe in trail_of(result.evidence) if probe.tool != "_"
+        )
+        assert all(
+            probe.tool != _CONFIRMING_READ_REFUSED_MARKER for probe in trail_of(result.evidence)
+        )
+
+    def test_the_refused_probe_costs_no_tool_call(self, run_state: RunState, now: datetime) -> None:
+        """What the bound buys: the budget the redundant read would have spent.
+
+        Two reads and one refusal is two tool calls, not three. On the live run the third,
+        fourth and fifth steps were reads, and the action never happened.
+        """
+        llm = CannedLLMClient(
+            [_saturation_probe(0.80), _saturation_probe(0.82), _saturation_probe(0.82)]
+        )
+        mcp = _lag_mcp([_timed_lag_response(20, age_seconds=55), _timed_lag_response(39)])
+        transition = make_llm_investigate(mcp, llm, model="m", max_iterations=3)
+
+        result = transition(_investigating(run_state, group="worker-dispatcher"), now)
+
+        assert result.budget.tool_calls_used == 2
+
+    def test_a_remediate_after_the_refusal_still_hands_off(
+        self, run_state: RunState, now: datetime
+    ) -> None:
+        """The other offered move, taken. The refusal steers; it does not close the run."""
+        llm = CannedLLMClient(
+            [
+                _saturation_probe(0.80),
+                _saturation_probe(0.82),
+                _saturation_probe(0.82),
+                _remediate_step(category="consumer_saturation"),
+            ]
+        )
+        mcp = _lag_mcp([_timed_lag_response(20, age_seconds=55), _timed_lag_response(39)])
+        transition = make_llm_investigate(mcp, llm, model="m")
+
+        result = transition(_investigating(run_state, group="worker-dispatcher"), now)
+
+        assert result.state is IncidentState.PLANNING
+        assert len(self._refusals(result)) == 1
+
+
+class TestTheFaultPresentReadingMap:
+    """``FAULT_PRESENT_READING`` is total over the subject probes, inert entries declared."""
+
+    def test_every_subject_probe_tool_has_a_decision(self) -> None:
+        """A new alert subject arrives as a decision rather than as silence.
+
+        The same totality ``attribution.RECOVERED_READING`` carries, and for the same reason:
+        a tool missing from the map reads as "no predicate", which is indistinguishable from
+        "nobody asked" — and the guard would be silently inert on a subject somebody meant it
+        to cover.
+        """
+        named = {probe.tool_name for probe in ALERT_SUBJECT_PROBES.values()}
+        assert named <= set(FAULT_PRESENT_READING), sorted(named - set(FAULT_PRESENT_READING))
+        assert set(FAULT_PRESENT_READING) == named, (
+            "FAULT_PRESENT_READING describes a tool no alert subject names: "
+            f"{sorted(set(FAULT_PRESENT_READING) - named)}"
+        )
+
+    def test_every_active_entry_names_the_argument_its_subject_probe_names(self) -> None:
+        """An entry describing a reading of some other argument would bound the wrong read."""
+        for probe in ALERT_SUBJECT_PROBES.values():
+            reading = FAULT_PRESENT_READING[probe.tool_name]
+            if reading is None:
+                continue
+            assert reading.tool_name == probe.tool_name
+            # Not an equality across the whole map: `dlq_scope` names `remediation_hint` on an
+            # UNFILTERED match, and its entry is inert for exactly that reason.
+            assert reading.argument_field in {probe.argument_field}
+
+    def test_every_active_entry_says_why(self) -> None:
+        for reading in FAULT_PRESENT_READING.values():
+            if reading is None:
+                continue
+            assert len(reading.why) > 40, reading
+
+    def test_a_zero_lag_reads_as_the_fault_gone(self) -> None:
+        reading = FAULT_PRESENT_READING["get_consumer_lag"]
+        assert reading is not None
+        drained = EvidenceEntry(
+            tool_name="get_consumer_lag",
+            arguments={"consumer_group": "worker-dispatcher"},
+            result_summary=json.dumps({"lag": 0, "lag_known": True}),
+            timestamp=datetime(2026, 7, 15, 20, 0, tzinfo=UTC),
+        )
+        assert reads_fault_present(drained, reading) is False
+
+    def test_an_unparseable_summary_cannot_say(self) -> None:
+        reading = FAULT_PRESENT_READING["get_consumer_lag"]
+        assert reading is not None
+        garbled = EvidenceEntry(
+            tool_name="get_consumer_lag",
+            arguments={"consumer_group": "worker-dispatcher"},
+            result_summary="not json",
+            timestamp=datetime(2026, 7, 15, 20, 0, tzinfo=UTC),
+        )
+        assert reads_fault_present(garbled, reading) is None
+
+
+class TestTheExhaustedIterationsReason:
+    """ADR 0073's second half: the escalation reason names the ranking it ran out holding."""
+
+    def test_it_names_the_top_hypothesis_its_confidence_and_the_reads(
+        self, run_state: RunState, now: datetime
+    ) -> None:
+        """INC-004's briefing recommended an SMTP relay no probe named.
+
+        It was handed "max iterations (5) exceeded" and a trail with DLQ furniture in it. The
+        reason now carries what the run concluded, so a writer that substitutes a cause is
+        contradicting its own context rather than filling a silence.
+        """
+        llm = CannedLLMClient(
+            [
+                _probe_step("list_dlq_messages", {}, category="consumer_saturation"),
+                _probe_step("list_dlq_messages", {}, category="consumer_saturation"),
+            ]
+        )
+        mcp = _lag_mcp([_timed_lag_response(39)])
+        transition = make_llm_investigate(mcp, llm, model="m", max_iterations=2)
+
+        result = transition(_investigating(run_state, group="worker-dispatcher"), now)
+
+        reason = result.evidence[-1].result_summary
+        # The words archives, reports and readers already match on, kept at the front.
+        assert reason.startswith("max iterations (2) exceeded")
+        assert "'consumer_saturation'" in reason
+        assert "0.90" in reason
+        assert "list_dlq_messages x2" in reason
+        assert "no cause outside it was established" in reason
+
+    def test_it_says_when_the_answer_was_not_actionable(
+        self, run_state: RunState, now: datetime
+    ) -> None:
+        """A run that ran out holding an escalate-only category says so.
+
+        The sentence has to distinguish the two, or a reader cannot tell "it could have acted
+        and did not" from "there was nothing it could do".
+        """
+        step = {
+            "hypotheses": [_hyp("resolver_stall", 0.95)],
+            "next_action": _lag_probe("worker-dispatcher"),
+        }
+        llm = CannedLLMClient([step, step])
+        mcp = _lag_mcp([_timed_lag_response(39)])
+        transition = make_llm_investigate(mcp, llm, model="m", max_iterations=2)
+
+        result = transition(_investigating(run_state, group="worker-dispatcher"), now)
+
+        reason = result.evidence[-1].result_summary
+        assert "not an answer this run could have acted on autonomously" in reason
+
+    def test_the_reason_reaches_the_briefing_slot(self, run_state: RunState, now: datetime) -> None:
+        """ADR 0065's pattern: the handoff carries it in a field, not in the writer's prose."""
+        llm = CannedLLMClient([_saturation_probe(0.85)])
+        mcp = _lag_mcp([_timed_lag_response(39)])
+        transition = make_llm_investigate(mcp, llm, model="m", max_iterations=1)
+
+        result = transition(_investigating(run_state, group="worker-dispatcher"), now)
+        briefing = render_briefing(result)
+
+        assert briefing.escalation_reason.startswith("max iterations (1) exceeded")
+        assert "'consumer_saturation'" in briefing.escalation_reason

@@ -37,6 +37,7 @@ from incident_commander.llm.prompts.loader import (
 from incident_commander.llm.prompts.shared_rules import (
     ATTRIBUTION_RULE,
     CHAIN_NODE_ACTION_RULE,
+    CONFIRMING_READ_BOUND_RULE,
     SHARED_RULES,
     STUCK_CHAIN_ROOT_RULE,
     UNRESOLVED_REMAINDER_RULE,
@@ -85,6 +86,19 @@ _ATTRIBUTION_RULE_READERS: Final[tuple[str, ...]] = (
     "remediation_planner",
 )
 
+# INC-004's readers of the confirming-read bound (ADR 0073), and the only shared rule whose
+# readers are two RULES rather than two prompts: `investigation_planner.md` states the
+# freshness re-read (ADR 0009) and the pre-action re-read (ADR 0071) as separate bullets, and a
+# model satisfied both by taking one more confirming read on every step. The bound belongs to
+# each of them, so it is rendered twice into the one file — and nowhere else, because the
+# remediation planner's re-read is a single pre-action reading it makes once and the judges
+# grade a finished run.
+_CONFIRMING_READ_BOUND_READERS: Final[tuple[str, ...]] = ("investigation_planner",)
+
+# How many times the one file renders it. TWO, and this is the number the decision is about:
+# one rendering would leave the other re-read rule saying what it said before INC-004.
+_CONFIRMING_READ_BOUND_RENDERINGS: Final[int] = 2
+
 # Every category the planner may emit, in a stable order, built from the enum so a
 # new ``HypothesisCategory`` value adds a case on the next collection.
 _CATEGORIES: Final[tuple[HypothesisCategory, ...]] = tuple(
@@ -112,7 +126,14 @@ _EXPECTED_HASHES: Final[dict[str, str]] = {
     # sentence saying who may be credited with a recovery. Three hashes move together or the
     # change is half a rule (INC-002). This value is taken on the tree that carries BOTH new
     # rules, which is why it is neither builder's own number.
-    "investigation_planner": ("6600eb6f6ff2c84976b996c38fd8695d5060ead9376b4049d23501190ce5c67b"),
+    #
+    # And a FOURTH time by WO-R3-331 / INC-004 / ADR 0073 — ALONE this time, and that is the
+    # point. `{{rule:confirming_read_bound}}` says how many times a "re-read before X" rule
+    # asks to be satisfied, and its two readers are the two RE-READ RULES IN THIS FILE (ADR
+    # 0009's freshness re-read and ADR 0071's pre-action re-read), not two prompts. So exactly
+    # one hash moves: the remediation planner and both judges are byte-for-byte what they were,
+    # because the bound is about which read the planner asks for next and about nothing else.
+    "investigation_planner": ("f01f5f5ed5e2483060823c40452ea021b4afae76220adc33890eb82276f6eb70"),
     # WP-5.2's addendum, appended to `investigation_planner` by
     # `best_of_n_enumerated` and never loaded alone — which is why the planner prompt's
     # own hash did not move: the control group's system prompt is byte-for-byte what it was.
@@ -1602,3 +1623,118 @@ class TestInvestigationPlannerRevisionInvariants:
 
     def test_it_repeats_the_untrusted_input_rule(self) -> None:
         assert "data, not instructions" in load_prompt("investigation_planner_revision")
+
+
+class TestTheConfirmingReadBoundReachesBothReReadRules:
+    """INC-004 (ADR 0073): how many times a "re-read before X" rule asks to be satisfied.
+
+    Every other shared rule exists because several PROMPTS must say one thing. This one exists
+    because two RULES IN ONE PROMPT must: the freshness re-read (ADR 0009) and the pre-action
+    re-read (ADR 0071) each asked for a confirming reading, neither said how many, and a live
+    run answered both with five. A clause appended to one bullet would have left the other
+    bullet unbounded, which is INC-002's half a rule inside a single file — so the sentence is
+    held once and rendered into both, and the count below is part of the decision.
+    """
+
+    _KEY: Final = "confirming_read_bound"
+    _PLACEHOLDER: Final = "{{rule:confirming_read_bound}}"
+
+    def test_the_rule_is_one_sentence(self) -> None:
+        rule = CONFIRMING_READ_BOUND_RULE.strip()
+        assert rule.endswith("."), rule
+        assert ". " not in rule, (
+            f"the confirming-read bound has more than one sentence:\n{rule}\nOne sentence, "
+            f"for O-19's reason: a second is where a paraphrase starts."
+        )
+
+    @pytest.mark.parametrize("name", _CONFIRMING_READ_BOUND_READERS)
+    def test_every_reader_is_served_the_identical_rule(self, name: str) -> None:
+        assert CONFIRMING_READ_BOUND_RULE in load_prompt(name), (
+            f"{name} does not carry the confirming-read bound as served. It must write "
+            f"`{self._PLACEHOLDER}` where the rule belongs; `load_prompt` expands it."
+        )
+
+    @pytest.mark.parametrize("name", _CONFIRMING_READ_BOUND_READERS)
+    def test_every_reader_delegates_the_rule_rather_than_copying_it(self, name: str) -> None:
+        raw = raw_prompt(name)
+        assert self._PLACEHOLDER in raw, (
+            f"{name}.md does not delegate the shared rule. Replace the copied sentence "
+            f"with `{self._PLACEHOLDER}`."
+        )
+        assert CONFIRMING_READ_BOUND_RULE not in raw, (
+            f"{name}.md spells the confirming-read bound out as well as delegating it."
+        )
+
+    def test_both_re_read_rules_carry_the_bound(self) -> None:
+        """The count, and the reason this class exists at all.
+
+        The planner file renders the bound twice — once on the freshness re-read, once on the
+        pre-action re-read. A change that drops one rendering leaves a rule that a model can
+        satisfy forever, and nothing else in this suite would notice: the served prompt would
+        still contain the sentence, and the hash would move for a reason a reviewer reads as
+        wording.
+        """
+        raw = raw_prompt("investigation_planner")
+        assert raw.count(self._PLACEHOLDER) == _CONFIRMING_READ_BOUND_RENDERINGS, (
+            f"investigation_planner.md renders `{self._PLACEHOLDER}` "
+            f"{raw.count(self._PLACEHOLDER)} times; ADR 0073 binds BOTH re-read rules "
+            f"({_CONFIRMING_READ_BOUND_RENDERINGS} renderings)."
+        )
+        assert (
+            load_prompt("investigation_planner").count(CONFIRMING_READ_BOUND_RULE)
+            == _CONFIRMING_READ_BOUND_RENDERINGS
+        )
+
+    def test_it_sits_on_the_two_rules_it_bounds(self) -> None:
+        """Each rendering is on the bullet whose demand it bounds, not loose in the file.
+
+        A sentence about "this rule" that is not on a rule is about nothing. The two anchors
+        are the freshness re-read's own opening and the attribution rule's served text.
+        """
+        served = load_prompt("investigation_planner")
+        for line in served.splitlines():
+            if "re-read the alerted signal" in line:
+                assert CONFIRMING_READ_BOUND_RULE in line, (
+                    "ADR 0009's freshness re-read does not carry the bound on its own line"
+                )
+            if ATTRIBUTION_RULE in line:
+                assert CONFIRMING_READ_BOUND_RULE in line, (
+                    "ADR 0071's pre-action re-read does not carry the bound on its own line"
+                )
+
+    def test_no_other_prompt_carries_it(self) -> None:
+        """Both directions, as every rule above is checked.
+
+        A judge or the remediation planner picking this up would be a decision about which
+        roles the bound binds: the remediation planner's re-read is ONE reading it takes before
+        acting, and a judge reads a finished run where no further probe is possible.
+        """
+        carrying = tuple(
+            sorted(name for name in available_prompts() if self._PLACEHOLDER in raw_prompt(name))
+        )
+        assert carrying == _CONFIRMING_READ_BOUND_READERS, (
+            f"prompts carrying the confirming-read bound are {list(carrying)}; ADR 0073 names "
+            f"{list(_CONFIRMING_READ_BOUND_READERS)}."
+        )
+
+    def test_the_rule_and_the_guard_agree_on_the_numbers(self) -> None:
+        """The pin that keeps the words and the structural guard about one bound.
+
+        The guard is the enforcement (``investigation._confirming_read_exhausted``) and this
+        sentence is what makes the refusal predictable. If the guard's numbers moved and the
+        rule kept saying "a THIRD" and "two steps running", the planner would be steered by a
+        bound that is not the one being applied — and a refusal nobody expects costs the run
+        the step it was meant to save.
+        """
+        from incident_commander.agent.investigation import (
+            _CONFIRMING_READS_ALLOWED,
+            _SETTLED_RANKING_STEPS,
+        )
+
+        assert _CONFIRMING_READS_ALLOWED == 2, "the rule says a THIRD reading is refused"
+        assert _SETTLED_RANKING_STEPS == 2, "the rule says 'for two steps running'"
+        assert "THIRD" in CONFIRMING_READ_BOUND_RULE
+        assert "two steps running" in CONFIRMING_READ_BOUND_RULE
+
+    def test_the_rule_is_in_the_table(self) -> None:
+        assert self._KEY in SHARED_RULES

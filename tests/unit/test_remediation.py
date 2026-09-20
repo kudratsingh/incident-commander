@@ -4082,7 +4082,9 @@ class TestAChainNodeActionIsAdmittedByTheChainsOwnReading:
         result = make_llm_plan(CannedLLMClient([plan]), model=_MODEL)(run, _now())
         assert result.state is IncidentState.REMEDIATING
         assert result.remediation_plan is not None
-        assert result.remediation_plan["action_arguments"]["job_id"] == self._STEP_1
+        arguments = result.remediation_plan["action_arguments"]
+        assert isinstance(arguments, Mapping)
+        assert arguments["job_id"] == self._STEP_1
         assert not [
             e for e in result.evidence if e.tool_name == _PLAN_REFUSED_SUBJECT_TARGET_MARKER
         ]

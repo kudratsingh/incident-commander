@@ -11,9 +11,9 @@
     "no-hook": "the fixture describes a fault no chaos hook can produce, so the canned value is the scenario's premise and the check probes a world that never had it. Not a defect; the fix, if that scenario is ever to run live, is a platform hook"
   },
   "_counts": {
-    "recorded": 161,
+    "recorded": 173,
     "fixture-defect": 0,
-    "explained": 161
+    "explained": 173
   },
   "known_drift": [
     {
@@ -1113,6 +1113,102 @@
       "kind": "not_live_reachable",
       "context": "post-fault",
       "why": "create_stuck_dag stamps each descendant's trace_id from the same namespace and chain_name, so the two trace ids appear and disappear with the rows themselves"
+    },
+    {
+      "scenario": "workflow_stuck_downstream_child_failed",
+      "tool": "get_dag_state",
+      "path": "edges",
+      "kind": "canned_only_field",
+      "context": "post-fault",
+      "why": "create_stuck_dag seeds the workflow-stuck-eval chain and derives its ids from the chain_name, so the un-faulted world the check probes answers 'job not found' and carries no edges at all \u2014 the dependency edges between them. This world is the root completed over a DEAD-LETTERED descendant"
+    },
+    {
+      "scenario": "workflow_stuck_downstream_child_failed",
+      "tool": "get_dag_state",
+      "path": "nodes",
+      "kind": "canned_only_field",
+      "context": "post-fault",
+      "why": "create_stuck_dag seeds the workflow-stuck-eval chain and derives its ids from the chain_name, so the un-faulted world the check probes answers 'job not found' and carries no nodes at all \u2014 the completed upstream, the completed root, and the dead-lettered descendant below it. This world is the root completed over a DEAD-LETTERED descendant"
+    },
+    {
+      "scenario": "workflow_stuck_downstream_child_failed",
+      "tool": "get_dag_state",
+      "path": "paused",
+      "kind": "canned_only_field",
+      "context": "post-fault",
+      "why": "create_stuck_dag seeds the workflow-stuck-eval chain and derives its ids from the chain_name, so the un-faulted world the check probes answers 'job not found' and carries no paused at all \u2014 the chain's pause flag. This world is the root completed over a DEAD-LETTERED descendant"
+    },
+    {
+      "scenario": "workflow_stuck_downstream_child_failed",
+      "tool": "get_dag_state",
+      "path": "paused_by",
+      "kind": "canned_only_field",
+      "context": "post-fault",
+      "why": "create_stuck_dag seeds the workflow-stuck-eval chain and derives its ids from the chain_name, so the un-faulted world the check probes answers 'job not found' and carries no paused_by at all \u2014 the pause's holder. This world is the root completed over a DEAD-LETTERED descendant"
+    },
+    {
+      "scenario": "workflow_stuck_downstream_child_failed",
+      "tool": "get_dag_state",
+      "path": "paused_expires_in_seconds",
+      "kind": "canned_only_field",
+      "context": "post-fault",
+      "why": "create_stuck_dag seeds the workflow-stuck-eval chain and derives its ids from the chain_name, so the un-faulted world the check probes answers 'job not found' and carries no paused_expires_in_seconds at all \u2014 the pause's countdown. This world is the root completed over a DEAD-LETTERED descendant"
+    },
+    {
+      "scenario": "workflow_stuck_downstream_child_failed",
+      "tool": "get_dag_state",
+      "path": "seed_id",
+      "kind": "canned_only_field",
+      "context": "post-fault",
+      "why": "create_stuck_dag seeds the workflow-stuck-eval chain and derives its ids from the chain_name, so the un-faulted world the check probes answers 'job not found' and carries no seed_id at all \u2014 the root job id the chain is named for. This world is the root completed over a DEAD-LETTERED descendant"
+    },
+    {
+      "scenario": "workflow_stuck_downstream_child_failed",
+      "tool": "list_dlq_messages",
+      "path": "items[].id[]",
+      "kind": "not_live_reachable",
+      "context": "post-fault",
+      "why": "the chain's step-1 id is uuid5-derived from the chain_name and exists only after create_stuck_dag has fired, so no un-faulted reading of the DLQ contains it \u2014 the same absence already recorded for its get_dag_state.seed_id, one node lower. Both elements of the sequenced fixture carry it"
+    },
+    {
+      "scenario": "workflow_stuck_downstream_child_failed",
+      "tool": "list_dlq_messages",
+      "path": "items[].trace_id[]",
+      "kind": "not_live_reachable",
+      "context": "post-fault",
+      "why": "create_stuck_dag stamps step-1's trace_id from the same namespace and chain_name (88378353\u2026), so it appears and disappears with the row itself; both elements of the sequenced fixture carry it"
+    },
+    {
+      "scenario": "workflow_stuck_downstream_child_failed",
+      "tool": "list_dlq_messages",
+      "path": "total",
+      "kind": "value",
+      "context": "post-fault",
+      "why": "create_stuck_dag dead-letters the workflow-stuck-eval chain's step-1 under a root that succeeded, so the faulted world holds five DLQ rows where the un-faulted world the check probes holds the four boot-seeded ones. Same asymmetry as world 1 and for the same reason, one node lower; both elements of the sequenced fixture read 5"
+    },
+    {
+      "scenario": "workflow_stuck_downstream_child_failed",
+      "tool": "search_traces",
+      "path": "matches[].job_id[]",
+      "kind": "not_live_reachable",
+      "context": "post-fault",
+      "why": "step-2 is uuid5-derived from the chain_name and exists only after create_stuck_dag has fired, so its id is in no un-faulted reading. Here it is the ONLY waiting row of the chain, held behind a dead-lettered sibling rather than behind the root"
+    },
+    {
+      "scenario": "workflow_stuck_downstream_child_failed",
+      "tool": "search_traces",
+      "path": "matches[].status[]",
+      "kind": "not_live_reachable",
+      "context": "post-fault",
+      "why": "the canned value is `waiting`, and a warm un-faulted stack has no waiting row anywhere \u2014 platform ADR 0029 measured that while building these hooks. The live reading offers completed, dead_letter and failed, and none of them is a disagreement about a value: the status this fixture pins cannot be reached without the fault"
+    },
+    {
+      "scenario": "workflow_stuck_downstream_child_failed",
+      "tool": "search_traces",
+      "path": "matches[].trace_id[]",
+      "kind": "not_live_reachable",
+      "context": "post-fault",
+      "why": "create_stuck_dag stamps step-2's trace_id from the same namespace and chain_name, so it appears and disappears with the row itself"
     },
     {
       "scenario": "workflow_stuck_healthy_chain",

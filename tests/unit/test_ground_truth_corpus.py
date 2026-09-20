@@ -73,6 +73,11 @@ _DECIDED: Final[Mapping[str, tuple[Category, ...] | None]] = {
     # WO-R3-214 (WP-7.2, ADR 0053). Family C: one chain under four faults, and `resolver_stall`
     # vs `dag_paused` — one boolean apart in `get_dag_state` — is separated by the labels alone.
     "workflow_stuck_dead_lettered_root": (Category.RUNAWAY_SAGA,),
+    # WO-R3-284 (ADR 0070). The family's fifth world, and `poison_message` rather than
+    # `runaway_saga`: the root ran and finished, so nothing in the chain stopped stepping —
+    # one job's stored payload cannot be processed, which is what the label names. It is
+    # also the family's fifth distinct answer, which its one-alert property requires.
+    "workflow_stuck_downstream_child_failed": (Category.POISON_MESSAGE,),
     "workflow_stuck_healthy_chain": (Category.NO_FAULT,),
     "workflow_stuck_paused_dag": (Category.DAG_PAUSED,),
     "workflow_stuck_resolver_stall": (Category.RESOLVER_STALL,),
@@ -219,11 +224,12 @@ class TestEveryScenarioCarriesADecision:
         """The number in the PR body, checked against the corpus that produced it."""
         corpus = _corpus()
         graded = [s for s in corpus if s.root_cause_graded]
-        assert (len(graded), len(corpus)) == (53, 62), (
+        assert (len(graded), len(corpus)) == (54, 63), (
             f"{len(graded)} of {len(corpus)} scenarios are root-cause graded; "
             "WO-R3-261 landed 32 of 41, WO-R3-202 took it to 36 of 45, WO-R3-214 "
             "to 40 of 49, WO-R3-226 to 44 of 53, WO-R3-228 to 46 of 55, WO-R3-236 to "
-            "48 of 57, WO-R3-229 to 49 of 58 and WO-R3-221 to 53 of 62 — every "
+            "48 of 57, WO-R3-229 to 49 of 58, WO-R3-221 to 53 of 62 and WO-R3-284 to "
+            "54 of 63 — every "
             "`jobs_not_progressing`, `temporal_recovery`, `workflow_stuck`, "
             "`api_latency`, retry, multi-fault and cascading scenario carries a label, "
             "because ADR 0038 makes one mandatory for a new scenario. Update this "

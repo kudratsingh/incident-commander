@@ -136,13 +136,14 @@ class TestSplitsAreByTemplate:
         }
 
     def test_the_shipped_corpus_loads(self) -> None:
-        """62 scenarios, no straddle. The check is inert until it is not.
+        """63 scenarios, no straddle. The check is inert until it is not.
 
         41 until WO-R3-202's four, 45 until WO-R3-214's four, 49 until WO-R3-226's
         four, 53 until WO-R3-228's two, 55 until WO-R3-236's two, 57 until
-        WO-R3-229's cascade and 58 until WO-R3-221's four. A pin, not a derivation.
+        WO-R3-229's cascade, 58 until WO-R3-221's four and 62 until WO-R3-284's
+        fifth `workflow_stuck` world. A pin, not a derivation.
         """
-        assert len(CORPUS) == 62
+        assert len(CORPUS) == 63
 
 
 class TestClosedVocabularies:
@@ -328,7 +329,13 @@ class TestPromotionIsReconciled:
             "the deploy in the name is the distractor, not the family",
         ),
         # WO-R3-214 (WP-7.2). The rule answered `workflow` for all four — right about the subject,
-        # one word short: `workflow_stuck` is FOUR worlds sharing one alert, and it is a prefix.
+        # one word short: `workflow_stuck` is worlds sharing one alert, and it is a prefix.
+        # WO-R3-284 added the fifth world, and the rule answers `workflow` for it too.
+        "workflow_stuck_downstream_child_failed": (
+            "workflow",
+            "workflow_stuck",
+            "same family, the world whose dead-lettered node is a DESCENDANT (ADR 0070)",
+        ),
         "workflow_stuck_dead_lettered_root": (
             "workflow",
             "workflow_stuck",
@@ -462,6 +469,13 @@ class TestPromotionIsReconciled:
             "single",
             "multi_hop",
             "dag state -> the root's own DLQ row -> replay -> verify on the chain",
+        ),
+        # WO-R3-284: the fifth world takes the same three reads, and its first one answers
+        # about a node other than the one it asked about.
+        "workflow_stuck_downstream_child_failed": (
+            "single",
+            "multi_hop",
+            "dag state -> the DESCENDANT's own DLQ row -> fence -> verify on that row",
         ),
         # WO-R3-226 (WP-10.1). Both are `ambiguous` and invisible from a name: the world
         # offers two readings of one symptom.

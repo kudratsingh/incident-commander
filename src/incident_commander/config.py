@@ -71,6 +71,16 @@ class ChaosTokenNotConfigured(RuntimeError):
     """
 
 
+class SmokeTokenNotConfigured(RuntimeError):
+    """A read-only observation path was reached with ``PLATFORM_SMOKE_TOKEN`` unset.
+
+    Its own type, for ``ChaosTokenNotConfigured``'s reason and one of its own: the demo
+    runner's every read is made under this principal (ADR 0074, F3 of the third live take),
+    and the fallback it replaced — the agent's own token — wrote the runner's reads into the
+    audit log as the AGENT's, where a page cannot tell them from the agent's own.
+    """
+
+
 class Settings(BaseSettings):
     """Immutable application settings. Constructed once at startup."""
 
@@ -348,6 +358,26 @@ class Settings(BaseSettings):
                 "verifying a fault world needs the chaos principal (the agent's "
                 "PLATFORM_TOKEN no longer carries chaos:invoke): run "
                 "`make bootstrap-token` and paste both printed lines."
+            )
+        return token.get_secret_value()
+
+    def require_smoke_token(self) -> str:
+        """The read-only principal's token, or refuse in one line.
+
+        ``require_chaos_token``'s twin, and refuses for the same reason: blank or whitespace
+        counts as unset, and there is no fall back to ``platform_token``. An observation made
+        under the agent's token is an observation the platform's audit log records as the
+        agent's, and the demo page then shows the runner's polling as the agent's own reads —
+        F3 of the 2026-09-20 take, where a `get_consumer_lag` every 3 seconds under the AGENT
+        principal buried the four reads the agent actually made.
+        """
+        token = self.platform_smoke_token
+        if token is None or not token.get_secret_value().strip():
+            raise SmokeTokenNotConfigured(
+                "PLATFORM_SMOKE_TOKEN is not set in .env, and this path reads the world "
+                "under the read-only principal on purpose — it will not fall back to the "
+                "agent's PLATFORM_TOKEN, because the agent's own audit rows are what the "
+                "demo page is showing. Run `make bootstrap-token` and paste the printed line."
             )
         return token.get_secret_value()
 

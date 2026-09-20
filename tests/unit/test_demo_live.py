@@ -22,6 +22,11 @@ from scripts import demo_live
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
+def _reading(lag: int, *, age_seconds: float = 4.0, known: bool = True) -> demo_live.LagReading:
+    """A lag reading in the shape the waits read, age included (ADR 0074's F7)."""
+    return demo_live.LagReading(lag=lag, known=known, age_seconds=age_seconds)
+
+
 class _FakeStack:
     """Records every command the machine would have run, and answers success.
 
@@ -72,7 +77,7 @@ def stack(monkeypatch: pytest.MonkeyPatch) -> _FakeStack:
         lambda scenario: fake.preconditions_awaited.append(scenario),
     )
     monkeypatch.setattr(demo_live, "_artifacts", lambda scenario: ["trajectory: <fake>"])
-    monkeypatch.setattr(demo_live, "_lag_reading", lambda: (0, True))
+    monkeypatch.setattr(demo_live, "_lag_reading", lambda: _reading(0))
     monkeypatch.setattr(
         demo_live,
         "_fault_is_visible",
@@ -232,11 +237,11 @@ class TestTheAuditWaitsForTheMetricInATrafficMode:
     ) -> None:
         # The first reading is step 2's baseline (healthy, or the demo never starts); the
         # stale ones are step 6's, after the reset.
-        readings = iter([(0, True), (33, True), (33, True), (0, True)])
-        seen: list[tuple[int | None, bool]] = []
+        readings = iter([_reading(0), _reading(33), _reading(33), _reading(0)])
+        seen: list[demo_live.LagReading] = []
 
-        def _lag() -> tuple[int | None, bool]:
-            value = next(readings, (0, True))
+        def _lag() -> demo_live.LagReading:
+            value = next(readings, _reading(0))
             seen.append(value)
             return value
 
@@ -244,19 +249,22 @@ class TestTheAuditWaitsForTheMetricInATrafficMode:
         assert demo_live.main(["--mode", "consumer_outage", "--auto"]) == 0
 
         out = capsys.readouterr().out
-        assert "waiting for the backlog to drain (lag 33" in out
+        # F7 (ADR 0074): the wait names the platform's 60-s clock and the sample's own age,
+        # because a bare spinner over a 106-second step reads as a hang.
+        assert "waiting on the platform's 60-s lag clock" in out
+        assert "lag 33, age" in out
         assert "backlog drained" in out
         # The stale readings were not accepted, and the audit came after the fresh one.
-        assert (0, True) in seen
+        assert _reading(0) in seen
         assert out.index("backlog drained") < out.rindex("world audit PASS")
 
     def test_a_timeout_warns_and_audits_anyway(
         self, stack: _FakeStack, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
     ) -> None:
         """The wait must not become a way to declare the world fine by waiting."""
-        readings = iter([(0, True)])  # step 2's baseline; every later read is stale
+        readings = iter([_reading(0)])  # step 2's baseline; every later read is stale
 
-        monkeypatch.setattr(demo_live, "_lag_reading", lambda: next(readings, (33, True)))
+        monkeypatch.setattr(demo_live, "_lag_reading", lambda: next(readings, _reading(33)))
         monkeypatch.setattr(demo_live, "_DRAIN_TIMEOUT_SECONDS", 0)
 
         assert demo_live.main(["--mode", "consumer_outage", "--auto"]) == 0
@@ -268,7 +276,7 @@ class TestTheAuditWaitsForTheMetricInATrafficMode:
     def test_the_quiet_mode_does_not_wait_at_all(
         self, stack: _FakeStack, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
     ) -> None:
-        def _boom() -> tuple[int | None, bool]:
+        def _boom() -> demo_live.LagReading:
             raise AssertionError("dlq_backlog has no producer, so there is nothing to read")
 
         monkeypatch.setattr(demo_live, "_lag_reading", _boom)
@@ -276,7 +284,7 @@ class TestTheAuditWaitsForTheMetricInATrafficMode:
         # The exploding reader is the real assertion; this one is that the wait's own lines
         # never appear ("backlog" alone is in this mode's story, so match the wait's words).
         out = capsys.readouterr().out
-        assert "waiting for the backlog to drain" not in out
+        assert "for the backlog to drain" not in out
         assert "backlog drained" not in out
 
 
@@ -478,7 +486,7 @@ class TestStepThreeWaitsForThePlatformsOwnReading:
         assert demo_live.main(["--mode", "consumer_outage", "--auto"]) == 0
 
         out = capsys.readouterr().out
-        assert "waiting for the platform's reading to show the fault (lag 0)" in out
+        assert "waiting on the platform's 60-s lag clock to show the fault — lag 0" in out
         assert "the platform's own reading shows the fault: lag 23" in out
         assert out.index("shows the fault: lag 23") < out.index("STEP 4")
 
@@ -672,3 +680,131 @@ class TestTheConsoleUrl:
         out = capsys.readouterr().out
         assert DEFAULT_PASSWORD not in out
         assert "DEFAULT_EMAIL" in out, "it must say WHERE the login is, without printing it"
+
+
+class TestTheRunnerNeverWearsTheAgentsToken:
+    """F3 (ADR 0074): every read this script makes is the read-only principal's.
+
+    The third live take's action ledger was flooded with `get_consumer_lag` every three seconds
+    under the AGENT principal, and the page cannot tell such a row from the agent's own: the
+    platform writes both as `agent.tool_invoked`. Three sources, all of them this script —
+    the wind-down client built with `make_client(settings)`, and two waits that fell back to
+    `settings.platform_token` when `PLATFORM_SMOKE_TOKEN` was unset in the subprocess env.
+    """
+
+    def _settings(self, monkeypatch: pytest.MonkeyPatch, **overrides: Any) -> Any:
+        """A ``Settings`` the module's readers will resolve, with the two tokens apart."""
+        from evals import runner as runner_module
+        from incident_commander.config import Settings
+
+        values: dict[str, Any] = {
+            "anthropic_api_key": "sk-ant-test",
+            "judge_model": "claude-haiku-4-5",
+            "platform_mcp_url": "https://demo.local/mcp",
+            "platform_rest_url": "https://demo.local/api/v1",
+            "platform_token": "AGENT-TOKEN",
+            "platform_smoke_token": "SMOKE-TOKEN",
+            "platform_webhook_secret": "hmac-secret",
+            "database_url": "postgresql://commander:commander@localhost:5432/commander",
+            **overrides,
+        }
+        # `_env_file=None`: a local .env would supply the very tokens this test is about.
+        settings = Settings(_env_file=None, **values)  # type: ignore[call-arg]
+        monkeypatch.setattr(runner_module, "_settings_for_mode", lambda live=True: settings)
+        return settings
+
+    def test_every_client_this_module_builds_carries_the_smoke_token(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The pin the order asks for: never ``settings.platform_token``.
+
+        Asserted on the TOKEN handed to ``make_client``, because that is the whole of the
+        decision — an argument of ``None`` selects the agent's principal, which is how the
+        fallback used to happen without anybody writing "platform_token".
+        """
+        settings = self._settings(monkeypatch)
+        tokens: list[str | None] = []
+
+        class _Client:
+            def call_tool(self, *args: Any, **kwargs: Any) -> Any:
+                raise AssertionError("this test builds clients; it does not read")
+
+            def close(self) -> None:
+                return None
+
+        def _make_client(_settings: Any, tracer: Any = None, token: str | None = None) -> Any:
+            tokens.append(token)
+            return _Client()
+
+        monkeypatch.setattr("incident_commander.tools.mcp_client.make_client", _make_client)
+
+        for _ in range(3):
+            demo_live._smoke_client()
+
+        assert tokens == ["SMOKE-TOKEN"] * 3
+        assert settings.platform_token.get_secret_value() not in tokens
+        assert None not in tokens, (
+            "a client was built with no token, which selects settings.platform_token — "
+            "the agent's own principal (S-04)"
+        )
+
+    def test_an_unset_smoke_token_fails_the_demo_rather_than_falling_back(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Loudly, and before anything is read. The fallback WAS the bug."""
+        self._settings(monkeypatch, platform_smoke_token=None)
+
+        with pytest.raises(demo_live.DemoFailed) as raised:
+            demo_live._smoke_client()
+
+        assert "PLATFORM_SMOKE_TOKEN" in str(raised.value)
+        assert "will not fall back" in str(raised.value)
+
+    def test_the_traffic_loop_is_handed_the_smoke_token_in_its_environment(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """`make traffic` exports it from make's variables, which this script may not assume.
+
+        The runner starts that subprocess, so the runner hands the credential over. Without it,
+        `traffic_loop.py --until-lag` cannot read the lag it waits on (it refuses rather than
+        looping forever, which is the right refusal and the wrong demo).
+        """
+        self._settings(monkeypatch, platform_smoke_token="SMOKE-TOKEN")
+        started: dict[str, Any] = {}
+
+        class _Popen:
+            def __init__(self, argv: Any, **kwargs: Any) -> None:
+                started["argv"] = argv
+                started["env"] = kwargs.get("env")
+
+            def poll(self) -> int | None:
+                return None
+
+        monkeypatch.setattr(subprocess, "Popen", _Popen)
+        demo_live.TrafficHandle().start()
+
+        assert started["argv"] == ["make", "traffic"]
+        assert started["env"]["PLATFORM_SMOKE_TOKEN"] == "SMOKE-TOKEN"
+
+    def test_the_module_names_no_other_client_builder(self) -> None:
+        """Structural, so a fourth reader cannot arrive with the old fallback in it.
+
+        Every ``make_client`` in this file must be the one inside ``_smoke_client``; a second
+        call site is how three of them ended up agent-scoped in the first place.
+        """
+        source = (_REPO_ROOT / "scripts" / "demo_live.py").read_text()
+        # Code lines only: this module's prose names the builder it refuses to use, and a
+        # sentence about a mistake is not the mistake.
+        builders = [
+            line
+            for line in source.splitlines()
+            if "make_client(" in line and not line.lstrip().startswith("#") and "`" not in line
+        ]
+        assert len(builders) == 1, (
+            f"demo_live.py builds clients in {len(builders)} places: {builders}. Route every "
+            "read through `_smoke_client()`, which cannot select the agent's token"
+        )
+        assert "token=token" in builders[0], (
+            "the one builder must pass an explicit token; no argument selects "
+            "settings.platform_token — the agent's principal (S-04)"
+        )

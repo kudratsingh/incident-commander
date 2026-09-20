@@ -56,7 +56,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Final
+from typing import Any, Final, NamedTuple
 
 # The one import from the harness at MODULE level, and deliberately: every other `evals`
 # import here is inside the function that needs it, and that is why the first rehearsal died
@@ -134,6 +134,34 @@ class DemoFailed(RuntimeError):
     """A step could not be completed. Always caught: the world is put back first."""
 
 
+class LagReading(NamedTuple):
+    """One reading of the alerted group's backlog, with the age of the measurement.
+
+    The age travels WITH the number because every wait in this script is a wait on the
+    platform's 60-second lag clock rather than on the world: a reading of 10 that was measured
+    58 seconds ago says nothing about now, and an operator watching a spinner cannot tell the
+    two apart (F7, the third live take's 106-second step 3).
+    """
+
+    lag: int | None
+    known: bool
+    age_seconds: float | None
+
+    @property
+    def said(self) -> str:
+        """The reading in the words the waits print, age included."""
+        if not self.known or self.lag is None:
+            return f"lag not known yet (lag {self.lag}, lag_known {self.known})"
+        age = "age unknown" if self.age_seconds is None else f"age {self.age_seconds:.0f}s"
+        return f"lag {self.lag}, {age}"
+
+
+#: What every wait on the platform's own measurement prints. One string, because the thing an
+#: operator needs to know is the same in step 3 and step 6: nothing is stuck, the number on
+#: screen is a sample, and the next one is up to a minute away.
+_LAG_CLOCK: Final = "waiting on the platform's 60-s lag clock"
+
+
 class TrafficHandle:
     """The producer subprocess, owned by ``main`` rather than returned from the walk.
 
@@ -155,6 +183,12 @@ class TrafficHandle:
             stdout=handle,
             stderr=subprocess.STDOUT,
             text=True,
+            # The read-only token, handed over explicitly (ADR 0074). `make traffic` exports it
+            # from make's own variables, which come from `-include .env` — true in a shell and
+            # NOT something this script may assume about the environment it was started in.
+            # `traffic_loop.py` refuses `--until-lag` without it, and the read it would
+            # otherwise be denied is the one that tells the loop when to stop.
+            env={**os.environ, **_smoke_env()},
         )
 
     def stop(self, console: Console) -> None:
@@ -592,14 +626,14 @@ def _wait_for_healthy_baseline(console: Console, step: Step) -> None:
     the system working before it stops working, or the fault has nothing to contrast with.
     """
     deadline = time.monotonic() + _BASELINE_TIMEOUT_SECONDS
-    lag: int | None = None
-    known = False
     while time.monotonic() < deadline:
-        lag, known = _lag_reading()
-        if known and lag is not None and lag <= _BASELINE_MAX_LAG:
-            console.note(step, f"baseline healthy: worker-dispatcher lag {lag}, lag_known true")
+        reading = _lag_reading()
+        if reading.known and reading.lag is not None and reading.lag <= _BASELINE_MAX_LAG:
+            console.note(
+                step, f"baseline healthy: worker-dispatcher {reading.said}, lag_known true"
+            )
             return
-        console.say(f"  waiting for a healthy baseline (lag {lag}, lag_known {known})…")
+        console.say(f"  {_LAG_CLOCK} for a healthy baseline — worker-dispatcher {reading.said}…")
         time.sleep(_BASELINE_POLL_SECONDS)
     raise DemoFailed(
         f"no healthy baseline within {_BASELINE_TIMEOUT_SECONDS}s: worker-dispatcher lag is "
@@ -608,24 +642,63 @@ def _wait_for_healthy_baseline(console: Console, step: Step) -> None:
     )
 
 
-def _lag_reading() -> tuple[int | None, bool]:
-    """``worker-dispatcher``'s backlog and whether the platform could measure it.
+def _smoke_env() -> dict[str, str]:
+    """``PLATFORM_SMOKE_TOKEN`` for a subprocess that reads the world.
+
+    A value, never printed: the caller merges it into the child's environment. Refuses for
+    ``_smoke_client``'s reason, and in the same words.
+    """
+    from evals.runner import _settings_for_mode
+    from incident_commander.config import SmokeTokenNotConfigured
+
+    settings = _settings_for_mode(live=True)
+    try:
+        return {"PLATFORM_SMOKE_TOKEN": settings.require_smoke_token()}
+    except SmokeTokenNotConfigured as err:
+        raise DemoFailed(str(err)) from err
+
+
+def _smoke_client() -> Any:
+    """The ONE client this script reads the world with, under the read-only principal.
+
+    Every read the runner makes goes through here, and it REFUSES when
+    ``PLATFORM_SMOKE_TOKEN`` is unset rather than falling back to the agent's own token
+    (``Settings.require_smoke_token``, ADR 0074). The fallback it replaced is F3 of the
+    2026-09-20 take: the runner's wind-down client and its two waits read lag every three
+    seconds under the AGENT principal, so the platform wrote each of them into the audit log
+    as `agent.tool_invoked` and the demo page could not tell the runner's polling from the
+    four reads the agent actually made. A demo that cannot show what the agent did is the
+    whole thing this script exists for, so an unset token is a failure and not a degradation.
+    """
+    from evals.runner import _settings_for_mode
+    from incident_commander.config import SmokeTokenNotConfigured
+    from incident_commander.tools.mcp_client import make_client
+
+    settings = _settings_for_mode(live=True)
+    try:
+        token = settings.require_smoke_token()
+    except SmokeTokenNotConfigured as err:
+        raise DemoFailed(str(err)) from err
+    # Never `make_client(settings)`: that selects `settings.platform_token`, the agent's own
+    # principal. `tests/unit/test_demo_live.py` pins that no client this module builds does.
+    return make_client(settings, token=token)
+
+
+def _lag_reading() -> LagReading:
+    """``worker-dispatcher``'s backlog, whether the platform measured it, and how old it is.
 
     Under the SMOKE principal: this is an observation about the world, and the read-scoped
     token is the one that cannot accidentally change it. Any failure reads as "not known",
     which keeps the baseline wait a wait rather than a crash.
-    """
-    from evals.runner import _settings_for_mode
-    from evals.world_audit import Probe, read
-    from incident_commander.tools.mcp_client import make_client
 
-    settings = _settings_for_mode(live=True)
-    # The read-scoped token when there is one, exactly as `world_audit` reads the same
-    # value: an observation of the baseline should be made by the principal that cannot
-    # change it. Falling back to the agent's own token rather than refusing, because a
-    # missing smoke token must not stop a demo whose next step is a read anyway.
-    smoke = settings.platform_smoke_token
-    client = make_client(settings, token=smoke.get_secret_value() if smoke is not None else None)
+    The AGE comes back with the number (v0.6.7's ``age_seconds``) because a reader of this
+    script's output needs it: the platform recomputes the lag on a 60-second interval, so
+    "lag 10" can mean "10 a minute ago" — which is what made step 3 of the third take look
+    stuck for 106 seconds behind a bare spinner (F7).
+    """
+    from evals.world_audit import Probe, read
+
+    client = _smoke_client()
     try:
         reading = read(
             client,
@@ -641,7 +714,14 @@ def _lag_reading() -> tuple[int | None, bool]:
     # is exactly "the lag is not known" and keeps the baseline wait a wait.
     payload = reading.payload or {}
     lag = payload.get("lag")
-    return (lag if isinstance(lag, int) else None), bool(payload.get("lag_known"))
+    age = payload.get("age_seconds")
+    return LagReading(
+        lag=lag if isinstance(lag, int) else None,
+        known=bool(payload.get("lag_known")),
+        age_seconds=(
+            float(age) if isinstance(age, (int, float)) and not isinstance(age, bool) else None
+        ),
+    )
 
 
 def _dlq_total() -> tuple[int | None, bool]:
@@ -650,13 +730,9 @@ def _dlq_total() -> tuple[int | None, bool]:
     Under the SMOKE principal, like ``_lag_reading``: an observation of the world is made
     by the token that cannot change it.
     """
-    from evals.runner import _settings_for_mode
     from evals.world_audit import Probe, read
-    from incident_commander.tools.mcp_client import make_client
 
-    settings = _settings_for_mode(live=True)
-    smoke = settings.platform_smoke_token
-    client = make_client(settings, token=smoke.get_secret_value() if smoke is not None else None)
+    client = _smoke_client()
     try:
         reading = read(
             client,
@@ -686,10 +762,13 @@ def _fault_is_visible(mode: str) -> tuple[bool, str]:
 
     signal = str(MODES[mode]["fault"])
     if signal == "consumer_lag":
-        lag, known = _lag_reading()
-        if not known or lag is None:
-            return False, f"worker-dispatcher lag not known yet (lag {lag}, lag_known {known})"
-        return lag >= _FAULT_MIN_LAG, f"worker-dispatcher lag {lag} (want >= {_FAULT_MIN_LAG})"
+        reading = _lag_reading()
+        if not reading.known or reading.lag is None:
+            return False, f"worker-dispatcher {reading.said}"
+        return (
+            reading.lag >= _FAULT_MIN_LAG,
+            f"worker-dispatcher {reading.said} (want lag >= {_FAULT_MIN_LAG})",
+        )
     total, ok = _dlq_total()
     if not ok or total is None:
         return False, f"DLQ total unreadable (total {total})"
@@ -710,7 +789,7 @@ def _wait_until_the_fault_shows(console: Console, step: Step, mode: str) -> bool
         if visible:
             console.note(step, f"the platform's own reading shows the fault: {reading}")
             return True
-        console.say(f"  waiting for the platform's reading to show the fault ({reading})…")
+        console.say(f"  {_LAG_CLOCK} to show the fault — {reading}…")
         time.sleep(_BASELINE_POLL_SECONDS)
     console.say(
         f"  WARNING: the platform's own reading has not shown the fault within "
@@ -800,16 +879,17 @@ def _await_precondition(scenario: str) -> None:
     The scenario's own probes, with the scenario's own attempts and delays — so "the fault
     is visible" means exactly what the grader will later assume it meant.
     """
-    from evals.runner import _assert_preconditions, _settings_for_mode
+    from evals.runner import _assert_preconditions
     from evals.scenarios.loader import load_scenarios
-    from incident_commander.tools.mcp_client import make_client
 
     scenarios = {s.name: s for s in load_scenarios(_REPO_ROOT / "evals" / "scenarios")}
     target = scenarios[scenario]
     if not target.expected_precondition:
         return
-    settings = _settings_for_mode(live=True)
-    client = make_client(settings)
+    # The read-only principal, like every other read this script makes (ADR 0074): the
+    # precondition is the EVALUATOR's check on the world, not a step the agent took, and it
+    # used to be polled under the agent's own token — F3's third source.
+    client = _smoke_client()
     try:
         _assert_preconditions(target, client, None)
     except Exception as err:
@@ -855,11 +935,11 @@ def _wait_for_a_drained_backlog(console: Console) -> None:
     """
     deadline = time.monotonic() + _DRAIN_TIMEOUT_SECONDS
     while time.monotonic() < deadline:
-        lag, known = _lag_reading()
-        if known and lag == 0:
-            console.say("  backlog drained: worker-dispatcher lag reads a fresh 0")
+        reading = _lag_reading()
+        if reading.known and reading.lag == 0:
+            console.say(f"  backlog drained: worker-dispatcher {reading.said} — a fresh 0")
             return
-        console.say(f"  waiting for the backlog to drain (lag {lag}, lag_known {known})…")
+        console.say(f"  {_LAG_CLOCK} for the backlog to drain — worker-dispatcher {reading.said}…")
         time.sleep(_BASELINE_POLL_SECONDS)
     console.say(
         f"  WARNING: worker-dispatcher lag has not read 0 within {_DRAIN_TIMEOUT_SECONDS}s. "

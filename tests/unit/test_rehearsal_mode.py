@@ -341,14 +341,28 @@ class TestTheRowSaysWhatItIs:
     ) -> None:
         """``degraded`` is not a consequence of the canned planner here, it is the mode.
 
-        A scenario with ``use_live_llm: false`` degrades nothing by running canned — that
-        is its intended mode — so the old expression would have left this row reading
-        ``degraded=False`` in a rehearsal archive: the one row a reader could mistake for a
-        measurement.
+        A scenario with ``use_live_llm: false`` degrades nothing by running canned — that is
+        its intended mode — so without ``or rehearsal`` this row reads ``degraded=False`` in a
+        rehearsal archive: the one row a reader could mistake for a measurement.
+
+        The LIVE platform leg is what makes this test bite. Against the placeholder URL the
+        row is degraded anyway (a declared-live MCP leg fell back), so the assertion would
+        pass for a reason that has nothing to do with the mode — which is exactly what the
+        first version of this test did.
         """
         _forbid_live_llm(monkeypatch)
-        outcome = run_scenario(_scenario(use_live_llm=False), _settings(), rehearsal=True).outcome
+        monkeypatch.setattr(
+            runner_module,
+            "make_client",
+            lambda *_a, **_kw: _ClosableCanned(_scenario().canned_tool_responses),
+        )
+        outcome = run_scenario(
+            _scenario(use_live_llm=False),
+            _settings(platform_mcp_url="http://real.host:8001/mcp"),
+            rehearsal=True,
+        ).outcome
 
+        assert outcome.live_mcp is True, "the premise: nothing else here is degraded"
         assert outcome.degraded is True
 
     def test_the_mode_is_rehearsal_even_when_the_platform_leg_is_really_live(

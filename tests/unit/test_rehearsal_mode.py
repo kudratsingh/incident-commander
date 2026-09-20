@@ -20,6 +20,7 @@ Everything here is hermetic and free: no platform is reached, no hook fires, no 
 
 from __future__ import annotations
 
+import json
 import os
 import stat
 import sys
@@ -405,6 +406,42 @@ class TestTheRowSaysWhatItIs:
         assert result.outcome.provenance is not None
         assert result.outcome.provenance.execution_mode is ExecutionMode.REHEARSAL
         assert result.outcome.provenance.rehearsal is True
+
+
+class TestTheTraceSaysWhichModeProducedIt:
+    """The training export reads the TRACE, not the report (WO-R3-287, merged as #316).
+
+    Its `scenario_start` record landed on main as `"recorded" if recorded else "canned"`,
+    which called a live run canned — and would have called a rehearsal canned, the one label
+    that makes a scripted planner's decisions look like a model's in a training set.
+    """
+
+    def test_the_four_modes_come_from_one_ordering(self) -> None:
+        answer = runner_module._execution_mode
+        assert answer(recorded=True, rehearsal=False, live=True) is ExecutionMode.RECORDED
+        # The ordering that matters: a rehearsal's platform leg IS live.
+        assert answer(recorded=False, rehearsal=True, live=True) is ExecutionMode.REHEARSAL
+        assert answer(recorded=False, rehearsal=False, live=True) is ExecutionMode.LIVE
+        assert answer(recorded=False, rehearsal=False, live=False) is ExecutionMode.CANNED
+
+    def test_a_rehearsals_trace_names_the_mode_and_its_row_agrees(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        _forbid_live_llm(monkeypatch)
+        monkeypatch.setenv("EVAL_TRACE_DIR", str(tmp_path))
+        outcome = run_scenario(
+            _scenario(), _settings(), invocation_id="rehearsal0001", rehearsal=True
+        ).outcome
+
+        lines = [
+            json.loads(line)
+            for line in (tmp_path / "rehearsal_probe.jsonl").read_text().splitlines()
+        ]
+        start = next(entry for entry in lines if entry["kind"] == "scenario_start")
+        assert start["execution_mode"] == ExecutionMode.REHEARSAL.value
+        assert outcome.provenance is not None
+        # The row and the trajectory under it cannot name different modes.
+        assert start["execution_mode"] == outcome.provenance.execution_mode.value
 
 
 class TestTheReportCannotCloseAnything:

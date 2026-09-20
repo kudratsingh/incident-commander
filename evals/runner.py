@@ -311,6 +311,23 @@ def search_mode_refusal(settings: Settings, *, recorded: bool) -> str | None:
     return SEARCH_IS_RECORDED_MODE_ONLY
 
 
+def _execution_mode(*, recorded: bool, rehearsal: bool, live: bool) -> ExecutionMode:
+    """Which mode produced a run, from what its legs DID — the one place that decides.
+
+    Read by the row, by the crash row and by the trace's ``scenario_start`` record, because
+    two copies of this ordering is two chances for a report and the trajectory under it to
+    name different modes. The ORDER is the content: ``recorded`` is the narrowest true
+    statement whatever the model leg did, ``rehearsal`` comes next and ahead of ``live``
+    whose test it would otherwise satisfy (its platform leg IS live — that is the mode), and
+    ``canned`` is what is left when no leg was real.
+    """
+    if recorded:
+        return ExecutionMode.RECORDED
+    if rehearsal:
+        return ExecutionMode.REHEARSAL
+    return ExecutionMode.LIVE if live else ExecutionMode.CANNED
+
+
 def build_provenance(
     scenario_name: str,
     settings: Settings,
@@ -1538,7 +1555,17 @@ def run_scenario(
                 "model": settings.agent_model,
                 "model_role": model_role.value,
                 "judge_model": settings.judge_model,
-                "execution_mode": "recorded" if recorded else "canned",
+                # The same four-way answer the ROW carries (see the outcome below), from the
+                # same three facts, so a trajectory in the training export and the graded row
+                # about it cannot disagree about what produced them. As landed on main
+                # (WO-R3-287) this read `"recorded" if recorded else "canned"`, which called
+                # a LIVE run canned and would have called a REHEARSAL canned too — the one
+                # label that makes a scripted planner's decisions look like a model's.
+                "execution_mode": _execution_mode(
+                    recorded=recorded,
+                    rehearsal=rehearsal,
+                    live=live_mcp_available or live_llm_available,
+                ).value,
                 "recorded_world_id": _repo_relative(recorded_world) if recorded_world else None,
             }
         )
@@ -2027,22 +2054,11 @@ def run_scenario(
             model_role=model_role,
             invocation_id=invocation_id,
             # From what the legs ACTUALLY did, never from the --live flag, which says
-            # what was asked for. ``recorded`` is first because it is the narrowest true
-            # statement, whatever the model leg did; ``rehearsal`` comes next for the same
-            # reason and ahead of ``LIVE``, whose test it would otherwise satisfy — its
-            # platform leg IS available, and that is exactly the confusion to prevent.
-            execution_mode=(
-                ExecutionMode.RECORDED
-                if recorded
-                else (
-                    ExecutionMode.REHEARSAL
-                    if rehearsal
-                    else (
-                        ExecutionMode.LIVE
-                        if (live_mcp_available or live_llm_available)
-                        else ExecutionMode.CANNED
-                    )
-                )
+            # what was asked for. One function, shared with the trace record above.
+            execution_mode=_execution_mode(
+                recorded=recorded,
+                rehearsal=rehearsal,
+                live=live_mcp_available or live_llm_available,
             ),
             # The final ledger: seeded maxima, all four meters, and (WO-R3-260) the
             # briefing writer's post-terminal call, which is the agent's cost. It
@@ -2257,18 +2273,10 @@ def _crashed_result(
                 # choice. Except ``recorded`` and ``rehearsal``, which are the caller's
                 # instruction — the platform leg WAS a replay, and the model leg WAS the
                 # scripted one, however early the crash came.
-                execution_mode=(
-                    ExecutionMode.RECORDED
-                    if recorded
-                    else (
-                        ExecutionMode.REHEARSAL
-                        if rehearsal
-                        else (
-                            ExecutionMode.LIVE
-                            if (scenario.use_live_mcp or scenario.use_live_llm)
-                            else ExecutionMode.CANNED
-                        )
-                    )
+                execution_mode=_execution_mode(
+                    recorded=recorded,
+                    rehearsal=rehearsal,
+                    live=scenario.use_live_mcp or scenario.use_live_llm,
                 ),
                 # The partial ledger when the crash carried one (what the
                 # run had actually spent), else the ledger it would have

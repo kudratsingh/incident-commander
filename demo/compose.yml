@@ -1,6 +1,6 @@
 # Live demo: full platform footprint sufficient for remediation eval.
 #
-# Pinned to the incident-platform v0.6.17 release by digest so the agent's
+# Pinned to the incident-platform v0.6.18 release by digest so the agent's
 # contract expectations don't shift under us. Every platform-code service
 # below uses the SAME pinned digest. Bump the digest whenever the platform
 # ships a new release and rerun `make eval-live` to catch drift.
@@ -137,7 +137,7 @@ services:
     # One-shot schema migration, mirroring the dev compose's migrate
     # service: with two app-code services (mcp + api) neither should
     # race `alembic upgrade head` at boot.
-    image: ghcr.io/kudratsingh/incident-platform:v0.6.17@sha256:08e50f81f86fe0b936a26bbe7e63bd17ed2eb3e22835450504efd2c0f8ee285c
+    image: ghcr.io/kudratsingh/incident-platform:v0.6.18@sha256:51635017ea4a495ed31c1b3245bcc62b2c758fad8044927696be5111e964460e
     platform: linux/amd64
     environment:
       DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/incident_platform
@@ -149,7 +149,7 @@ services:
     restart: "no"
 
   platform:
-    # incident-platform v0.6.17 (INDEX digest published by the platform
+    # incident-platform v0.6.18 (INDEX digest published by the platform
     # release, confirmed with `docker buildx imagetools inspect` — the
     # top-level `Digest:`, not a per-platform child manifest).
     #
@@ -395,11 +395,48 @@ services:
     #     history survives, so the demo chart opens on a full window instead
     #     of two points. `lag_samples_cleared` stays in the reset JSON as a
     #     permanent 0.
+    #
+    # What v0.6.18 changed (plat #233 console + plat #234 backend, platform
+    # ADR 0039, owner decisions O-35/O-36; WO-R3-336/338/339): the platform
+    # PAGES ITSELF, and its lag clock is a setting. This one DOES move
+    # `tools/list` — one entry, no tool added or removed, no scope moved:
+    #   * `get_consumer_lag`'s description said `every ~60s`, `90s TTL` and
+    #     `up to a minute stale`. The interval is a setting now, so all three
+    #     were about to be false on this stack. The description says the
+    #     interval is deployment-configured, points at `age_seconds` and the
+    #     gaps between `recent_samples`, and states the fifteen-sample cap it
+    #     returns; three `outputSchema` field descriptions (`source`,
+    #     `age_seconds`, `recent_samples`) moved with it. `tools/list` hash
+    #     `31183161…` → `21a1c228…`, 39 other entries byte-identical. That is
+    #     the whole delta — reblessed by WO-R3-339 (`make snapshot`, one
+    #     entry), ledgered in the hub's `docs/wave4-specs/rebless-notes.md`.
+    #   * `METRICS_LOOP_INTERVAL_SECONDS` (below) is the clock. Two numbers
+    #     derive from it rather than sitting as literals: the lag VALUE key's
+    #     TTL is three passes (180 s at the 60 s default, 15 s here), and the
+    #     sample ring is pruned by TIME (`LAG_SAMPLES_WINDOW_SECONDS = 900`,
+    #     so ~180 points here) with `LAG_SAMPLES_MAX_ENTRIES = 240` as an
+    #     absolute guard that binds only below a 3.75 s interval. The
+    #     operator endpoint serves the whole window; `get_consumer_lag`
+    #     returns the newest 15, the count and order it always returned, so
+    #     the agent's context cost does not move with a deployment's tick.
+    #   * Two rules the platform evaluates on its own clock, in the metrics
+    #     pass, `alert_rules_enabled` default ON: `consumer_stalled` (latest
+    #     MEASURED lag sample for a group ≥ 20, `source kafka:consumer_lag`,
+    #     platform tenant) and `dlq_depth_warning` (a tenant's dead-letter
+    #     total ≥ 5 = the seeded baseline of four plus one, `source
+    #     dlq:threshold`). An episode raises ONCE
+    #     (`dedup_key rule:<fingerprint>:<subject>:<ordinal>`) and resolves
+    #     when a reading crosses back — resolved, never deleted. One
+    #     `alert.raised` / `alert.resolved` audit row per transition, withheld
+    #     from NOBODY: an alert is what the agent was paged with, so ADR 0012
+    #     does not hide it. `make eval-reset` closes any open episode and
+    #     counts it as `rule_alerts_resolved`, so the world audit's "active
+    #     alerts: 3" is true after a reset.
     # Do not switch to `:latest` — the whole point of pinning by digest is
     # that a platform-side prompt or schema change can't shift agent
     # behavior without an explicit bump here.
-    image: ghcr.io/kudratsingh/incident-platform:v0.6.17@sha256:08e50f81f86fe0b936a26bbe7e63bd17ed2eb3e22835450504efd2c0f8ee285c
-    # v0.6.17 is an OCI index, but it still lists linux/amd64 ONLY (plus an
+    image: ghcr.io/kudratsingh/incident-platform:v0.6.18@sha256:51635017ea4a495ed31c1b3245bcc62b2c758fad8044927696be5111e964460e
+    # v0.6.18 is an OCI index, but it still lists linux/amd64 ONLY (plus an
     # attestation manifest) — being an index is not the same as being
     # multi-arch, and this one is not. On Apple Silicon this runs under
     # Rosetta (slower cold start, correct output) — REQUIRED there; without
@@ -447,6 +484,25 @@ services:
       # that need a real broken state to fix. Triple-gated on the
       # platform side — refuses to enable in prod. See docs/runbook.md.
       CHAOS_ENABLED: "true"
+      # v0.6.18 (platform ADR 0039, owner decision O-35): how often the
+      # platform measures consumer lag, in seconds. The default is 60, and
+      # nobody watching a demo waits a minute for a number to move — so this
+      # stack measures every 5 seconds. It is set on THIS service and on
+      # `api` and the two must stay in step (the same rule the SLO note below
+      # states): `api` runs the metrics loop that writes the sample, and this
+      # service reads the value and reports `pause_control_loop`'s "resumes in
+      # N ticks" off the same clamped setting — a service reading a different
+      # interval would report a wait it is not taking.
+      #
+      # Two things follow from 5 rather than 60, both derived by the platform
+      # and neither pinned here: the lag VALUE key's TTL is three passes, so
+      # 15 s (a reading older than that is absent, not stale, and
+      # `check_backpressure` opens the gate on absent — that is the intended
+      # asymmetry), and the 15-minute sample ring holds ~180 points instead of
+      # 15, so the console's chart steps by the real clock. The eval stack is
+      # this stack, so every live scenario shares the faster clock (O-35);
+      # ADR 0050 forgives the history-path drift that causes on recordings.
+      METRICS_LOOP_INTERVAL_SECONDS: "5"
       # NO SLO_EVALUATION_INTERVAL_SECONDS here, deliberately: the
       # evaluator runs at its default interval. It used to be pinned to "0"
       # (PR #180) because it read the seeded fixtures as real traffic — 4 of
@@ -503,7 +559,7 @@ services:
     # Env copied deliberately from the dev compose's `app` service
     # (drift between services is platform bug #69's class); minio/jaeger
     # endpoints omitted with the services (see header note).
-    image: ghcr.io/kudratsingh/incident-platform:v0.6.17@sha256:08e50f81f86fe0b936a26bbe7e63bd17ed2eb3e22835450504efd2c0f8ee285c
+    image: ghcr.io/kudratsingh/incident-platform:v0.6.18@sha256:51635017ea4a495ed31c1b3245bcc62b2c758fad8044927696be5111e964460e
     platform: linux/amd64
     ports:
       - "${DEMO_API_HOST_PORT:-8000}:8000"
@@ -527,6 +583,16 @@ services:
       # startup; the kill flag is honored by the consumers in THIS
       # process).
       CHAOS_ENABLED: "true"
+      # The WRITER's half of the 5-second lag clock (platform ADR 0039, O-35).
+      # The metrics loop runs in THIS process, so this is the setting that
+      # decides how often a sample is taken, how long the value key lives
+      # (three passes = 15 s) and how dense the 15-minute ring is (~180
+      # points). It is also the tick the two alert rules are evaluated on, so
+      # `consumer_stalled` can page within five seconds of the lag crossing 20
+      # instead of within a minute. Must match the `platform` service's copy
+      # above — a leftover mismatch would have one service reporting a clock
+      # the other does not keep.
+      METRICS_LOOP_INTERVAL_SECONDS: "5"
       # See the platform service: the worker loops run in THIS process, so
       # this is where the SLO evaluator actually ran, and this is the
       # service whose "0" was doing the silencing. Both services carried the
@@ -582,7 +648,7 @@ services:
     # No `depends_on: service_healthy` on api, deliberately: nginx resolves
     # the upstream per request, so the console coming up first only means a
     # 502 until the backend is ready, and `make demo` waits on both anyway.
-    image: ghcr.io/kudratsingh/incident-platform-console:v0.6.17@sha256:d265ea4783af7e1db56631720c4f59be4af6a0a3556ae68188bfa551cff99e70
+    image: ghcr.io/kudratsingh/incident-platform-console:v0.6.18@sha256:0c8f73062bd0238c82ebbd0796d25b5bddd577b8da9ab7e3217937b8cc2501bb
     platform: linux/amd64
     environment:
       API_UPSTREAM: http://api:8000

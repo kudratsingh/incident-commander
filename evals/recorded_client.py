@@ -28,14 +28,12 @@ from incident_commander.tools.wire import wire_arguments
 #: client, the runner's report and the tests all compare against it.
 NOT_RECORDED: Final[str] = "not_recorded"
 
-#: Absolute clocks in a recorded result, per tool, as dotted paths with list
-#: markers stripped (``items.created_at``); each is SHIFTED by the replay offset.
-#: Written down, not derived from types: the question is "is this a clock of the
-#: world the agent sees", not "is this a datetime". The shift is rigid — ONE offset
-#: for the whole document, so a recording cannot contradict itself (plan 02 § 187).
+#: Absolute clocks in a recorded result, per tool, as dotted paths with list markers stripped;
+#: each is SHIFTED by the replay offset. Written down rather than derived from types, because
+#: the question is "is this a clock of the world the agent sees". ONE rigid offset for the
+#: whole document, so a recording cannot contradict itself (plan 02 § 187).
 SHIFTED_CLOCK_FIELDS: Final[Mapping[str, frozenset[str]]] = {
-    # v0.6.7 (plat #204): both are clocks of the world — when the metrics loop
-    # took THIS number, and when it took each of the previous few.
+    # v0.6.7 (plat #204): when the metrics loop took THIS number, and the previous few.
     "get_consumer_lag": frozenset({"measured_at", "recent_samples.measured_at"}),
     "get_dag_state": frozenset({"nodes.created_at"}),
     "get_deploy_history": frozenset({"entries.deployed_at"}),
@@ -43,8 +41,8 @@ SHIFTED_CLOCK_FIELDS: Final[Mapping[str, frozenset[str]]] = {
     "get_trace": frozenset({"jobs.created_at", "jobs.updated_at", "audit_events.created_at"}),
     "list_active_alerts": frozenset({"alerts.fired_at"}),
     "list_audit_events": frozenset({"events.created_at"}),
-    # Four clocks on one row, and the distinction matters to the DLQ scenarios:
-    # submission, death, last write, and an operator's fence. All four move.
+    # Four clocks on one row, and the DLQ scenarios care which: submission, death, last
+    # write, an operator's fence. All four move.
     "list_dlq_messages": frozenset(
         {
             "items.created_at",
@@ -54,9 +52,8 @@ SHIFTED_CLOCK_FIELDS: Final[Mapping[str, frozenset[str]]] = {
         }
     ),
     "list_incidents": frozenset({"incidents.fired_at", "incidents.resolved_at"}),
-    # v0.6.9 (plat #211). `relay_last_tick_at` is the worker's clock, the rest the
-    # database server's; same rigid offset anyway, or the relay ticks after the
-    # reading that observed it.
+    # v0.6.9 (plat #211). `relay_last_tick_at` is the worker's clock, the rest the database
+    # server's; same rigid offset anyway, or the relay ticks after the reading of it.
     "get_outbox_status": frozenset(
         {
             "measured_at",
@@ -66,11 +63,9 @@ SHIFTED_CLOCK_FIELDS: Final[Mapping[str, frozenset[str]]] = {
             "relay_last_tick_at",
         }
     ),
-    # v0.6.11 (plat #218). `measured_at` is the answering process's clock; the
-    # three `breakers.*` stamps are the OWNING process's, and that split is the
-    # reason to shift them all by one offset rather than to re-derive them: the
-    # skew between two live processes is part of the world the recording caught,
-    # and a rigid shift keeps it.
+    # v0.6.11 (plat #218). `measured_at` is the answering process's clock, the three
+    # `breakers.*` stamps the OWNING process's — one offset for both, because the skew
+    # between two live processes is part of the world the recording caught.
     "get_circuit_breakers": frozenset(
         {
             "measured_at",
@@ -79,31 +74,25 @@ SHIFTED_CLOCK_FIELDS: Final[Mapping[str, frozenset[str]]] = {
             "breakers.recorded_at",
         }
     ),
-    # v0.6.14 (plat #227). The pool group's only clock, and it is the PUBLISHING
-    # process's, not the answering one's — same split as `breakers.recorded_at`
-    # above and shifted for the same reason: the skew between two processes is
-    # part of the world the recording caught, so one rigid offset keeps it.
+    # v0.6.14 (plat #227). The pool group's only clock, and the PUBLISHING process's —
+    # the same split as `breakers.recorded_at` above, shifted for the same reason.
     "get_postgres_health": frozenset({"pools.written_at"}),
-    # One clock only: an objective's window is `window_hours` back from the
-    # reading, so moving the reading moves the window with it.
+    # One clock only: an objective's window is `window_hours` back from the reading.
     "get_slo_status": frozenset({"measured_at"}),
     "search_traces": frozenset({"matches.created_at"}),
 }
 
-#: Durations already expressed relative to the moment of the reading, per tool.
-#: HELD, not shifted or decremented: the replay clock IS that moment, so a
-#: 12-second-old reading is still 12 seconds old. Decrementing would hand a
-#: day-later replay an expired pause and a negative age. Known residual: a
-#: recording read over a window can leave a held duration out by up to the
-#: session's own length, because a replay flattens an interval to an instant.
+#: Durations already expressed relative to the moment of the reading, per tool. HELD, never
+#: shifted or decremented: the replay clock IS that moment, and decrementing would hand a
+#: day-later replay an expired pause and a negative age. Known residual: a replay flattens the
+#: recording session to an instant, so a held duration can be out by the session's length.
 HELD_DURATION_FIELDS: Final[Mapping[str, frozenset[str]]] = {
     "get_cache_key_info": frozenset({"ttl_seconds"}),
     "get_consumer_lag": frozenset({"age_seconds"}),
     "get_dag_state": frozenset({"paused_expires_in_seconds"}),
-    # v0.6.9 spells durations `_age_s`, `_s` and `seconds_since_…`, so the coverage
-    # test's walk recognises all three — five were invisible on `_seconds` alone.
-    # `relay_tick_interval_s` is configuration, not a countdown; listed because
-    # held is still right for it, and omitting it would read as an oversight.
+    # v0.6.9 spells durations `_age_s`, `_s` and `seconds_since_…`; five were invisible to the
+    # coverage walk on `_seconds` alone. `relay_tick_interval_s` is configuration, listed
+    # because held is still right for it.
     "get_outbox_status": frozenset(
         {
             "oldest_unpublished_age_s",
@@ -113,12 +102,9 @@ HELD_DURATION_FIELDS: Final[Mapping[str, frozenset[str]]] = {
             "relay_tick_interval_s",
         }
     ),
-    # v0.6.11 (plat #218). `recovery_timeout_s` is configuration, like the outbox
-    # tick interval above; the two ages are relative to the reading and so are
-    # right unchanged. Held, not shifted — but the clocks they were computed from
-    # ARE shifted, so a replay's ages and its timestamps only agree to the
-    # whole-second rounding `replay_offset` applies (the known residual the
-    # comment above this table describes).
+    # v0.6.11 (plat #218). `recovery_timeout_s` is configuration; the two ages are relative to
+    # the reading. The clocks they were computed from ARE shifted, so ages and timestamps agree
+    # only to the whole-second rounding `replay_offset` applies.
     "get_circuit_breakers": frozenset(
         {
             "breakers.recovery_timeout_s",
@@ -126,12 +112,9 @@ HELD_DURATION_FIELDS: Final[Mapping[str, frozenset[str]]] = {
             "breakers.reported_age_s",
         }
     ),
-    # v0.6.14 (plat #227): the pool group's age, relative to the reading and so
-    # right unchanged. Its v0.6.11 durations stay unlisted and deliberately so —
-    # they are spelled `_ms` (`longest_active_query_ms`, `slow_query_threshold_ms`,
-    # `p95_query_ms_1m`), which the coverage walk does not read as durations and
-    # this table does not have to name; everything not in SHIFTED_CLOCK_FIELDS is
-    # already held byte-identical, which is what those readings want.
+    # v0.6.14 (plat #227): the pool group's age, relative to the reading. Its `_ms` durations
+    # stay unlisted on purpose — the coverage walk does not read them as durations, and
+    # anything outside SHIFTED_CLOCK_FIELDS is already held byte-identical.
     "get_postgres_health": frozenset({"pools.reported_age_s"}),
 }
 
@@ -139,10 +122,9 @@ HELD_DURATION_FIELDS: Final[Mapping[str, frozenset[str]]] = {
 class ReplayRefused(RuntimeError):
     """A call the replay client will not answer at all, as opposed to cannot.
 
-    Raised for a tool above read (no state, no audit log to grade from —
-    invariant 6) or one not in ``TOOL_REGISTRY``, so unclassifiable. Never an
-    ``MCPError``: transitions escalate on those, which would file a harness
-    refusal as an incident the agent handled.
+    Raised for a tool above read (no state, no audit log to grade from — invariant 6) or one
+    not in ``TOOL_REGISTRY``. Never an ``MCPError``: transitions escalate on those, filing a
+    harness refusal as an incident the agent handled.
     """
 
 

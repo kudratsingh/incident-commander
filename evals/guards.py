@@ -1,19 +1,10 @@
 """Point-of-use assertions for the eval runner's effective principal.
 
-Run 001 stage 1 ran with full write scope while every label said "read-scoped
-smoke" (F-001), so: **a control is asserted where it is used, not assumed from
-where it was configured.** Each stage probes the one scope it needs —
-``assert_read_only_principal`` (no ``actions:execute``),
-``assert_write_capable_principal`` (carries it, and NOT ``chaos:invoke``),
-``assert_chaos_capable_principal`` (the evaluator's client carries ``chaos:invoke``).
-The agent's chaos-blindness is load-bearing: the platform hides the ``chaos.%``
-audit rows only from principals that genuinely lack the scope, so a token holding
-it reads the answer key out of ``list_audit_events`` (owner decision O-4).
-
-Three of the four probes must wear the AGENT's token — that is what they prove — so
-since platform v0.6.17 each one also SAYS it is the lab's (``lab_principal_token``,
-platform ADR 0038). Without the label the platform writes ``agent.tool_invoked`` and
-the demo page reads a run nobody made (finding F4, WO-R3-335).
+Run 001 stage 1 ran with full write scope while every label said "read-scoped smoke" (F-001),
+so **a control is asserted where it is used**, and each stage probes the one scope it needs.
+Chaos-blindness is load-bearing: the platform hides the ``chaos.%`` rows — the answer key —
+only from principals that genuinely lack the scope (O-4). Each probe also SAYS it is the
+lab's (``lab_principal_token``, platform ADR 0038), or its row reads as the agent's (F4).
 """
 
 from __future__ import annotations
@@ -35,9 +26,8 @@ from incident_commander.tools.registry import TOOL_REGISTRY, AuditEventEntry
 # Any Tier-1 tool works as the probe; mark_dlq_permanent is the cheapest.
 _PROBE_TOOL: Final[str] = "mark_dlq_permanent"
 
-# Deliberately invalid arguments. The handler checks scope BEFORE parsing them, so
-# a token without actions:execute is refused on scope and one with it fails argument
-# validation — two distinguishable outcomes, neither of which can execute.
+# Deliberately invalid arguments. The handler checks scope BEFORE parsing them, so the two
+# outcomes are distinguishable and neither can execute.
 _PROBE_ARGS: Final[dict[str, Any]] = {
     "job_id": "00000000-0000-0000-0000-000000000000-INVALID",
     "reason": "",
@@ -46,51 +36,42 @@ _PROBE_ARGS: Final[dict[str, Any]] = {
 
 _SCOPE_REFUSAL_CODE: Final[int] = -32002
 
-# The ONLY codes meaning "scope check passed, arguments rejected". Anything else —
-# a vanished tool (-32601), an internal error, a transport code — never reached
-# argument validation and proves nothing. The positive guards used to pass on any
-# non-scope MCPError, so they went vacuously green when the probe tool vanished.
+# The ONLY codes meaning "scope check passed, arguments rejected". Anything else never
+# reached argument validation: the positive guards used to pass on any non-scope MCPError,
+# so they went vacuously green when the probe tool vanished.
 _ARGUMENT_REFUSAL_CODES: Final[frozenset[int]] = frozenset({-32602})
 
 # The chaos half: a ``chaos_setup``-only scenario executes no Tier-1 action, so
-# ``actions:execute`` is the wrong question about it. ``inject_latency`` is the
-# smallest blast radius on offer — one named group, self-cleaning on a TTL.
+# ``actions:execute`` is the wrong question. ``inject_latency`` has the smallest blast
+# radius — one named group, self-cleaning on a TTL.
 _CHAOS_PROBE_TOOL: Final[str] = "inject_latency"
 
-# Invalid twice over against the hook's committed inputSchema: ``consumer_group``
-# violates minLength 1 and ``latency_ms`` is not an integer at all. The type error is
-# load-bearing — it cannot be coerced into a value that seeds anything.
-# ``tests/unit/test_guards.py`` pins both against the snapshot.
+# Invalid twice over against the hook's committed inputSchema (minLength 1, and a type error
+# that cannot be coerced into anything that seeds). ``test_guards.py`` pins both.
 _CHAOS_PROBE_ARGS: Final[dict[str, Any]] = {
     "consumer_group": "",
     "latency_ms": "not-a-latency",
 }
 
-# The scope the AGENT principal must never carry (owner decision O-4). Named once,
-# because the negative probe and the platform's own ``hidden_audit_action_prefixes``
-# predicate must key on the same string.
+# The scope the AGENT principal must never carry (O-4). Named once, because this probe and
+# the platform's ``hidden_audit_action_prefixes`` predicate must key on the same string.
 _AGENT_FORBIDDEN_SCOPE: Final[str] = "chaos:invoke"
-# Derived from the tier map, never hand-copied: a second list of Tier-1 names is one
-# more mirror to drift (the F-004 class — a fact restated instead of referenced).
+# Derived from the tier map, never hand-copied: a second list of Tier-1 names is one more
+# mirror to drift (the F-004 class).
 _TIER_1_TOOLS: Final[frozenset[str]] = tools_at_or_below(Tier.TIER_1) - tools_at_or_below(Tier.READ)
 
-# One constant for both the page request and the saturation check below. 200 is the
-# platform's ceiling (ListAuditEventsInput.limit is le=200), not a tuning choice.
+# The platform's own ceiling (ListAuditEventsInput.limit is le=200), not a tuning choice,
+# for both the page request and the saturation check below.
 _AUDIT_PAGE_LIMIT: Final[int] = 200
 
-# Memory ceiling on one stage's in-window rows. Not a knob: 2000 audit rows from a
-# read-only stage is anomalous, so hitting this reports inconclusive rather than
-# grading a partial merge clean.
+# Memory ceiling on one stage's in-window rows. Not a knob: 2000 audit rows from a read-only
+# stage is anomalous, so hitting this reports inconclusive rather than clean.
 _AUDIT_SCAN_ROW_CAP: Final[int] = 2000
 
 
-# Every probe below is a call the LAB makes on a service account's token — three of
-# them on the AGENT's, on purpose, because what they prove is what that token can and
-# cannot do. Since platform v0.6.17 the lab says so on the call itself (``_lab_probe``
-# + ``X-Lab-Principal``, platform ADR 0038) and the platform writes ``lab.probe``
-# instead of ``agent.tool_invoked``; without it these rows read as a run nobody made
-# (demo finding F4). The reason is one short sentence naming what the probe proves,
-# because it is what an operator reads in the audit stream months later.
+# The reason each probe sends with ``_lab_probe`` + ``X-Lab-Principal`` (platform ADR 0038),
+# so the platform writes ``lab.probe`` rather than ``agent.tool_invoked`` (F4). One short
+# sentence naming what the probe proves — it is what an operator reads months later.
 _READ_ONLY_PROBE_REASON: Final[str] = (
     "principal guard: proves this token cannot execute a Tier-1 action"
 )
@@ -111,9 +92,8 @@ class PrincipalGuardError(RuntimeError):
 def _label(reason: str, lab_principal_token: str | None) -> tuple[str | None, str | None]:
     """The label pair to send: the reason rides with the lab's credential or not at all.
 
-    No credential means no label — an unlabelled probe on a platform that would have
-    refused a credential-less one, not a call sent twice. Callers with a token pass it;
-    the offline fakes and the pre-v0.6.17 path pass None.
+    No credential means no label rather than a refused call. The offline fakes and the
+    pre-v0.6.17 path pass ``None``.
     """
     return (reason, lab_principal_token) if lab_principal_token else (None, None)
 
@@ -123,9 +103,8 @@ def assert_read_only_principal(
 ) -> None:
     """Hard-fail unless the client's token genuinely lacks write scope.
 
-    Negative probe on a Tier-1 tool with invalid arguments: a ``-32002`` scope
-    refusal passes, anything else fails before a scenario runs. Safe by
-    construction — the scope check precedes argument parsing.
+    Negative probe on a Tier-1 tool with invalid arguments: only a ``-32002`` scope refusal
+    passes. Safe by construction, because the scope check precedes argument parsing.
     """
     _assert_scope_absent(
         client,
@@ -148,12 +127,9 @@ def assert_write_capable_principal(
 ) -> None:
     """Hard-fail unless the client's token genuinely CARRIES write scope.
 
-    The mirror of ``assert_read_only_principal``: only an argument refusal
-    (``-32602``) passes, a scope refusal fails, and anything else fails closed.
-    Without it a read-scoped remediation stage grades every scenario red on ACTION
-    after a full investigation — environment failures dressed as agent failures,
-    after the spend. Then ``assert_chaos_blind_principal``, because the right
-    principal here is two claims (owner decision O-4).
+    The mirror of ``assert_read_only_principal``: only an argument refusal (``-32602``)
+    passes. Without it a read-scoped remediation stage grades every scenario red on ACTION
+    after full spend. Also asserts chaos-blindness: the right principal is two claims (O-4).
     """
     _assert_scope_carried(
         client,
@@ -182,11 +158,8 @@ def assert_chaos_blind_principal(
 ) -> None:
     """Hard-fail unless the AGENT's token genuinely lacks ``chaos:invoke``.
 
-    Carrying it is a read of the answer key, not merely a wider grant:
-    ``list_audit_events`` would return the hook and its arguments, stamped seconds
-    before the alert (divergence G3, platform ADR 0012's 2026-09-15 amendment, O-4).
-    Called by ``assert_write_capable_principal``, and by the runner for a live
-    selection that seeds chaos without declaring a Tier-1 action.
+    Carrying it reads the answer key: ``list_audit_events`` would return the hook and its
+    arguments, stamped seconds before the alert (G3, platform ADR 0012 amended, O-4).
     """
     _assert_scope_absent(
         client,
@@ -213,10 +186,8 @@ def assert_chaos_capable_principal(
 ) -> None:
     """Hard-fail unless the client's token genuinely carries ``chaos:invoke``.
 
-    A ``chaos_setup``-only scenario declares no ``expected_action_tools``, so the
-    write guard never fired for it and the wrongness surfaced inside
-    ``run_scenario``, with the archive open. Probing ``actions:execute`` here would
-    be wrong both ways. Runs on the EVALUATOR's client (``PLATFORM_CHAOS_TOKEN``):
+    For a ``chaos_setup``-only scenario, which declares no ``expected_action_tools`` and so
+    never reached the write guard. Runs on the EVALUATOR's client (``PLATFORM_CHAOS_TOKEN``):
     the agent's token must FAIL this probe, the runner's must pass it.
     """
     _assert_scope_carried(
@@ -254,10 +225,9 @@ def _assert_scope_absent(
 ) -> None:
     """Shared body of the two negative guards: prove one scope is NOT carried.
 
-    Only a ``-32002`` scope refusal passes. The other outcomes fail for different
-    REASONS and each says so, because "the token carries chaos:invoke" and "chaos is
-    switched off" send an operator to different files. Shared, not copied: the
-    fail-open bug that made the write guard vacuous is what a second copy reintroduces.
+    Only a ``-32002`` scope refusal passes, and each other outcome says why it failed:
+    "the token carries chaos:invoke" and "chaos is switched off" send an operator to
+    different files. Shared, not copied — a second copy reintroduces the fail-open bug.
     """
     reason, token = _label(lab_probe_reason, lab_principal_token)
     try:
@@ -265,10 +235,9 @@ def _assert_scope_absent(
             probe_tool, probe_args, lab_probe=reason, lab_principal_token=token
         )
     except LabProbeRefused:
-        # A refused LABEL is a request bug, not a verdict about the scope: the call
-        # never ran, and its -32602 is the code the clause below reads as "the scope
-        # check passed". Loud, unretried, and never re-sent unlabelled — a silent
-        # unlabelled retry is exactly how F4's rows became the agent's.
+        # A refused LABEL is a request bug, not a verdict about the scope, and its -32602
+        # is the code the clause below reads as "the scope check passed". Never re-sent
+        # unlabelled: a silent retry is how F4's rows became the agent's.
         raise
     except MCPError as err:
         if err.code == _SCOPE_REFUSAL_CODE and "scope" in str(err).lower():
@@ -290,8 +259,8 @@ def _assert_scope_absent(
             "the run does not proceed on an unverified control."
         ) from err
     except Exception as err:  # noqa: BLE001 — fail closed, deliberately
-        # Anything at all: an unverified guard is an unmet precondition, not a
-        # warning. A safety check that shrugs is the bypass F-001 is about.
+        # An unverified guard is an unmet precondition, not a warning: a safety check
+        # that shrugs is the bypass F-001 is about.
         raise PrincipalGuardError(
             f"{label}: could not verify the principal "
             f"({type(err).__name__}: {err}). Failing closed — the run does "
@@ -328,9 +297,8 @@ def _assert_scope_carried(
             probe_tool, probe_args, lab_probe=reason, lab_principal_token=token
         )
     except LabProbeRefused:
-        # Same reason as the negative guard: here a -32602 is the PASS condition, so a
-        # refused label would read as "the principal can act" — the most misleading
-        # outcome of the four. Raised as itself.
+        # Worse here than in the negative guard: a -32602 is the PASS condition, so a
+        # refused label would read as "the principal can act".
         raise
     except MCPError as err:
         if err.code == _SCOPE_REFUSAL_CODE and "scope" in str(err).lower():
@@ -369,24 +337,20 @@ def _assert_scope_carried(
 class AuditWindowScan:
     """The union of every audit page read across one stage.
 
-    ``list_audit_events`` has no ``offset`` and no ``created_after`` (verified:
-    sending one is refused ``-32602 extra_forbidden``), so rows older than the newest
-    200 are unreachable after the fact. Repeated reads DURING the stage compose:
-    coverage is the interval ``[_covered_from, _covered_upto]``, extended when a
-    truncated page reaches back to it, restarted at that page's oldest row when it
-    does not, latched ``_complete`` by an untruncated page. Both bounds come off the
-    ROWS, never off a clock, so the guard needs no agreement about the time.
+    ``list_audit_events`` has no ``offset`` and no ``created_after``, so rows older than the
+    newest 200 are unreachable after the fact and reads DURING the stage have to compose.
+    Coverage is ``[_covered_from, _covered_upto]``, restarted when a truncated page does not
+    reach back to it. Both bounds come off the ROWS, so the guard needs no clock.
     """
 
     def __init__(self, since: datetime, *, lab_principal_token: str | None = None) -> None:
         self.since = since
-        # The scan's own reads are the lab's too, on the same token as the stage, so
-        # they carry the same label: rows this guard writes while reading must not
-        # show up as the agent's work on the demo page.
+        # The scan's own reads are the lab's too, so they carry the same label: rows this
+        # guard writes while reading must not show up as the agent's work.
         self._lab_principal_token = lab_principal_token
         self.checkpoints = 0
-        # Only in-window rows are retained: an older row can never be a violation,
-        # and its timestamp has already extended coverage by the time it is dropped.
+        # Only in-window rows are retained: an older row can never be a violation, and its
+        # timestamp has already extended coverage by the time it is dropped.
         self._rows: dict[str, AuditEventEntry] = {}
         self._covered_from: datetime | None = None
         self._covered_upto: datetime | None = None
@@ -411,9 +375,8 @@ class AuditWindowScan:
         self.checkpoints += 1
         self._last_page = (len(events), total)
         self._merge(events)
-        # ``total`` is an unlimited COUNT over the same filter (platform
-        # ``repositories/audit.py:86``), so ``total > len(events)`` is the server
-        # saying it withheld rows — honest even if the cap moves off 200.
+        # ``total`` is an unlimited COUNT over the same filter, so ``total > len(events)`` is
+        # the server saying it withheld rows — still true if the cap moves off 200.
         if not (total > len(events) or len(events) >= _AUDIT_PAGE_LIMIT):
             self._complete = True
             return
@@ -503,11 +466,9 @@ def assert_no_tier1_successes(
     """Fail if the platform audit records any successful Tier-1 call since ``since``.
 
     Graded from the platform's audit log, not the agent's trajectory (invariant 6).
-    ``principal_ids`` are the principals THIS stage owns — BOTH the agent and smoke
-    SAs, since the F-001 rows carry the AGENT principal — and omitting them leaves
-    the guard deliberately over-broad. ``scan`` is the caller's in-stage
-    ``AuditWindowScan``; without one a single post-stage page is inconclusive above
-    200 rows. Returns the offending rows, or raises ``PrincipalGuardError``.
+    ``principal_ids`` are the principals THIS stage owns, BOTH of them, and omitting them
+    leaves the guard deliberately over-broad. Without ``scan``, a single post-stage page is
+    inconclusive above 200 rows.
     """
     if scan is None:
         scan = AuditWindowScan(since, lab_principal_token=lab_principal_token)
@@ -530,9 +491,8 @@ def assert_no_tier1_successes(
         ) from err
     violations = scan.violations(principal_ids)
     if not scan.fully_scanned:
-        # A-13: the rows we could not fetch may hold the successes this exists to
-        # catch, so inconclusive is a failure — and anything already visible is
-        # named rather than swallowed.
+        # A-13: the rows we could not fetch may hold the successes this exists to catch, so
+        # inconclusive is a failure — and what is already visible is named, not swallowed.
         raise PrincipalGuardError(scan.inconclusive_reason() + _visible_suffix(violations))
     if violations:
         raise PrincipalGuardError(
@@ -561,12 +521,10 @@ def _visible_suffix(violations: list[AuditEventEntry]) -> str:
 def _parse_events(result: Any) -> tuple[int, list[AuditEventEntry]]:
     """Parse the tool result through the REGISTRY'S typed output model.
 
-    Not a hand-rolled dict walk: the first version read ``payload["items"]`` against
-    a ``{"total", "events"}`` payload, so it returned zero events on every real call
-    and the assertion passed unconditionally (F-004). Through the registry model the
-    contract test protects this guard too, and an unrecognized payload raises rather
-    than yielding nothing. Returns ``(total, events)``; ``total`` is the unlimited
-    COUNT, which is how the caller learns the page was truncated.
+    Never a hand-rolled dict walk: the first version read ``payload["items"]`` against a
+    ``{"total", "events"}`` payload, returned zero events on every real call and passed the
+    assertion unconditionally (F-004). ``total`` is the unlimited COUNT, which is how the
+    caller learns the page was truncated.
     """
     spec = TOOL_REGISTRY["list_audit_events"]
     for block in getattr(result, "content", []) or []:

@@ -1,9 +1,8 @@
 """LLM-as-judge grader for briefing quality.
 
-Uses the pinned ``JUDGE_MODEL`` so scores stay stable across agent-model swaps.
-Two dimensions, both 0-1: groundedness (no invented facts) and actionability (a
-concrete verification step). Scored per scenario; regression gating on judge
-scores is deferred until a real distribution exists.
+Uses the pinned ``JUDGE_MODEL``, so scores stay stable across agent-model swaps. Two
+dimensions, both 0-1: groundedness (no invented facts) and actionability (a concrete
+verification step). Regression gating on judge scores awaits a real distribution.
 """
 
 from __future__ import annotations
@@ -55,9 +54,8 @@ def judge_briefing(
 ) -> JudgeScore:
     """Grade a briefing. Uses the pinned ``JUDGE_MODEL`` at the call site.
 
-    One bounded re-ask on an output-shape failure (ADR 0035, WO-R2-174); a second
-    raises ``OutputRepairExhausted``, so ``evals/runner.py`` records
-    ``judge_error`` and leaves ``judge_score`` ``None`` rather than inventing one.
+    One bounded re-ask on an output-shape failure (ADR 0035, WO-R2-174); a second raises
+    ``OutputRepairExhausted``, and ``evals/runner.py`` records ``judge_error`` instead.
     """
     call = call_with_output_repair(
         judge_client,
@@ -72,12 +70,10 @@ def judge_briefing(
 def format_briefing_context(briefing: EscalationBriefing) -> str:
     """The context the judge grades against.
 
-    Public since WP-6.3 so the calibration harness asks through this same function.
-    Must show everything the WRITER was shown
-    (``agent/briefing_enrichment.py::_format_context``), worded as the writer sees
-    it (pinned by ``tests/unit/test_llm_judge.py``), and ``render_trail`` renders
-    each probe's ARGUMENTS — a result without its scope read as "the whole queue is
-    empty" and scored an honest briefing 0.0 (INC-002).
+    Public since WP-6.3, so the calibration harness asks through the same function. Must
+    show everything the WRITER was shown, in the writer's wording (pinned by
+    ``test_llm_judge.py``), including each probe's ARGUMENTS: a result without its scope
+    read as "the whole queue is empty" and scored an honest briefing 0.0 (INC-002).
     """
     lines = [
         f"Incident: {briefing.incident_id}",

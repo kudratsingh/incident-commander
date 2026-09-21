@@ -1,10 +1,8 @@
 """Invoke platform chaos hooks from the eval harness.
 
-Lives in ``evals/`` rather than ``src/incident_commander/`` so the import path
-enforces the boundary: the agent never fires chaos on itself. ``ChaosClient`` is
-the JSON-RPC wrapper (shared with ``scripts/chaos_setup.py``); ``invoke_chaos_hook``
-is the one-shot the runner uses. Failures raise ``ChaosInvocationError``, so a
-seeding failure is never read as a scenario failure.
+In ``evals/`` rather than ``src/incident_commander/`` so the import path enforces the
+boundary: the agent never fires chaos on itself. Failures raise ``ChaosInvocationError``,
+so a seeding failure is never read as a scenario failure.
 """
 
 from __future__ import annotations
@@ -22,13 +20,9 @@ class ChaosInvocationError(RuntimeError):
     """The platform rejected or errored on a chaos-hook invocation."""
 
 
-# The chaos refusals a seeding failure can legitimately be, and what each MEANS
-# (WO-R2-16). Every tool-level refusal arrives as JSON-RPC ``-32011``, so on the
-# code alone a fixture-name collision and a Kafka outage read the same — and the
-# reflex to re-run is wrong for every entry here: each says the WORLD is not what
-# the scenario assumes. ``*_name_in_use`` (409) means a previous run's row or chain
-# has DRIFTED; the fix is `make eval-reset PURGE_IDEMPOTENCY=1`, never a retry.
-# A message ledger only: an unledgered code still surfaces with its wire name.
+# What each chaos refusal MEANS (WO-R2-16). Every tool-level refusal arrives as JSON-RPC
+# ``-32011``, so on the code alone a fixture-name collision and a Kafka outage read the same —
+# and re-running is wrong for all of them: each says the WORLD is not what the scenario assumes.
 _REFUSAL_MEANINGS: Final[dict[str, str]] = {
     "poison_fixture_name_in_use": (
         "a poison_message row under this fixture_name already exists and no longer "
@@ -109,9 +103,8 @@ class ChaosClient:
             "method": "tools/call",
             "params": {"name": tool_name, "arguments": arguments},
         }
-        # Every transport-shaped failure becomes a ChaosInvocationError: without
-        # this, a 502 during seeding crashed past the runner's handler with the
-        # hook name — which fault failed to seed — nowhere in it.
+        # Every transport-shaped failure becomes a ChaosInvocationError: a 502 during seeding
+        # used to crash past the runner's handler with the hook name nowhere in it.
         try:
             response = self._client.post(self._url, json=body)
             response.raise_for_status()
@@ -137,9 +130,8 @@ class ChaosClient:
             # `.get` raise AttributeError, straight past the runner's handler.
             if isinstance(err_body, dict):
                 detail = f"{err_body.get('code')}: {err_body.get('message')}"
-                # The JSON-RPC `code` is -32011 for every tool-level refusal, so
-                # the name lives in `data.error_code`. Prefixed, so it leads the
-                # message the runner puts on a failed seed.
+                # The JSON-RPC `code` is -32011 for every tool-level refusal, so the name
+                # lives in `data.error_code`. Prefixed, so it leads the runner's message.
                 code = _refusal_code(err_body)
                 if code is not None:
                     detail = f"{code} ({detail})"
@@ -154,10 +146,9 @@ class ChaosClient:
         content = result.get("content", [])
         if not isinstance(content, list):
             content = []
-        # A tool-level failure rides on `result.isError`, not the JSON-RPC `error`
-        # member — a failed hook is a 200 with a success envelope, and reading only
-        # the envelope graded the agent on a world nobody manufactured. Both
-        # spellings: the wire is camelCase, fixtures are snake (C-02).
+        # A tool-level failure rides on `result.isError`, not the JSON-RPC `error` member: a
+        # failed hook is a 200 with a success envelope, and reading only the envelope graded
+        # the agent on a world nobody manufactured. Both spellings (C-02).
         if result.get("isError") or result.get("is_error"):
             raise ChaosInvocationError(
                 f"{tool_name}: hook failed at the tool level (isError): "

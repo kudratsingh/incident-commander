@@ -11,12 +11,9 @@ from incident_commander.tools.mcp_client import MCPError, ToolResult
 class CannedMCPClient:
     """Structural ``MCPClientProtocol`` fake — returns pre-scripted responses.
 
-    A tool maps to one ``ToolResult`` (returned always) or a sequence consumed in
-    order, the last one repeating so verify polling and re-probes do not crash.
-
-    It satisfies ``LabProbeCapableClient`` as well, because the runner's premise reads go
-    through ``LabProbeClient`` since ADR 0075 and a fake that refused the label would fail
-    every offline precondition test on a signature rather than on behaviour.
+    A tool maps to one ``ToolResult`` (returned always) or a sequence consumed in order, the
+    last repeating so verify polling and re-probes do not crash. Also satisfies
+    ``LabProbeCapableClient``, because the runner's premise reads carry a label (ADR 0075).
     """
 
     def __init__(self, responses: Mapping[str, ToolResult | Sequence[ToolResult]]) -> None:
@@ -30,10 +27,9 @@ class CannedMCPClient:
                     raise ValueError(f"empty canned response sequence for tool: {name}")
                 self._queues[name] = queue
         self.calls: list[tuple[str, dict[str, Any]]] = []
-        #: The lab label each call carried, in call order (ADR 0075). ``(None, None)`` for the
-        #: agent's own reads. Recorded rather than ignored because the label is the thing under
-        #: test wherever this fake stands in for the transport — a fake that swallowed it would
-        #: make "the premise reads are the lab's" unprovable offline.
+        #: The lab label each call carried, in call order (ADR 0075); ``(None, None)`` for the
+        #: agent's own reads. Recorded, because a fake that swallowed it would make "the
+        #: premise reads are the lab's" unprovable offline.
         self.labels: list[tuple[str | None, str | None]] = []
 
     def call_tool(

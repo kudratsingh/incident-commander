@@ -1,17 +1,11 @@
 """Record one scenario's fault world once — ``make world-record ONLY=<scenario>``.
 
-Neither existing way of handing the agent a world can serve a paired comparison: a
-``canned_tool_responses`` sequence is per TOOL, not argument-aware, and no two live
-runs see the same world. A recording is the third way — read once, keyed by ``(tool,
-WIRED arguments)``, replayed free and in parallel. Probes, reads and lints are
-``evals/dossier.py``'s, never re-derived here; this adds the wiring (divergence F2:
-the agent's client default-fills, so a key on raw arguments answers nothing) and
-keeps the whole ``ToolResult`` (F3). A recording is evidence (invariant 9, the
-``recorded_world`` artifact kind), it says which world it is (ADR 0040, via
-``label_describes_this_world``), and its answer key lives in a SIBLING file the
-replay path cannot reach. Zero model tokens, but it seeds and resets the shared
-world, so it needs the owner's go. Exit codes are ``dossier``'s plus
-``EXIT_PRECONDITION``.
+A third way to hand the agent a world, for the paired comparison a per-TOOL
+``canned_tool_responses`` sequence cannot serve: read once, keyed by ``(tool, WIRED
+arguments)`` (divergence F2), keeping the whole ``ToolResult`` (F3), replayed free. Probes,
+reads and lints are ``evals/dossier.py``'s. The recording is evidence (invariant 9), says
+which world it is (ADR 0040), and its answer key lives in a SIBLING file. Zero model tokens,
+but it seeds and resets the shared world, so it needs the owner's go.
 """
 
 from __future__ import annotations
@@ -85,11 +79,9 @@ SCHEMA_VERSION: Final[int] = 1
 #: recording a replayed agent can see. A constant: the test and renderer compare it.
 LAB_VOCABULARY_KIND: Final[str] = "lab vocabulary in a recorded result"
 
-#: Per-call fields about WHEN the recording happened rather than about the world.
-#: ``world_fingerprint`` drops them, which is the whole definition of "two recordings
-#: of one world are the same recording". Nothing inside ``result`` is here: a moved
-#: platform clock is DRIFT, and which of those are benign is
-#: ``fixture_drift._VOLATILE``'s call, not a fingerprint's.
+#: Per-call fields about WHEN the recording happened rather than about the world, dropped by
+#: ``world_fingerprint``. Nothing inside ``result`` is here: a moved platform clock is DRIFT,
+#: and ``fixture_drift._VOLATILE`` decides which of those are benign.
 VOLATILE_CALL_FIELDS: Final[frozenset[str]] = frozenset(
     {"started_at", "completed_at", "duration_ms"}
 )
@@ -274,11 +266,9 @@ def world_fingerprint(world: RecordedWorld) -> str:
 def sweep_probes(scenario: Scenario) -> tuple[list[Probe], list[str]]:
     """Every read tool × the argument values this scenario names, plus the unfiltered forms.
 
-    The dossier derives every read the agent is EXPECTED to make; a recording wants
-    every read it MIGHT make, since an unrecorded call is a ``not_recorded`` miss in a
-    measured run. Widened only in plan 02 § 181's direction: ``_value_pool`` and
-    ``_fill`` are the dossier's, so nothing here invents a resource id, and
-    ``_read_tool`` keeps a Tier-1 tool out by construction.
+    The dossier derives the reads the agent is EXPECTED to make; a recording wants every read
+    it MIGHT make, because an unrecorded call is a ``not_recorded`` miss in a measured run.
+    ``_value_pool`` and ``_fill`` are the dossier's, so nothing here invents a resource id.
     """
     pool = _value_pool(scenario)
     probes: list[Probe] = []
@@ -318,11 +308,9 @@ def sweep_probes(scenario: Scenario) -> tuple[list[Probe], list[str]]:
 def recording_probes(scenario: Scenario) -> tuple[list[Probe], list[str]]:
     """The whole call set for one recording, and what could not be derived.
 
-    04:110's three sources, merged by ``dossier._merge`` so a call derived twice is
-    made once and keeps both reasons: ``derive_probes`` (the expected reads, with its
-    notes); the scenario's own ``expected_precondition`` calls, which are literal and
-    FILTERED where the derivation reads unfiltered, so a replayed agent can take
-    either route; and ``sweep_probes``.
+    Three sources merged by ``dossier._merge``, so a call derived twice is made once and keeps
+    both reasons: ``derive_probes``, the scenario's own ``expected_precondition`` calls (which
+    are FILTERED where the derivation reads unfiltered, so either route replays), ``sweep_probes``.
     """
     derived, notes = derive_probes(scenario)
     probes = list(derived)
@@ -380,12 +368,9 @@ def establish_preconditions(
 ) -> list[PreconditionReading]:
     """The scenario's premise, POLLED the way the runner polls it.
 
-    The deliberate deviation from the dossier's single-shot ``check_precondition``:
-    04:110 records after the preconditions PASS, and a lag premise on a 60s gauge
-    (``remediate_consumer_lag_success``: attempts 10, delay 15) would otherwise refuse
-    every consumer-lag scenario. The loop is local because WP-3.3 makes the runner
-    import THIS module; the predicate is not duplicated, so "met" means one thing in
-    all three places. Last attempt decides, early exit on met.
+    A deliberate deviation from the dossier's single-shot ``check_precondition``: recording
+    happens after the preconditions PASS, and a lag premise on a 60s gauge would otherwise
+    refuse every consumer-lag scenario. The predicate is shared, so "met" means one thing.
     """
     established: list[PreconditionReading] = []
     for probe in scenario.expected_precondition:
@@ -517,11 +502,9 @@ def lab_vocabulary_terms() -> frozenset[str]:
 def lint_agent_visible_vocabulary(calls: Sequence[RecordedCall]) -> list[Finding]:
     """Does anything a replayed agent can SEE name the lab?
 
-    The recorder reads under ``PLATFORM_SMOKE_TOKEN``, not the agent's
-    ``PLATFORM_TOKEN`` — which deliberately lacks ``chaos:invoke`` (platform ADR
-    0012) — so anything the smoke principal can see extra would be replayed to every
-    run as tool output. Only ``result`` is scanned, since that is the whole replay
-    surface. A finding, not a refusal, but do not replay a recording that trips it.
+    The recorder reads under ``PLATFORM_SMOKE_TOKEN``, not the agent's ``PLATFORM_TOKEN``,
+    so anything extra the smoke principal sees would be replayed as tool output. Only
+    ``result`` is scanned. A finding, not a refusal — but do not replay a recording that trips it.
     """
     terms = sorted(lab_vocabulary_terms())
     findings: list[Finding] = []

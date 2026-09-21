@@ -1,14 +1,9 @@
 """Submit jobs at a steady rate so a killed consumer builds real backlog.
 
-The eval only ever had the service half of consumer lag: with nothing arriving,
-`kill_consumer` leaves `get_consumer_lag` reading 0 and `remediate_consumer_lag_success`
-asserts a fault that cannot exist. This is the "standard 1-job/2s loop" `docs/runbook.md`
-has described since 2026-08-04. Three platform behaviours shape it: job creation needs a
-USER token (the demo user `bootstrap_agent_token.py` registers); `jobs:create` allows 30
-per 60s, which 1/2s sits exactly on, so the default is 3s; and backpressure rejects new
-jobs once lag passes 1000, so a 503 means the fault is fully manufactured.
-
-Run it beside the scenario, or with `--until-lag`.
+With nothing arriving, `kill_consumer` leaves `get_consumer_lag` reading 0 and
+`remediate_consumer_lag_success` asserts a fault that cannot exist. Job creation needs a USER
+token; `jobs:create` allows 30 per 60s, which 1/2s sits exactly on, so the default is 3s; and
+backpressure rejects new jobs past lag 1000, so a 503 means the fault is manufactured.
 """
 
 from __future__ import annotations

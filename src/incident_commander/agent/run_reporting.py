@@ -531,6 +531,23 @@ def _verification_from_attempt(entry: EvidenceEntry) -> dict[str, Any]:
     }
 
 
+def _verification_from_thinking(thinking: ObservedThinking) -> dict[str, Any] | None:
+    """One verify poll's verdict, from the observation the verify loop just published.
+
+    ``None`` for a ranking, which announces no verdict. Capped here rather than in
+    ``PlannerLog`` so every verdict this module sends is cut to the same limits.
+    """
+    observed = thinking.verification
+    if observed is None:
+        return None
+    return {
+        "verdict": _capped(observed.verdict, _MAX_VERDICT_CHARS),
+        "reasoning_excerpt": _excerpt(observed.reasoning, _MAX_EXCERPT_CHARS),
+        "attempt": _ordinal(observed.attempt),
+        "of": _ordinal(observed.of),
+    }
+
+
 def _ordinal(value: object) -> int | None:
     """An ``{attempt, of}`` ordinal, or ``None`` when it is not a countable one."""
     if isinstance(value, bool) or not isinstance(value, int):
@@ -598,6 +615,12 @@ class RunReporter:
         #: The plan as last sent, so a second attempt's different plan is reported while the
         #: same plan is not re-sent on every later report.
         self._plan_sent: str | None = None
+        #: Whether the verify loop publishes its verdicts to this reporter. When it does, the
+        #: same verdicts on the evidence ledger are skipped: reporting both sends each twice.
+        self._live_verdicts = planner_log is not None
+        #: A verdict that was observed and has not reached the platform — because the run had
+        #: not reported yet, or the send failed. The report that closes the run carries it.
+        self._verdict_to_send: dict[str, Any] | None = None
         #: Reports that failed, for the run's own summary line. Nothing acts on it: it exists so
         #: "the console was empty" has an answer other than "the frontend is broken".
         self.failures: list[str] = []
@@ -698,6 +721,11 @@ class RunReporter:
         The ranking on the payload is the observation's OWN, because ``_last_state`` still holds
         the one from before this call. ``False`` leaves it to the next transition report.
         """
+        verdict = _verification_from_thinking(thinking)
+        if verdict is not None:
+            # Held from here rather than after the send, so a verdict the platform never took
+            # is still on the report that closes the run (WO-R3-342 item 2).
+            self._verdict_to_send = verdict
         state = self._last_state
         if state is None or not self._widened:
             return False
@@ -707,6 +735,10 @@ class RunReporter:
             # The ranking this call produced, written into both fields the console panel reads.
             payload["hypotheses"] = ranked_of(thinking.hypotheses)
             payload["current_hypothesis"] = top_of(thinking.hypotheses)
+            if verdict is not None:
+                # The verdict rides its OWN judge step rather than the next transition's
+                # report: the fifth take's verdict list filled 22 s late (F3).
+                payload["verification"] = verdict
             self._deliver(payload, narrow_retry=False, may_narrow=False)
         except Exception as err:  # noqa: BLE001 - telemetry may never fail a transition
             self._note(f"{REPORT_RUN_TOOL}: reporting the run's thinking failed: {err}")
@@ -731,6 +763,10 @@ class RunReporter:
         #    tool call becomes a step, and a bookkeeping row is skipped.
         for entry in entries:
             if entry.tool_name == VERIFY_JUDGE_MARKER:
+                if self._live_verdicts:
+                    # This verdict left with its own judge step; reporting the ledger's copy
+                    # too would put the same verdict on the platform twice.
+                    continue
                 pending.append(
                     _Pending({"verification": _verification_from_judge(entry)}, entry.timestamp)
                 )
@@ -873,6 +909,14 @@ class RunReporter:
             plan = plan_payload(run_state)
             if plan is not None and json.dumps(plan, sort_keys=True) != self._plan_sent:
                 payload["plan"] = plan
+            # A verdict that never reached the platform rides the report that closes the run,
+            # or the console's verdict list would end one poll short of the run's own answer.
+            if (
+                run_state.state.is_terminal
+                and self._verdict_to_send is not None
+                and "verification" not in payload
+            ):
+                payload["verification"] = self._verdict_to_send
         # 5. Add the identifying fields to EVERY report: the platform stores them once and never
         #    clears them, so repeating is free and a lost first report still recovers.
         if self._run_label is not None:
@@ -947,6 +991,7 @@ class RunReporter:
                 self.steps_sent += 1
         if "verification" in body:
             self.verifications_sent += 1
+            self._verdict_to_send = None
         plan = body.get("plan")
         if plan is not None:
             self._plan_sent = json.dumps(plan, sort_keys=True)

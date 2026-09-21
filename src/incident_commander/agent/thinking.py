@@ -51,6 +51,20 @@ class ThinkingAction(NamedTuple):
     tool: str | None = None
 
 
+class ObservedVerdict(NamedTuple):
+    """One verify poll's verdict, carried in fields rather than only in a sentence.
+
+    The console has a verdict list beside the thinking timeline, and it is fed by the report's
+    own ``verification`` field — so the verdict has to travel as data to ride the same report
+    as the judge step that produced it (the fifth take's F3).
+    """
+
+    verdict: str
+    reasoning: str | None
+    attempt: int
+    of: int
+
+
 @dataclass(frozen=True, slots=True)
 class ObservedThinking:
     """One accepted piece of the run's reasoning, as the loop accepted it.
@@ -72,6 +86,9 @@ class ObservedThinking:
     #: What to show in place of a move, for thinking that made none — for example
     #: "verify 2/4 verified". ``None`` everywhere else, where the move itself is the headline.
     headline: str | None = None
+    #: The verdict this observation announced, for a verify poll, so the reporter can put it on
+    #: the same report as this step. ``None`` for a ranking, which judges nothing.
+    verification: ObservedVerdict | None = None
 
     def ranking(self) -> list[dict[str, Any]]:
         """The top entries, in the three fields a ranking card draws — without the reasoning,
@@ -176,14 +193,18 @@ class PlannerLog:
     ) -> None:
         """Record one verify poll's verdict, stamped now. The ranking travels unchanged — a
         verdict does not re-rank anything — so the row keeps what the run still believes."""
+        trimmed = _reason(reasoning)
         self.observe(
             ObservedThinking(
                 tool=VERIFY_JUDGE_TOOL,
                 hypotheses=tuple(hypotheses),
                 next_action=None,
-                reason=_reason(reasoning),
+                reason=trimmed,
                 at=self.clock(),
                 headline=f"verify {attempt}/{of} {verdict}",
+                verification=ObservedVerdict(
+                    verdict=verdict, reasoning=trimmed, attempt=attempt, of=of
+                ),
             )
         )
 

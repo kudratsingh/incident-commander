@@ -8,6 +8,7 @@ is the half a rehearsal cannot demonstrate, because a rehearsal succeeds).
 
 from __future__ import annotations
 
+import json
 import subprocess
 import time
 from pathlib import Path
@@ -20,6 +21,9 @@ from evals.scenarios.loader import load_scenarios
 from scripts import demo_live
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
+
+#: How many times the machine sleeps before step 6's hold: the fault countdown, one a second.
+_FAULT_COUNTDOWN_SLEEPS = demo_live._FAULT_COUNTDOWN_SECONDS
 
 
 def _reading(lag: int, *, age_seconds: float = 4.0, known: bool = True) -> demo_live.LagReading:
@@ -130,15 +134,11 @@ def stack(monkeypatch: pytest.MonkeyPatch) -> _FakeStack:
     # rehearsal, not asserted here.
     monkeypatch.setattr(time, "sleep", lambda _seconds: None)
 
-    def _start(
-        self: demo_live.TrafficHandle, rate: str | None = None, *, append: bool = False
-    ) -> None:
+    def _start(self: demo_live.TrafficHandle, rate: str | None = None) -> None:
         fake.traffic_started += 1
         fake.traffic_rates.append(rate)
-        # A stand-in with a `Popen` shape, so `accelerate`'s "is the producer running" check
-        # and `stop`'s `poll()` both see what they would see live. `None` made `accelerate` a
-        # no-op and the acceleration untestable. The cast is the honest shape of a fake: it is
-        # structurally what the handle uses and nothing more.
+        # A stand-in with a `Popen` shape, so `stop`'s `poll()` sees what it would see live.
+        # The cast is the honest shape of a fake: structurally what the handle uses, nothing more.
         self.process = cast("subprocess.Popen[str]", _FakePopen())
 
     def _stop(self: demo_live.TrafficHandle, console: demo_live.Console) -> None:
@@ -257,12 +257,12 @@ class TestTheStepOrder:
 
 class TestTrafficBelongsToOneModeOnly:
     def test_consumer_outage_starts_and_stops_the_producer(self, stack: _FakeStack) -> None:
-        # Lag is arrival minus service: without a producer the fault cannot exist. TWO starts
-        # since WO-R3-339 — the slow baseline and the fast one the fault gets — and the
-        # important half is unchanged: it is stopped, so the loop cannot outlive the demo.
+        # Lag is arrival minus service: without a producer the fault cannot exist. ONE start
+        # for the whole take since WO-R3-342 (the rate never changes), and the important half
+        # is unchanged: it is stopped, so the loop cannot outlive the demo.
         assert demo_live.main(["--mode", "consumer_outage", "--auto"]) == 0
 
-        assert stack.traffic_started == 2
+        assert stack.traffic_started == 1
         assert stack.traffic_stopped >= 1
 
     def test_dlq_backlog_starts_no_producer(self, stack: _FakeStack) -> None:
@@ -388,7 +388,7 @@ class TestEveryFailurePathResetsAndAudits:
 
         assert demo_live.main(["--mode", "consumer_outage", "--auto"]) == 1
 
-        assert stack.traffic_started == 2
+        assert stack.traffic_started == 1
         assert stack.traffic_stopped >= 1
 
     def test_an_unexpected_exception_also_resets(
@@ -971,39 +971,35 @@ class TestThePlatformRaisesThePage:
         assert "WARNING" not in capsys.readouterr().out or stack.pages_awaited
 
 
-class TestTheProducerRunsAtTheModesRate:
-    """WO-R3-339: 0.75 s during the fault, so the page arrives while somebody is watching."""
+class TestTheProducerRunsAtThePlatformsOwnCeiling:
+    """The fifth take's F4: the backlog climbed to 28 and then sat flat at 28 for 25 seconds.
 
-    def test_the_baseline_is_slow_and_the_fault_is_fast(self, stack: _FakeStack) -> None:
-        """The order is the claim, and it is the one a measurement bought.
+    `POST /jobs` allows 30 creations per FIXED 60-second window per caller address
+    (`rate_limiter(limit=30, window=60, key_prefix="jobs:create")`), so 30 a minute is the
+    sustained ceiling and there is no faster fault-phase rate to switch to. WO-R3-339's
+    mid-take acceleration to 0.75 s borrowed from that one window and the chart repaid it as a
+    plateau, so the producer now runs at the ceiling for the whole take and never changes rate.
+    """
 
-        `POST /jobs` is rate-limited per identity in a FIXED 60-second window of 30
-        creations, so every job the BASELINE spends is one the backlog cannot have. Running
-        the whole walk at 0.75 s was measured on 2026-09-21: ten seconds of countdown left 17
-        of the 30, the lag stalled at 17 until the window rolled, and the platform's page
-        arrived 56.1 s after the fault instead of 15.6 s. So the producer starts at the
-        script's sustainable default and is restarted at the fault's rate in step 3.
-        """
+    def test_one_producer_at_the_ceiling_for_the_whole_take(self, stack: _FakeStack) -> None:
         assert demo_live.main(["--mode", "consumer_outage", "--auto"]) == 0
 
-        assert stack.traffic_rates == [None, "0.75"]
-        assert demo_live.MODES["consumer_outage"]["fault_traffic_rate"] == "0.75"
+        assert stack.traffic_rates == [demo_live.MODES["consumer_outage"]["traffic_rate"]]
+        assert demo_live.MODES["consumer_outage"]["traffic_rate"] == "2.0"
 
-    def test_the_quiet_mode_accelerates_nothing(self, stack: _FakeStack) -> None:
+    def test_the_quiet_mode_starts_no_producer(self, stack: _FakeStack) -> None:
         assert demo_live.main(["--mode", "dlq_backlog", "--auto"]) == 0
 
         assert stack.traffic_rates == []
-        assert demo_live.MODES["dlq_backlog"]["fault_traffic_rate"] is None
+        assert demo_live.MODES["dlq_backlog"]["traffic_rate"] is None
 
-    def test_the_acceleration_happens_after_the_fault_is_fired(
-        self, stack: _FakeStack, capsys: pytest.CaptureFixture[str]
-    ) -> None:
-        # Not before: until the consumer is dead the jobs are consumed, so a fast baseline
-        # buys nothing and spends the window the fault needs.
+    def test_the_rate_never_changes_part_way_through_the_take(self, stack: _FakeStack) -> None:
+        """The producer is started once and not restarted: a restart loses the count of what
+        the current window already spent, which is how the plateau arrived."""
         assert demo_live.main(["--mode", "consumer_outage", "--auto"]) == 0
 
-        out = capsys.readouterr().out
-        assert out.index("fired: ") < out.index("producer to a job every 0.75s")
+        assert stack.traffic_started == 1
+        assert not hasattr(demo_live.TrafficHandle, "accelerate")
 
     def test_the_rate_reaches_make_as_a_variable(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """The argv `make traffic` is really started with — the fake stack stubs `start`."""
@@ -1019,53 +1015,11 @@ class TestTheProducerRunsAtTheModesRate:
 
         monkeypatch.setattr(subprocess, "Popen", _Popen)
         monkeypatch.setattr(demo_live, "_smoke_env", lambda: {"PLATFORM_SMOKE_TOKEN": "x"})
-        demo_live.TrafficHandle().start(rate="0.75")
+        demo_live.TrafficHandle().start(rate="2.0")
 
-        assert seen == [["make", "traffic", "RATE=0.75"]]
+        assert seen == [["make", "traffic", "RATE=2.0"]]
 
-    def test_accelerate_stops_the_slow_loop_and_starts_a_fast_one(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        seen: list[list[str]] = []
-
-        class _Popen(_FakePopen):
-            def __init__(self, argv: list[str], **kwargs: Any) -> None:
-                super().__init__()
-                seen.append(argv)
-
-        monkeypatch.setattr(subprocess, "Popen", _Popen)
-        monkeypatch.setattr(demo_live, "_smoke_env", lambda: {"PLATFORM_SMOKE_TOKEN": "x"})
-        handle = demo_live.TrafficHandle()
-        handle.start()
-        handle.accelerate(demo_live.Console(auto=True), "0.75")
-
-        assert seen == [["make", "traffic"], ["make", "traffic", "RATE=0.75"]]
-
-    def test_accelerate_with_no_rate_or_no_producer_does_nothing(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        seen: list[list[str]] = []
-
-        class _Popen(_FakePopen):
-            def __init__(self, argv: list[str], **kwargs: Any) -> None:
-                super().__init__()
-                seen.append(argv)
-
-        monkeypatch.setattr(subprocess, "Popen", _Popen)
-        monkeypatch.setattr(demo_live, "_smoke_env", lambda: {"PLATFORM_SMOKE_TOKEN": "x"})
-        console = demo_live.Console(auto=True)
-        # No producer: the quiet mode's path.
-        demo_live.TrafficHandle().accelerate(console, "0.75")
-        # A producer but no declared rate: unchanged, still running.
-        handle = demo_live.TrafficHandle()
-        handle.start()
-        handle.accelerate(console, None)
-
-        assert seen == [["make", "traffic"]]
-
-    def test_no_rate_keeps_the_scripts_own_sustainable_default(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_no_rate_keeps_the_scripts_own_default(self, monkeypatch: pytest.MonkeyPatch) -> None:
         seen: list[list[str]] = []
 
         class _Popen:
@@ -1081,6 +1035,198 @@ class TestTheProducerRunsAtTheModesRate:
         demo_live.TrafficHandle().start()
 
         assert seen == [["make", "traffic"]]
+
+
+class TestTheHoldKeepsTheFinishedRunOnScreen:
+    """The fifth take's F1: the finished run vanished 11 seconds after it resolved.
+
+    The wind-down's reset writes a new `lab.world_reset` boundary and the page's "current take"
+    rule jumped to the empty take that boundary opened. The world is now held for HOLD seconds
+    after the briefing, so the run stays up until somebody has read it.
+    """
+
+    def test_the_hold_sits_between_the_briefing_and_the_reset(
+        self, stack: _FakeStack, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        assert demo_live.main(["--mode", "dlq_backlog", "--auto", "--hold", "5"]) == 0
+
+        out = capsys.readouterr().out
+        assert out.index("walk through the briefing") < out.index("holding the world for 5 s")
+        assert out.index("holding the world for 5 s") < out.index("resetting the world")
+
+    def test_the_default_is_sixty_seconds(self, stack: _FakeStack, capsys: Any) -> None:
+        assert demo_live.main(["--mode", "dlq_backlog", "--auto"]) == 0
+
+        assert "holding the world for 60 s" in capsys.readouterr().out
+
+    def test_a_hold_of_zero_is_allowed_and_resets_at_once(
+        self, stack: _FakeStack, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        assert demo_live.main(["--mode", "dlq_backlog", "--auto", "--hold", "0"]) == 0
+
+        out = capsys.readouterr().out
+        assert "holding the world" not in out
+        assert "HOLD=0" in out and "resetting the world" in out
+
+    def test_a_negative_hold_is_refused_before_anything_is_touched(self, stack: _FakeStack) -> None:
+        assert demo_live.main(["--mode", "dlq_backlog", "--auto", "--hold", "-1"]) == 2
+        assert stack.commands == []
+
+    def test_an_interrupt_during_the_hold_skips_to_the_wind_down_and_still_resets(
+        self, stack: _FakeStack, monkeypatch: pytest.MonkeyPatch, capsys: Any
+    ) -> None:
+        """Ctrl-C is the operator saying "I have seen it" — never a reason to leave a dirty
+        world, which is what a KeyboardInterrupt escaping the hold would have produced.
+
+        The interrupt lands on the hold's first tick rather than on any earlier sleep: the
+        fault countdown has its own ten, and an interrupt there is a different path.
+        """
+        ticks = {"n": 0}
+
+        def _interrupt(_seconds: float) -> None:
+            ticks["n"] += 1
+            if ticks["n"] > _FAULT_COUNTDOWN_SLEEPS:
+                raise KeyboardInterrupt
+
+        monkeypatch.setattr(time, "sleep", _interrupt)
+
+        assert demo_live.main(["--mode", "dlq_backlog", "--auto", "--hold", "30"]) == 0
+
+        out = capsys.readouterr().out
+        assert "hold skipped" in out
+        assert "world audit PASS" in out
+        assert "INTERRUPTED by the operator" not in out, "a skipped hold is not a failed demo"
+        assert stack.make_targets().count("eval-reset") == 2
+
+    def test_the_make_target_forwards_the_hold(self) -> None:
+        recipe = (_REPO_ROOT / "Makefile").read_text()
+        assert "HOLD" in recipe and "--hold $(HOLD)" in recipe
+
+
+class TestEveryReadSaysItIsTheLabs:
+    """The fifth take's F5: `agent.tool_invoked get_consumer_lag` every ~3 s before the fault.
+
+    Under the SMOKE principal, so the token was right — but unlabelled, so the platform filed
+    the rows as the agent's, and the page with no run selected drew them as the agent acting ten
+    seconds before the lab had injected anything. Every read now carries `_lab_probe` plus the
+    lab credential, which makes the row `lab.probe` (platform ADR 0038).
+    """
+
+    def _wired(self, monkeypatch: pytest.MonkeyPatch, payload: dict[str, Any]) -> Any:
+        """A transport with the lab-probe protocol, recording the label each read carried."""
+        from incident_commander.tools.mcp_client import ToolResult
+
+        class _Transport:
+            def __init__(self) -> None:
+                self.calls: list[tuple[str, str | None, str | None]] = []
+                self.closed = 0
+
+            def call_tool(
+                self,
+                name: str,
+                arguments: Any,
+                *,
+                timeout_seconds: float | None = None,
+                lab_probe: str | None = None,
+                lab_principal_token: str | None = None,
+            ) -> ToolResult:
+                self.calls.append((name, lab_probe, lab_principal_token))
+                import json as _json
+
+                return ToolResult(
+                    content=[{"type": "text", "text": _json.dumps(payload)}], is_error=False
+                )
+
+            def close(self) -> None:
+                self.closed += 1
+
+        transport = _Transport()
+        TestTheRunnerNeverWearsTheAgentsToken()._settings(monkeypatch)
+        monkeypatch.setattr(
+            "incident_commander.tools.mcp_client.make_client",
+            lambda _settings, tracer=None, token=None: transport,
+        )
+        return transport
+
+    def test_the_lag_poll_is_labelled_and_closed(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        transport = self._wired(monkeypatch, {"lag": 12, "lag_known": True, "age_seconds": 3.0})
+
+        reading = demo_live._lag_reading()
+
+        assert reading.lag == 12
+        assert transport.calls == [
+            ("get_consumer_lag", demo_live.BASELINE_PROBE_REASON, "SMOKE-TOKEN")
+        ]
+        assert demo_live.BASELINE_PROBE_REASON == "demo: baseline lag poll"
+        assert transport.closed == 1
+
+    def test_the_dlq_watch_is_labelled_too(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        transport = self._wired(monkeypatch, {"total": 7, "messages": []})
+
+        assert demo_live._dlq_total() == (7, True)
+
+        assert transport.calls == [
+            ("list_dlq_messages", demo_live.FAULT_WATCH_PROBE_REASON, "SMOKE-TOKEN")
+        ]
+
+    def test_the_precondition_probes_carry_the_lab_credential(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Through the runner's own labelling, so the reason names what each probe proves."""
+        from evals import runner as runner_module
+
+        self._wired(monkeypatch, {"lag": 42, "lag_known": True})
+        seen: dict[str, Any] = {}
+
+        def _assert(scenario: Any, client: Any, tracer: Any, **kwargs: Any) -> None:
+            seen.update(kwargs)
+
+        monkeypatch.setattr(runner_module, "_assert_preconditions", _assert)
+
+        demo_live._await_precondition("remediate_consumer_lag_success")
+
+        assert seen == {"lab_principal_token": "SMOKE-TOKEN"}
+
+    def test_no_read_in_this_module_goes_out_unlabelled(self) -> None:
+        """Structural, so a fourth reader cannot arrive without a label the way three arrived
+        without the read-only token (ADR 0074's F3)."""
+        source = (_REPO_ROOT / "scripts" / "demo_live.py").read_text()
+        calls = [
+            line.strip()
+            for line in source.splitlines()
+            if "_smoke_client(" in line
+            and not line.lstrip().startswith("#")
+            and "def _smoke_client" not in line
+        ]
+        assert calls, "the readers must go through _smoke_client"
+        unlabelled = [line for line in calls if "lab_probe=" not in line]
+        assert unlabelled == ["client = _smoke_client()"], (
+            "every read must name its lab-probe reason; the one exception is the precondition "
+            f"client, which is labelled per probe by the runner. Found: {unlabelled}"
+        )
+
+
+class TestTakeFivesLedgerIsTheRecord:
+    """The fifth take's 162 audit rows, kept as the fixture the owner's addendum names."""
+
+    def test_every_agent_row_before_the_run_was_one_of_these_two_scripts_reads(self) -> None:
+        rows = json.loads(
+            (_REPO_ROOT / "tests" / "unit" / "fixtures" / "take5-audit-rows.json").read_text()
+        )
+        first_report = min(
+            row["created_at"] for row in rows if row["action"] == "agent.run_reported"
+        )
+        before = [
+            row
+            for row in rows
+            if row["action"] == "agent.tool_invoked" and row["created_at"] < first_report
+        ]
+
+        assert len(before) == 39, "the rows the page drew as the agent acting before the fault"
+        assert {(row["extra_data"] or {}).get("tool_name") for row in before} == {
+            "get_consumer_lag"
+        }, "all of them the lag read this script and the traffic loop now label"
+        assert len({row["principal_id"] for row in before}) == 1, "one principal: the smoke one"
 
 
 class TestTheDocstringStaysTrue:

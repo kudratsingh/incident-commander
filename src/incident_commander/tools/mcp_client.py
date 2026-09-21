@@ -387,6 +387,16 @@ class LabProbeClient:
         """The label every call from this client carries."""
         return self._reason
 
+    def close(self) -> None:
+        """Close the transport underneath, when it has one to close.
+
+        So a caller that only holds the wrapper can still shut the connection down; a fake
+        transport in a test need not have the method.
+        """
+        closer = getattr(self._inner, "close", None)
+        if callable(closer):
+            closer()
+
     def call_tool(
         self,
         name: str,

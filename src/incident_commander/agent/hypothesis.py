@@ -23,13 +23,15 @@ class HypothesisCategory(StrEnum):
     ``FIX_MAP``** (WP-1.6, plan 02 § 5); ``TestEveryNewCategoryIsEscalateOnly`` pins that.
     """
 
-    # Categories with Tier-1 fixes (see FIX_MAP in investigation.py):
+    # These four categories have an automatic Tier-1 fix; FIX_MAP in investigation.py maps
+    # each one to the tool that fixes it.
     CONSUMER_SATURATION = "consumer_saturation"
     POISON_MESSAGE = "poison_message"
     STALE_CACHE = "stale_cache"
     RUNAWAY_SAGA = "runaway_saga"
 
-    # Categories WITHOUT auto-fixes — always escalate:
+    # Every category below has no automatic fix, so a run that lands on one always escalates
+    # to a human instead of acting.
     TRANSIENT_DEPENDENCY = "transient_dependency"
     """External dependency (SMTP, upstream API, third-party) is down or
     degrading. Right answer is wait for recovery, not auto-remediate."""
@@ -46,8 +48,8 @@ class HypothesisCategory(StrEnum):
     """LLM couldn't classify the root cause into any known category.
     Escalate with the full evidence chain in the briefing."""
 
-    # WP-1.6 (plan 02 § 5). Nine labels for new fault families, ALL outside FIX_MAP.
-    # Appended, not interleaved: run archives are read back against this enum.
+    # Nine labels added for newer fault families, none of them with an automatic fix. Added at
+    # the end rather than in place, because old run archives are read back against this enum.
 
     NO_FAULT = "no_fault"
     """Nothing is wrong. Every reading the agent took is healthy, so the
@@ -89,7 +91,8 @@ class HypothesisCategory(StrEnum):
     """A projected read model disagrees with the write side; what the
     platform reports and what it stored have diverged."""
 
-    # WO-R3-263 (owner decision O-19, ADR 0054). Appended — archives read it back by value.
+    # Added later, again at the end: an archive reads these back by their string value, so no
+    # existing member may change its spelling or move.
 
     RESOURCE_EXHAUSTION = "resource_exhaustion"
     """A worker or job that ran out of memory, CPU or disk.
@@ -105,8 +108,8 @@ class HypothesisCategory(StrEnum):
     this platform's Tier-1 surface raises a memory limit, resizes a worker or
     reclaims a disk. A human changes a limit or the work that needs it."""
 
-    # WO-R3-214 (WP-7.2, ADR 0053). Appended, like every label since the original eight:
-    # values already in run archives and `ground_truth.root_causes` keep spelling and position.
+    # Added later still, for the same reason: values already written into run archives and
+    # scenario ground truth keep their spelling and their position here.
 
     DAG_PAUSED = "dag_paused"
     """A dependency chain is not advancing because it is deliberately
@@ -150,8 +153,8 @@ class Hypothesis(StructuredOutput):
     reasoning: str = Field(min_length=1)
 
 
-# NextAction — probe / remediate / stop.
-# ProbeAction.tool_name is a Literal over TOOL_REGISTRY's read tier: no invented tools.
+# The three moves a planner step may make: probe, remediate or stop. A probe's tool name is
+# restricted to the registry's read tools, so the model cannot name a tool that does not exist.
 
 
 ReadToolName = Literal[
@@ -241,17 +244,16 @@ class InvestigationStep(StructuredOutput):
         return tuple(sorted(value, key=lambda h: h.confidence, reverse=True))
 
 
-# The step schema with `probe` withdrawn (ADR 0074, amending ADR 0073). A refusal the planner
-# meets AFTER it has chosen leaves "probe something else" open and a model takes it (INC-004), so
-# a settled ranking is narrowed in the SCHEMA. The LOOP decides when (ADR 0036).
+# The same step schema with the probe move removed. Refusing a read after the planner has already
+# chosen it leaves "read something else" open, and models take it, so the schema closes it first.
 
 
 SettledNextAction = Annotated[StopAction | RemediateAction, Field(discriminator="kind")]
 """``NextAction`` with ``probe`` removed: the two moves left once the ranking has settled."""
 
 
-#: What the planner is told in the schema itself when the probe has been withdrawn. On the
-#: FIELD, not in a class docstring, because a docstring here is a silent schema change.
+#: What the planner is told, in the schema itself, when no read is on offer. Attached to the
+#: field rather than written as a class docstring, which would change the schema silently.
 SETTLED_CHOICE_DESCRIPTION: Final[str] = (
     "This step offers two moves and no probe. Your top hypothesis has held at or above the "
     "remediate threshold in a category with a Tier-1 fix for two steps running, and your own "
@@ -265,8 +267,8 @@ SETTLED_CHOICE_DESCRIPTION: Final[str] = (
 
 
 class ProbeWithdrawn(StructuredOutput):
-    # NO class docstring, deliberately: it would become the planner's JSON schema `description`
-    # (CLAUDE.md). The reason travels on `next_action`'s own description instead.
+    # Deliberately no class docstring: Pydantic would copy it into the JSON schema the planner
+    # reads. The explanation is attached to the `next_action` field below instead.
     model_config = ConfigDict(extra="forbid")
 
     next_action: SettledNextAction = Field(description=SETTLED_CHOICE_DESCRIPTION)
@@ -281,8 +283,8 @@ class ProbeWithdrawn(StructuredOutput):
         return asked_for_a_probe(error)
 
 
-#: Built models, keyed by the model they narrow: ``model_json_schema()`` is cached per class, so
-#: a fresh class per step would re-generate the schema and defeat the prompt cache.
+#: Narrowed models built so far, keyed by the model each one narrows. Pydantic caches a schema
+#: per class, so building a fresh class every step would rebuild it and lose the prompt cache.
 _WITHOUT_PROBE: Final[dict[type[BaseModel], type[BaseModel]]] = {}
 
 
@@ -304,8 +306,8 @@ def without_probe[T: BaseModel](model: type[T]) -> type[T]:
     return cast(type[T], cached)
 
 
-#: Pydantic's name for "the discriminator value is not one this union admits". Named because a
-#: Pydantic upgrade could turn a refusal into a silent escalation; test_hypothesis.py pins it.
+#: Pydantic's own name for the error "this is not one of the allowed kinds". Named here because a
+#: Pydantic upgrade that renamed it would turn a deliberate refusal into a silent escalation.
 _UNION_TAG_INVALID: Final[str] = "union_tag_invalid"
 
 

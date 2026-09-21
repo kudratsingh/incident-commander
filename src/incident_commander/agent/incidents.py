@@ -15,8 +15,8 @@ from incident_commander.agent.hypothesis import Hypothesis, HypothesisCategory
 from incident_commander.agent.planner_context import ATTEMPT_FAILED_MARKER, PLAN_MARKER
 from incident_commander.agent.state import EvidenceEntry
 
-#: The argument key both markers carry the targeted cause under. One spelling, because a
-#: second one is how a remediated cause starts reading as an unaddressed one (ADR 0059).
+#: The key both ledger markers record the cause they aimed at under. One spelling only: a second
+#: one would make a cause the run did act on read as one it left unaddressed.
 TARGET_KEY = "target_hypothesis"
 
 

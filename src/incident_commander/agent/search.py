@@ -16,39 +16,40 @@ from typing import Final
 from incident_commander.agent.hypothesis import Hypothesis, ProbeAction
 from incident_commander.agent.state import BudgetLedger, EvidenceEntry
 
-#: Levels below the root, and branches per node. Not raisable: ``SEARCH_DEPTH`` /
-#: ``SEARCH_BRANCH`` may ask for LESS, never more (ADR 0055).
+#: How many levels below the root a walk may go, and how many branches each node may open.
+#: Configuration may ask for less than these, never more.
 MAX_SEARCH_DEPTH: Final[int] = 2
 MAX_BRANCH_FACTOR: Final[int] = 3
 
-#: One branch reads the world once, and one tool call is held back so the chosen path can
-#: still run its own probe: exploring must not starve the path that acts.
+#: A branch makes one read, and one tool call is always held back so the chosen path can still
+#: make its own: exploring must never use up the budget the acting path needs.
 BRANCH_PROBE_TOOL_CALLS: Final[int] = 1
 CHOSEN_PATH_TOOL_RESERVE: Final[int] = 1
 
-#: Weights for plan 02 § 257's ``selector_confidence − tool_cost − token_cost − safety_risk``.
-#: DECLARED, not tuned: tuning needs the paid sweep (WP-12.2), never on the holdout.
+#: The weights in a node's score: the selector's confidence, less tool cost, token cost and
+#: safety risk. Declared rather than tuned — tuning them needs a paid sweep first.
 TOOL_COST_WEIGHT: Final[float] = 0.25
 TOKEN_COST_WEIGHT: Final[float] = 0.25
 SAFETY_RISK_WEIGHT: Final[float] = 0.5
 
-#: Markers, so tests assert the guard's own string rather than that something raised (F-007).
+#: The exact wording each refusal uses, so a test can assert the reason rather than merely that
+#: something raised.
 DEPTH_CAP_SPENT: Final[str] = "this step's search depth is already spent"
 BRANCH_CAP_SPENT: Final[str] = "this node's branches are already spent"
 DEPTH_ABOVE_MAXIMUM: Final[str] = "requested search depth is above the structural maximum"
 BRANCH_ABOVE_MAXIMUM: Final[str] = "requested branch factor is above the structural maximum"
 
-#: Why the ledger refused another branch. Each is a reason a reader can act on, never a silent
-#: stop: "search explored less than its bound" and "search was capped" are different findings.
+#: Why the shared budget refused another branch. Each is a reason a reader can act on: a walk
+#: that explored less than it was allowed and one that hit its limit are different findings.
 LEDGER_EXHAUSTED: Final[str] = "ledger exhausted"
-#: Two candidates naming the same read are one evidence-gathering decision, so the second is
-#: not a branch — it would pay a second tool call for the answer already in hand.
+#: Two candidates proposing the same read are one decision, so the second opens no branch: it
+#: would pay for a second call to get an answer already in hand.
 DUPLICATE_BRANCH_PROBE: Final[str] = "duplicate probe"
 TOOL_CEILING_RESERVED: Final[str] = "tool-call ceiling reserved for the chosen path"
 TOKEN_CEILING_RESERVED: Final[str] = "token ceiling reserved for the chosen path"
 
-#: The refusal every mode but RECORDED gets, spelled once for the strategy and the eval runner:
-#: branches of a live world read a MOVING world, so the experiment would measure its drift.
+#: The refusal a run gets unless it is replaying a recording, written once for both the strategy
+#: and the eval runner: branches of a live world read a world that moves underneath them.
 SEARCH_IS_RECORDED_MODE_ONLY: Final[str] = (
     "search runs in RECORDED mode only. A branch gathers evidence, so in a live world "
     "each branch would read a world that had already moved and no two branches would be "
@@ -132,7 +133,7 @@ class SearchWalk:
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class NodeCost:
-    """What one node cost, as ledger deltas — the "accumulated cost" of plan 02 § 255."""
+    """What one node of the walk cost: the tool calls, tokens and dollars it added."""
 
     tool_calls: int = 0
     tokens: int = 0
@@ -157,7 +158,7 @@ def cost_between(before: BudgetLedger, after: BudgetLedger) -> NodeCost:
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class NodeScore:
-    """Plan 02 § 257's score, kept as its four terms so a row says WHY a path won."""
+    """A node's score, kept as its four separate terms so a reader sees why a path won."""
 
     selector_confidence: float
     tool_cost: float
@@ -236,22 +237,22 @@ def evidence_snapshot_ref(evidence: Sequence[EvidenceEntry]) -> str:
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class SearchNode:
-    """One node of the walk, in plan 02 § 255's terms: hypothesis set, evidence snapshot ref,
-    proposed probe, score, accumulated cost — plus the tree ids and any refusal reason."""
+    """One node of the walk: the ranking at it, a reference to the evidence it was scored over,
+    the read it would make next, its score and cost, its place in the tree, and any refusal."""
 
     node_id: str
-    #: ``""`` on the root, which is the step as the generator proposed it.
+    #: Empty on the root node, which is the step the generator proposed before any read.
     parent_id: str = ""
     depth: int
     evidence_snapshot_ref: str
     hypotheses: tuple[Hypothesis, ...] = ()
-    #: The probe this node would run next; ``None`` when its path would stop or act.
+    #: The read this node would make next; ``None`` where its path would stop or remediate.
     proposed_probe: ProbeAction | None = None
-    #: The probe that was RUN to reach this node — a branch is an evidence-gathering
-    #: decision, so this is what distinguishes one branch from another.
+    #: The read that was actually made to reach this node. A branch IS a choice of which read
+    #: to make, so this is what tells one branch from another.
     probe_taken: ProbeAction | None = None
     score: NodeScore
     cost: NodeCost
-    #: Why this branch never became a scored node (a tier refusal, a replay miss, the
-    #: ledger). ``None`` on every node that ran.
+    #: Why this branch never became a scored node — the read was not allowed, the recording had
+    #: no answer for it, or the shared budget was spent. ``None`` on every node that ran.
     refused: str | None = None

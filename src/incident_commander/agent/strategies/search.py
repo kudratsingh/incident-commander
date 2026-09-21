@@ -415,7 +415,7 @@ class _Walk:
         path_cost: NodeCost,
         candidate_id: str = "",
     ) -> _Path:
-        """Score one node: one selector call, then plan 02 § 257's four terms.
+        """Score one node: one selector call, then the score's four terms.
 
         ``cost_from`` is the ledger before this node's first charge, so a branch's own cost
         includes its read; the score reads the PATH's cost, which is what paths differ by.

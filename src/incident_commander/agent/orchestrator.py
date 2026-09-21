@@ -38,8 +38,8 @@ ALLOWED_TRANSITIONS: dict[IncidentState, frozenset[IncidentState]] = {
     IncidentState.REMEDIATING: frozenset(
         {IncidentState.VERIFYING, IncidentState.ESCALATED, IncidentState.FAILED}
     ),
-    # INVESTIGATING, never PLANNING (ADR 0056, superseding ADR 0008): a failed attempt
-    # says the diagnosis was wrong, so the retry re-gathers evidence instead of re-planning.
+    # A failed verification goes back to INVESTIGATING, never straight to PLANNING: the attempt
+    # failing suggests the diagnosis was wrong, so a retry gathers evidence before re-planning.
     IncidentState.VERIFYING: frozenset(
         {
             IncidentState.INVESTIGATING,

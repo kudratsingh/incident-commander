@@ -187,7 +187,7 @@ class _Budget(BaseModel):
 
 
 class _RunReport(BaseModel):
-    """The whole ``report_agent_run`` payload, as WO-R3-328 defines it."""
+    """The whole payload one run report sends, as the platform's report tool declares it."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -404,7 +404,7 @@ def top_of(hypotheses: Sequence[Hypothesis]) -> dict[str, Any] | None:
 def ranked_hypotheses(run_state: RunState) -> list[dict[str, Any]] | None:
     """Every hypothesis the run holds, in rank order, each with its reasoning excerpt.
 
-    **The ORDER is the ranking** — the platform stores it as sent and never re-sorts (plat #230).
+    **The order IS the ranking** — the platform stores the list as sent and never re-sorts it.
     ``None`` never clears an earlier ranking; an empty LIST would claim it considered nothing.
     """
     return ranked_of(run_state.hypotheses)
@@ -625,7 +625,7 @@ class RunReporter:
 
     @property
     def widened(self) -> bool:
-        """Whether this run is still reporting the WO-R3-328 fields."""
+        """Whether this run is still sending the newer report fields, or has fallen back."""
         return self._widened
 
     def report(self, run_state: RunState) -> None:

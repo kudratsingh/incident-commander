@@ -23,20 +23,22 @@ from incident_commander.llm.prompts.loader import load_prompt
 from incident_commander.llm.repair import RepairedCall, call_with_output_repair
 from incident_commander.llm.structured import StructuredOutput
 
-#: Prompt file this role is asked with. One spelling for strategy, snapshot suite and loader.
+#: The prompt file this role is asked with. One spelling, shared by the strategy, the snapshot
+#: tests and the loader.
 SELECTOR_PROMPT: Final[str] = "candidate_selector"
 
-#: Role label for the accounting split and the trace, so selection's cost is separable from
-#: ``investigation_planner``'s. ``StepAccounting.selector_calls`` counts it.
+#: The role the selector's calls are accounted and traced under, so its cost can be read apart
+#: from the planner's.
 SELECTOR_ROLE: Final[str] = "candidate_selector"
 
-#: The candidate ids one ``SelectionResult`` may cite, for one selector call.
-#: ``None`` refuses; a ``ContextVar``, so runs cannot cross.
+#: The candidate ids a selection is allowed to name during one selector call. ``None`` refuses
+#: every id rather than allowing any; a context variable, so two runs cannot cross.
 _CANDIDATES: ContextVar[tuple[str, ...] | None] = ContextVar(
     "incident_commander_selector_candidates", default=None
 )
 
-#: Named so a test asserts the guard's marker, not that something raised (F-007).
+#: The exact wording each validation failure uses, named so a test can assert the reason rather
+#: than merely that something raised.
 NO_CANDIDATES_BOUND: Final[str] = "no candidate set is bound"
 UNKNOWN_CANDIDATE_ID: Final[str] = "names no candidate in the set you were shown"
 UNSCORED_CANDIDATE: Final[str] = "was not scored"
@@ -67,15 +69,15 @@ def _bound_candidates(subject: str) -> tuple[str, ...]:
 
 
 class SelectionDecision(StrEnum):
-    # No class docstring: pydantic copies an enum's into ``$defs.<Enum>.description``,
-    # which the model reads on ``record_output`` (LESSONS 2026-09-17, plat #210).
+    # No class docstring: Pydantic copies one into the JSON schema the model itself reads, so a
+    # note meant for developers would become an instruction to the model.
     SELECT = "select"
     PROBE_MORE = "probe_more"
     ESCALATE = "escalate"
 
 
 class SelectionResult(StructuredOutput):
-    # No class docstring here either, same reason as above.
+    # No class docstring here either, for the same reason: it would reach the model's schema.
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     decision: SelectionDecision = Field(
@@ -186,8 +188,8 @@ class SelectionResult(StructuredOutput):
         return None
 
 
-#: Headings of the selector's context block, named so the prompt and the tests
-#: spell them once each.
+#: The headings of the selector's context block, named once each so the prompt and the tests
+#: cannot spell them differently.
 CANDIDATES_HEADING: Final[str] = "Candidate diagnoses:"
 ALERT_PREFIX: Final[str] = "Alert: "
 

@@ -19,13 +19,14 @@ from incident_commander.agent.hypothesis import HypothesisCategory, ProbeAction
 from incident_commander.agent.state import EvidenceEntry
 from incident_commander.llm.structured import StructuredOutput
 
-#: The evidence ids a candidate set may cite, for one planner call. ``None`` is a
-#: refusal, not a licence; a ``ContextVar`` so concurrent runs cannot cross.
+#: The evidence ids a candidate set is allowed to cite during one planner call. ``None`` refuses
+#: every citation rather than allowing any; a context variable, so two runs cannot cross.
 _LEDGER: ContextVar[frozenset[UUID] | None] = ContextVar(
     "incident_commander_evidence_ledger", default=None
 )
 
-#: Named so a test asserts the guard's marker, not that something raised (F-007).
+#: The exact wording each validation failure uses, named so a test can assert the reason rather
+#: than merely that something raised.
 NO_LEDGER_BOUND: Final[str] = "no evidence ledger is bound"
 UNKNOWN_EVIDENCE_ID: Final[str] = "names no entry in the run's evidence ledger"
 DUPLICATE_CANDIDATE: Final[str] = "duplicate candidate"
@@ -54,8 +55,8 @@ def _bound_ledger(subject: str) -> frozenset[UUID]:
     return ledger
 
 
-# No class docstring on any model below: pydantic copies one into the JSON schema
-# ``description`` shown to the model. Field descriptions are the deliberate opposite.
+# None of the models below has a docstring: Pydantic copies a class docstring into the JSON
+# schema the model reads, whereas the field descriptions are written for it on purpose.
 
 
 class EvidenceRef(StructuredOutput):
@@ -109,8 +110,8 @@ class DiagnosisCandidate(StructuredOutput):
         ),
     )
     confidence: float = Field(ge=0.0, le=1.0)
-    # The only two defaulted fields: omitted and empty say the same thing, so
-    # repairing the absence would spend a billed call for nothing.
+    # The only two fields with defaults: leaving them out and sending an empty list mean the
+    # same thing, so re-asking for an absent one would spend a billed call for nothing.
     evidence_for: tuple[EvidenceRef, ...] = Field(
         default=(),
         description="Evidence ids that support this candidate. May be empty.",
@@ -119,8 +120,8 @@ class DiagnosisCandidate(StructuredOutput):
         default=(),
         description="Evidence ids that argue against this candidate. May be empty.",
     )
-    # Required even when null: plan 02 § 11.3 builds the step from the top
-    # candidate's probe, so silence must be stated, not inferred.
+    # Required even when it is null, because the step the loop runs is built from the top
+    # candidate's probe: "no further read would help" has to be said, not left out.
     next_probe: ProbeAction | None = Field(
         description=(
             "The read tool that would best discriminate this candidate next, "
@@ -157,11 +158,12 @@ def _one_candidate_each(
                 "diagnosis. Give each candidate a distinct category or name."
             )
         seen_labels.add(label)
-    # Stable, so equal confidences keep the order the model stated them in.
+    # A stable sort, so candidates of equal confidence keep the order the model listed them in.
     return tuple(sorted(value, key=lambda candidate: candidate.confidence, reverse=True))
 
 
-#: The set-level rules in the model's words — one string, so the two types agree.
+#: The rules about the set as a whole, in the words the model reads. One string, so both types
+#: that use it state them identically.
 _SET_DESCRIPTION: Final[str] = (
     "List them most likely first; ordering is normalized after validation — "
     "entries are re-sorted by confidence descending (stable: equal-confidence "
@@ -170,8 +172,8 @@ _SET_DESCRIPTION: Final[str] = (
     "(category, name)."
 )
 
-#: The candidate set as a TYPE, not a field: ``candidates: CandidateTuple``
-#: inherits all three set-level rules (architecture-principles rule 2).
+#: The candidate set expressed as a type rather than repeated as a field, so anything annotated
+#: with it gets all three set-level rules without restating them.
 CandidateTuple = Annotated[
     tuple[DiagnosisCandidate, ...],
     Field(

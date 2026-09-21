@@ -30,20 +30,21 @@ from incident_commander.llm.prompts.loader import load_prompt
 from incident_commander.llm.repair import RepairedCall, call_with_output_repair
 from incident_commander.llm.structured import StructuredOutput
 
-#: Prompt file the critic is asked with, and the addendum the revising planner call appends to
-#: ``investigation_planner.md``. One spelling for strategy, snapshot suite and loader.
+#: The prompt file the critic is asked with, and the extra text the revising planner call appends
+#: to the planner prompt. One spelling each, shared by the strategy, the tests and the loader.
 CRITIC_PROMPT: Final[str] = "reflection_critic"
 REVISION_PROMPT: Final[str] = "investigation_planner_revision"
 
-#: Role label for the accounting split and the trace. Its own role, so the critique's cost is
-#: separable from the planner's — "added tokens" is the number this packet reports.
+#: The role the critic's calls are accounted and traced under. Its own role, so the critique's
+#: cost can be read apart from the planner's: how many tokens it adds is what it is judged on.
 CRITIC_ROLE: Final[str] = "reflection_critic"
 
-#: Revision passes one planner step may spend. ONE, and deliberately not configurable: a bound
-#: an operator can raise is not a bound, and a bound stated only in the prompt fails open.
+#: How many revisions one planner step may spend. One, and deliberately not configurable: a limit
+#: an operator can raise is no limit, and one stated only in a prompt can simply be ignored.
 MAX_REVISION_PASSES: Final[int] = 1
 
-#: Named so a test asserts the guard's own marker rather than that something raised (F-007).
+#: The exact wording each contradictory critique is rejected with, named so a test can assert
+#: the reason rather than merely that something raised.
 KEEP_WITH_FINDINGS: Final[str] = "the verdict is 'keep' and findings were named"
 REVISE_WITHOUT_FINDINGS: Final[str] = "the verdict is 'revise' and no finding was named"
 CAP_ALREADY_SPENT: Final[str] = "this step's one revision pass is already spent"
@@ -89,14 +90,14 @@ class RevisionPass:
 
 
 class RevisionVerdict(StrEnum):
-    # No class docstring: pydantic copies an enum's into ``$defs.<Enum>.description``,
-    # which the model reads on ``record_output`` (LESSONS 2026-09-17, plat #210).
+    # No class docstring: Pydantic copies one into the JSON schema the model itself reads, so a
+    # note meant for developers would become an instruction to the model.
     KEEP = "keep"
     REVISE = "revise"
 
 
 class LedgerContradiction(StructuredOutput):
-    # No class docstring here either, same reason as above.
+    # No class docstring here either, for the same reason: it would reach the model's schema.
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     evidence: EvidenceRef = Field(
@@ -115,7 +116,7 @@ class LedgerContradiction(StructuredOutput):
 
 
 class StepCritique(StructuredOutput):
-    # No class docstring here either, same reason as above.
+    # No class docstring here either, for the same reason: it would reach the model's schema.
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     unsupported_assumptions: tuple[str, ...] = Field(
@@ -204,8 +205,8 @@ class StepCritique(StructuredOutput):
         return self
 
 
-#: Headings of the two blocks the critic and the reviser are shown beyond the planner's own
-#: context. Named so the prompts and the tests spell them once each.
+#: The headings of the two extra blocks the critic and the reviser see on top of the planner's
+#: own context. Named once each, so the prompts and the tests cannot spell them differently.
 PROPOSED_STEP_HEADING: Final[str] = "The step the planner proposed:"
 CRITIQUE_HEADING: Final[str] = "A reviewer read that step against the same evidence and found:"
 NO_FINDINGS_LINE: Final[str] = "  (no findings)"

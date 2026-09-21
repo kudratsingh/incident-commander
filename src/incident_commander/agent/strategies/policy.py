@@ -19,7 +19,8 @@ from incident_commander.agent.state import RunState
 
 
 class EscalationSignal(StrEnum):
-    """Plan 02 § 15's escalation signals, closed. A member lands only with its threshold."""
+    """The signals that say a step is too uncertain to leave alone. Closed: a new signal lands
+    only together with the threshold that decides when it fires."""
 
     TOP1_CONFIDENCE_LOW = "top1_confidence_low"
     TOP1_TOP2_MARGIN_NARROW = "top1_top2_margin_narrow"

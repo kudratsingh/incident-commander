@@ -37,12 +37,11 @@ class RecoveredReading(NamedTuple):
     human is never asked to take the predicate on trust."""
 
 
-#: "This reading shows the fault already gone", keyed on the READ tool. TOTAL over every probe
-#: ``ALERT_SUBJECT_PROBES`` and ``VERIFY_PROBE_FOR_ACTION`` name; ``None`` is a DECLARED inert
-#: entry, pinned by ``tests/unit/test_attribution.py::TestTheRecoveredReadingMap``.
+#: For each read tool, how its reading says the fault is already gone. Every read tool the agent
+#: can use has an entry; ``None`` states on purpose that this tool's reading can never say so.
 RECOVERED_READING: Final[dict[str, RecoveredReading | None]] = {
-    # An expired key and an invalidated one are byte-identical (ADR 0062), which is why a claim
-    # rests on the PAIR of readings rather than on this one.
+    # A key that expired by itself and a key the agent invalidated read exactly the same, which
+    # is why a claim needs the readings from BEFORE and after the action, not just this one.
     "get_cache_key_info": RecoveredReading(
         "get_cache_key_info",
         "key",
@@ -51,22 +50,22 @@ RECOVERED_READING: Final[dict[str, RecoveredReading | None]] = {
         "the platform reports every field null for a key it does not hold, so `exists: false` "
         "is the state an invalidation leaves and the state an expiry leaves",
     ),
-    # INERT (ADR 0009): a DECLARED CACHED read, so a zero can be a drained backlog or a
-    # measurement from before the fault. `measured_at` / `age_seconds` are what an entry needs.
+    # No entry: this reading may be cached, so a zero backlog can mean the queue drained or
+    # merely that the measurement predates the fault. An entry would need the measurement's age.
     "get_consumer_lag": None,
-    # INERT: no argument names one row, and an absence from a filtered or partial page proves
-    # only that page (INC-001, INC-002). A fence also leaves the row listed (ADR 0033).
+    # No entry: no argument names a single row, a row missing from one page proves nothing about
+    # the rest (incidents INC-001 and INC-002), and a fenced row is still listed anyway.
     "list_dlq_messages": None,
-    # INERT: nothing in a chain reading says the fault ended on its own — `paused` is the state
-    # the agent's OWN stabilizer writes, and ADR 0033 measured a fence changing nothing else.
+    # No entry: nothing in a chain's reading shows a fault ending on its own. `paused` is the
+    # state the agent's own action writes, and a fence was measured to change nothing else.
     "get_dag_state": None,
-    # INERT: a trace is a record of work that already happened. It does not recover.
+    # No entry: a trace records work that already finished, so it never recovers.
     "get_trace": None,
 }
 
 
 class AttributionVerdict(StrEnum):
-    """What this run may say about the recovery it read (O-29's three answers)."""
+    """What a run may claim about a recovery it read. Three answers, and no others (O-29)."""
 
     ATTRIBUTED = "attributed"
     """The last pre-action reading showed the fault present and the reading after the action
@@ -78,13 +77,13 @@ class AttributionVerdict(StrEnum):
     so the action may have caused it and the evidence cannot say."""
 
 
-#: The sentences O-29 requires a run to report, verbatim in one place: the shared prompt rule
-#: quotes them and ``tests/unit/test_attribution.py`` pins the briefing to the same words.
+#: The two sentences a run must use to report a recovery it cannot claim credit for, written once
+#: here: the shared prompt rule quotes them and a test holds the briefing to the same words.
 CLEARED_ON_ITS_OWN_SENTENCE: Final[str] = "the issue cleared on its own before I could act"
 CANNOT_ATTRIBUTE_SENTENCE: Final[str] = "recovered, but I cannot confirm my action caused it"
 
-#: Which sentence each verdict is reported with. ``ATTRIBUTED`` has none: a claim that holds
-#: needs no disclaimer.
+#: Which of those sentences goes with each verdict. A verdict the evidence supports has none,
+#: because a claim that holds up needs no disclaimer.
 VERDICT_SENTENCE: Final[dict[AttributionVerdict, str]] = {
     AttributionVerdict.CLEARED_ON_ITS_OWN: CLEARED_ON_ITS_OWN_SENTENCE,
     AttributionVerdict.CANNOT_ATTRIBUTE: CANNOT_ATTRIBUTE_SENTENCE,
@@ -112,7 +111,7 @@ class AttributionRead(BaseModel):
 
     @property
     def sentence(self) -> str:
-        """The report O-29 requires for this verdict, or "" where none is required."""
+        """The sentence a run must report with this verdict, or "" where none is required."""
         return VERDICT_SENTENCE.get(self.verdict, "")
 
 
@@ -129,7 +128,7 @@ def resource_values(tool: str, arguments: Mapping[str, Any]) -> set[str]:
 
 
 def _matches(value: object, expected: object) -> bool:
-    """Value equality that does not let ``0`` satisfy ``False`` (S-20's lesson)."""
+    """Equality that will not let ``0`` count as ``False``, which in Python it otherwise does."""
     if isinstance(expected, bool):
         return value is expected
     return value == expected
@@ -266,8 +265,8 @@ def attribution_of(run_state: RunState) -> AttributionRead | None:
     if acted is not None:
         return _acted_verdict(evidence, *acted)
     if tier_one_calls(evidence):
-        # An action fired on something this map cannot read. "It cleared before I could act"
-        # is false of such a run, so the alerted-subject branch is not available to it.
+        # The run acted on something no reading above can observe. "It cleared before I could
+        # act" would be false of such a run, so it gets no verdict at all.
         return None
     subject = alerted_subject(run_state.alert)
     if subject is None:
@@ -284,7 +283,8 @@ def _acted_verdict(
     before = [entry for index, entry in seen if index < action_index]
     after = [entry for index, entry in seen if index > action_index]
     if not after or reads_recovered(after[-1], reading) is not True:
-        # No recovery was read, so nothing is being credited to the action.
+        # The newest reading after the action does not show the fault gone, so there is no
+        # recovery to credit to anything.
         return None
     post = render_reading(reading, resource, after[-1])
     if before and reads_recovered(before[-1], reading) is False:

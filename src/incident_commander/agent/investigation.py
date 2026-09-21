@@ -346,8 +346,8 @@ READING_AGE_FIELD: Final[str] = "age_seconds"
 
 
 def _same_value(value: object, expected: object) -> bool:
-    """Value equality that does not let ``0`` satisfy ``False`` (S-20's lesson). Spelled again
-    rather than imported from ``attribution``, because that module imports this one."""
+    """Equality that will not let ``0`` count as ``False``, which in Python it otherwise does.
+    Written again here rather than imported, because ``attribution`` imports this module."""
     if isinstance(expected, bool):
         return value is expected
     return value == expected

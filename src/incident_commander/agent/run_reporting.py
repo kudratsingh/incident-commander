@@ -31,49 +31,47 @@ from incident_commander.tools.policies import Tier, tier_of
 
 _LOG: Final = logging.getLogger(__name__)
 
-#: The two platform tools this module calls. Deliberately NOT in ``TOOL_REGISTRY``: a registry
-#: entry is what puts a tool on the planner's page.
+#: The two platform tools this module calls. Kept out of ``TOOL_REGISTRY`` on purpose, because a
+#: registry entry is what would put a tool in front of the planner as something it may choose.
 REPORT_RUN_TOOL: Final = "report_agent_run"
 REPORT_BRIEFING_TOOL: Final = "report_agent_briefing"
 
-#: Both of them, for anything that has to leave the reporter's own traffic out of a stream
-#: (``ToolCallLog``, which would otherwise report its reports as steps, forever).
+#: Both names together, for anything that must leave this reporter's own calls out of a stream —
+#: ``ToolCallLog`` would otherwise report each report as a step, and never stop.
 REPORT_TOOLS: Final[frozenset[str]] = frozenset({REPORT_RUN_TOOL, REPORT_BRIEFING_TOOL})
 
-#: Timeout for one report, well under the client's 30 s default: a platform slow to accept a
-#: report must cost the run seconds, not minutes.
+#: How long one report may take before it is abandoned, far under the client's 30-second default:
+#: a platform slow to accept reports must cost the run seconds, not minutes.
 _REPORT_TIMEOUT_SECONDS: Final = 5.0
 
-#: How long a prose blob may be, matching ``report_agent_briefing``'s own ``maxLength``.
-#: Truncated here rather than refused there, because a refusal loses the whole briefing.
+#: The longest prose this reporter sends, matching ``report_agent_briefing``'s own limit. Cut here
+#: rather than left for the platform to refuse, because a refusal loses the whole briefing.
 _MAX_PROSE_CHARS: Final = 20_000
 
-#: How much reasoning one hypothesis, plan or verdict may carry (WO-R3-328): the tool refuses an
-#: over-long string, and a console panel shows a sentence.
+#: The longest reasoning one hypothesis, plan or verdict may carry: the platform refuses a string
+#: over its limit, and a console panel has room for about a sentence anyway.
 _MAX_EXCERPT_CHARS: Final = 280
 
-#: And how much of what a tool ANSWERED one step may carry — longer, because the audit row
-#: records that a read happened and never what it returned.
+#: The longest excerpt of what a tool answered. Longer than the one above, because the platform's
+#: audit row records that a read happened and never what came back, so this is the only copy.
 _MAX_RESULT_EXCERPT_CHARS: Final = 400
 
-#: The platform's caps on the short identifying fields. Over the limit they are REFUSED rather than
-#: truncated (plat #230), and ``Hypothesis.name`` is free-form model output, so this is a real path.
+#: The platform's limits on the short identifying fields. It refuses an over-long value rather
+#: than trimming it, and a hypothesis name is free-form model output, so this really does happen.
 _MAX_NAME_CHARS: Final = 128
 _MAX_CATEGORY_CHARS: Final = 64
-#: Same reasoning, for a verdict string the platform leaves open.
+#: The same, for a verdict string, where the platform declares no limit of its own.
 _MAX_VERDICT_CHARS: Final = 64
-#: And for a step's outcome. 64, not 128: this module said 128 until
-#: ``TestTheMirrorMatchesTheContract`` compared it with the snapshot, and a transport-error
-#: outcome is easily over 64.
+#: And for a step's outcome: 64, not the 128 this module used to assume. A transport error's
+#: outcome text easily runs past 64, so the wrong number here refused real reports.
 _MAX_OUTCOME_CHARS: Final = 64
 
-#: JSON-RPC's "Invalid params". MEASURED on platform v0.6.15: an undeclared field comes back as a
-#: JSON-RPC ERROR with this code, not as a 200 carrying ``isError``, so reading only the
-#: ``isError`` path left a whole rehearsal's reports failing and the console empty.
+#: JSON-RPC's "invalid params" code. A field the platform does not declare comes back as an error
+#: carrying this code, not as a success carrying ``isError``, so both paths must be read.
 _INVALID_PARAMS: Final = -32602
 
-#: What a refusal must name before it is read as "this run cannot be reported" rather than "this
-#: platform does not know these fields yet": a shape refusal is recoverable, a finished run is not.
+#: The refusals that mean "this run can never be reported again", as opposed to "this platform
+#: does not know these fields": the second can be retried with fewer fields, the first cannot.
 _RUN_LEVEL_REFUSALS: Final[frozenset[str]] = frozenset(
     {
         "agent_run_already_finished",
@@ -82,9 +80,8 @@ _RUN_LEVEL_REFUSALS: Final[frozenset[str]] = frozenset(
     }
 )
 
-#: Exactly the input fields platform v0.6.15 declares for ``report_agent_run``. The fallback
-#: payload KEEPS these rather than dropping the new ones, so a field added later cannot leak in
-#: by being forgotten; ``tests/unit/test_run_reporting.py`` pins the set against the snapshot.
+#: Exactly the fields the oldest supported platform declares for ``report_agent_run``. The retry
+#: payload keeps these rather than dropping newer ones, so a new field cannot slip in unnoticed.
 NARROW_FIELDS: Final[tuple[str, ...]] = (
     "run_id",
     "state",
@@ -96,9 +93,8 @@ NARROW_FIELDS: Final[tuple[str, ...]] = (
 )
 
 
-# What a report may contain — a local MIRROR of the tool's input schema, never the contract, so a
-# reporter bug surfaces as a log line rather than a platform refusal mid-demo. These schemas reach
-# no prompt and no tool definition, which is why docstrings are safe on them.
+# The models below mirror the report tool's input schema locally, so a mistake in this module
+# fails here as a log line instead of as a platform refusal in the middle of a demo.
 
 
 class _CurrentHypothesis(BaseModel):
@@ -141,10 +137,10 @@ class _Step(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    #: The contract's bound is ``>= 0``; this reporter's own first step is 1.
+    #: The platform accepts 0 and up; this reporter numbers its own first step 1.
     seq: int = Field(ge=0)
-    # ``report`` is the platform's word for the agent TELLING the operator something rather than
-    # a call it made (ADR 0075). It is never the run's ``last_step``, whose kind has no member.
+    # ``report`` is the platform's word for the agent telling the operator something, rather than
+    # a call it made. It can never be the run's ``last_step``, which has no such kind.
     kind: Literal["read", "action", "report"]
     tool: str = Field(max_length=128)
     arguments: dict[str, Any] = Field(default_factory=dict)
@@ -182,8 +178,8 @@ class _Budget(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     tool_calls_used: int = Field(ge=0)
-    #: ``null`` is the contract's "no limit" (plat #230), which this reporter never sends:
-    #: invariant 7 gives every run an explicit ceiling, so there is always a number.
+    #: The platform reads ``null`` as "no limit", which this reporter never sends: invariant 7
+    #: gives every run an explicit ceiling, so there is always a real number here.
     tool_calls_max: int | None = Field(default=None, ge=0)
     tokens_used: int = Field(ge=0)
     usd_used: float = Field(ge=0.0)
@@ -210,7 +206,7 @@ class _RunReport(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# What the client saw — the only place latency, outcome and raw output exist.
+# What the MCP client saw: the only place a call's latency, outcome and raw output exist.
 
 
 @dataclass(frozen=True, slots=True)
@@ -224,8 +220,8 @@ class ObservedCall:
     tool: str
     arguments: dict[str, Any]
     result_excerpt: str | None
-    #: ``ok``, ``refused`` (a 200 carrying ``isError``) or ``error: <type>: <message>``. Three
-    #: outcomes, not a boolean: "the platform said no" and "the call never landed" differ.
+    #: One of ``ok``, ``refused`` (the platform answered and said no) or ``error: <type>:
+    #: <message>`` (the call never landed). Three outcomes, because those last two differ.
     outcome: str
     latency_ms: int | None
     at: datetime
@@ -250,12 +246,12 @@ class ToolCallLog:
         clock: Callable[[], datetime] = _now,
     ) -> None:
         self.skip = skip
-        # The tracer record carries a DURATION and no timestamp, so the stamp is taken here,
-        # immediately after the call returned.
+        # The tracer's record carries how long a call took but no timestamp, so the moment is
+        # read here instead, immediately after the call returned.
         self.clock = clock
         self._calls: list[ObservedCall] = []
-        #: Who to hand a call to the moment it is observed (ADR 0074). A sink answering ``False``
-        #: leaves the call buffered for the next transition.
+        #: Who to hand a call to the moment it is seen. A subscriber that answers ``False`` has
+        #: not reported it, so the call stays buffered for the next transition to send.
         self._sink: Callable[[ObservedCall], bool] | None = None
 
     def subscribe(self, sink: Callable[[ObservedCall], bool]) -> None:
@@ -336,7 +332,8 @@ def _first_text_block(result: object) -> str | None:
     text = first.get("text")
     if isinstance(text, str):
         return text
-    # A non-text block is still evidence something came back, so it is rendered, not dropped.
+    # A block that is not text is still evidence something came back, so render it as JSON
+    # rather than drop it.
     try:
         return json.dumps(first, sort_keys=True, default=str)
     except (TypeError, ValueError):
@@ -376,7 +373,7 @@ def _capped(text: str, limit: int) -> str:
 
 
 # ---------------------------------------------------------------------------
-# What the console is shown, derived from the run's own state.
+# What the console is shown, built from the run's own state.
 
 
 def top_hypothesis(run_state: RunState) -> dict[str, Any] | None:
@@ -475,7 +472,8 @@ def plan_payload(run_state: RunState) -> dict[str, Any] | None:
     return {
         "action_tool": _capped(action_tool, _MAX_NAME_CHARS),
         "action_arguments": dict(arguments) if isinstance(arguments, Mapping) else {},
-        # The hypothesis NAME, so it is free-form model output and capped like one.
+        # This is a hypothesis NAME, which the model wrote freely, so cap it like the other
+        # model-written names.
         "target_hypothesis": _capped(target, _MAX_NAME_CHARS) if isinstance(target, str) else None,
         "rationale_excerpt": _excerpt(
             rationale if isinstance(rationale, str) else None, _MAX_EXCERPT_CHARS
@@ -492,8 +490,8 @@ def budget_payload(run_state: RunState) -> dict[str, Any]:
     budget = run_state.budget
     return {
         "tool_calls_used": budget.tool_calls_used,
-        # Always a number: ``null`` is the contract's "no limit", and invariant 7 says no run
-        # has one. The scenario's declared cap arrives here (ADR 0019), not the fleet default.
+        # Always a number, never ``null``: the platform reads ``null`` as "no limit" and
+        # invariant 7 gives every run a ceiling. This is the scenario's own cap, not a default.
         "tool_calls_max": budget.max_tool_calls,
         "tokens_used": budget.tokens_used,
         "usd_used": round(float(budget.usd_used), 6),
@@ -578,33 +576,33 @@ class RunReporter:
     ) -> None:
         self._client = client
         self._run_id = str(run_id)
-        # `run_label`, NOT `scenario`: the tool's input model forbids unknown fields, so the
-        # wrong spelling is a refused report rather than an ignored one.
+        # The field is `run_label`, not `scenario`: the report tool rejects unknown fields, so
+        # the wrong spelling makes the platform refuse the report rather than ignore the value.
         self._run_label = run_label
         self._alert_id = str(alert_id) if alert_id is not None else None
-        #: Where the steps come from. ``None`` reports everything except them.
+        #: Where observed tool calls come from. ``None`` still reports everything else.
         self._tool_log = tool_log
-        #: The run as the last report saw it, so a step reported mid-transition carries what was
-        #: true when the call was made. ``None`` is the one window where a step is buffered.
+        #: The run as the last report saw it, so a step sent mid-transition carries what was true
+        #: when the call was made. ``None`` before the first report, when a step is held back.
         self._last_state: RunState | None = None
-        #: Whether the widened fields are still being sent. Latched off by the first refusal
-        #: that names no run-level code — an older platform.
+        #: Whether the newer fields are still being sent. Switched off for good by the first
+        #: refusal that looks like an older platform rejecting a field it does not declare.
         self._widened = True
-        #: Monotonic across the run: the console orders the action ledger by it.
+        #: A step counter that only ever rises: the console orders its ledger by this number.
         self._seq = 0
-        #: How much of the evidence ledger has been turned into reports already.
+        #: How many evidence entries have been reported, so the next report starts after them.
         self._reported_entries = 0
-        #: The state the last report carried, which is the state the run was in while it
-        #: made the calls this report is about to describe.
+        #: The state named by the last report that landed, which is the state the run was in
+        #: while it made the calls the next report will describe.
         self._state_reported: str | None = None
-        #: The plan as last sent, so a second attempt's different plan is reported and the
-        #: same plan is not re-sent on every report after it.
+        #: The plan as last sent, so a second attempt's different plan is reported while the
+        #: same plan is not re-sent on every later report.
         self._plan_sent: str | None = None
-        #: Reports that failed, for the run's own summary line. A count, not a rail: it exists so
-        #: "the console was empty" has an answer other than a broken frontend.
+        #: Reports that failed, for the run's own summary line. Nothing acts on it: it exists so
+        #: "the console was empty" has an answer other than "the frontend is broken".
         self.failures: list[str] = []
-        #: Why the widened fields were dropped, once. NOT in ``failures``: a refused report that
-        #: then landed narrow is one failure, not two.
+        #: Why the newer fields were dropped, recorded once. Kept out of ``failures``, because a
+        #: report that was refused and then landed with fewer fields is one failure, not two.
         self.narrowed_because: str | None = None
         self.reports_sent = 0
         self.steps_sent = 0
@@ -612,11 +610,12 @@ class RunReporter:
         self.verifications_sent = 0
         self.briefing_sent = False
         if tool_log is not None:
-            # ADR 0074: the hook fires when a call returns, so that is when its step is reported.
-            # Subscribed here, not by the runner, so no caller gets queued behaviour by omission.
+            # Subscribe so each tool call is reported the moment it returns, rather than at the
+            # next transition. Done here, so no caller gets the old queued behaviour by omission.
             tool_log.subscribe(self._report_call)
         if planner_log is not None:
-            # ADR 0075, for the same reason: the loop writes a ranking the moment it accepts one.
+            # The same for the run's thinking: the loop publishes a ranking the moment it
+            # accepts one, and this reports it straight away.
             planner_log.subscribe(self._report_thinking)
 
     @property
@@ -635,32 +634,33 @@ class RunReporter:
         One call per pending verdict, plus the run's own state on the last of them. Upsert by
         ``run_id``, so repeating a state appends nothing to the platform's phase history.
         """
-        # 1. Publish the state a live step will stamp itself with, before the pending list is
-        #    built: a call made during the NEXT transition belongs to that transition.
+        # 1. Remember this state before building the list below, because a call made during the
+        #    NEXT transition is reported against that transition's state, not this one's.
         self._last_state = run_state
-        # 2. What has happened since the last report.
+        # 2. Collect everything that has happened since the last report and is not yet sent.
         pending = self._pending(run_state)
         if not self._widened:
-            # A narrow payload carries no step, so N of them would say the same thing N times.
+            # On an older platform a report carries no step, so sending one per item would
+            # repeat the same state report; keep only the last.
             pending = pending[-1:]
-        # 3. Nothing pending: one report carrying the state alone.
+        # 3. Nothing new happened: send one report carrying the run's state on its own.
         if not pending:
             self._deliver(self._payload(run_state, item=None, final=True), narrow_retry=True)
             return
-        # 4. Otherwise one report per item, the run's own state riding on the last of them.
+        # 4. Otherwise send one report per item, with the run's new state on the last of them.
         for position, item in enumerate(pending, start=1):
             final = position == len(pending)
             if not self._widened and not final:
-                # The narrowing latched mid-report, and everything this item carries is a field
-                # the narrow form drops. Skipped rather than sent as a duplicate state report.
+                # The platform refused the newer fields part-way through this loop, and this
+                # item holds nothing else, so skip it rather than repeat the state report.
                 continue
             self._deliver(self._payload(run_state, item=item, final=final), narrow_retry=final)
 
     def report_briefing(self, briefing: EscalationBriefing, *, prose: str | None = None) -> None:
         """Report the finished handoff. Once per run; a second call is refused by design."""
         if self.briefing_sent:
-            # Refused here rather than at the platform: a local guard keeps the log honest
-            # about which call was the real one, and the 409 it would earn is not news.
+            # Refused here rather than by the platform: this keeps the failure log honest about
+            # which call was the real one, and the conflict it would earn tells nobody anything.
             _LOG.debug("run %s: briefing already reported; not sending a second", self._run_id)
             return
         arguments: dict[str, Any] = {
@@ -685,8 +685,8 @@ class RunReporter:
             return False
         try:
             item = self._step_of(call)
-            # Intermediate: the state is the one the run was in while it made this call, and
-            # `at` is the call's own moment, never the report's.
+            # An intermediate report: it carries the state the run was in while it made this
+            # call, stamped with the call's own moment rather than now.
             self._deliver(self._payload(state, item=item, final=False), narrow_retry=False)
         except Exception as err:  # noqa: BLE001 - telemetry may never fail a tool call
             self._note(f"{REPORT_RUN_TOOL}: reporting a live step failed: {err}")
@@ -704,7 +704,7 @@ class RunReporter:
         try:
             item = self._thinking_step(thinking)
             payload = self._payload(state, item=item, final=False)
-            # The ranking this call produced, in both fields a console panel reads.
+            # The ranking this call produced, written into both fields the console panel reads.
             payload["hypotheses"] = ranked_of(thinking.hypotheses)
             payload["current_hypothesis"] = top_of(thinking.hypotheses)
             self._deliver(payload, narrow_retry=False, may_narrow=False)
@@ -720,13 +720,15 @@ class RunReporter:
         The verdicts come from the evidence ledger, the only place they exist. Since ADR 0074 the
         steps are normally already sent; what is left is what the live path could not.
         """
-        # 1. The ledger slice nobody has reported yet, and whatever the client seam buffered.
+        # 1. Take the evidence entries nobody has reported yet, plus any calls the client
+        #    observed and could not send at the time.
         entries = run_state.evidence[self._reported_entries :]
         self._reported_entries = len(run_state.evidence)
         observed = deque(self._tool_log.drain() if self._tool_log is not None else [])
         live_steps = self._tool_log is not None
         pending: list[_Pending] = []
-        # 2. Walk the slice: a verdict is a verification, a real call is a step.
+        # 2. Turn each entry into a report item: a judge verdict becomes a verification, a real
+        #    tool call becomes a step, and a bookkeeping row is skipped.
         for entry in entries:
             if entry.tool_name == VERIFY_JUDGE_MARKER:
                 pending.append(
@@ -741,11 +743,11 @@ class RunReporter:
             if entry.tool_name.startswith("_"):
                 continue
             if live_steps:
-                # Its step went out when the call returned; a second here is the same call
-                # under a second `seq`.
+                # This call's step was already reported the moment it returned; reporting it
+                # again here would show the same call twice under two step numbers.
                 continue
             pending.append(self._step(entry, _take(observed, entry.tool_name)))
-        # 3. Anything the live path could not send, in the order the calls happened.
+        # 3. Add the observed calls that could not be sent live, in the order they happened.
         pending.extend(self._step_of(call) for call in observed)
         return pending
 
@@ -753,8 +755,8 @@ class RunReporter:
         """One ledger entry as a step, enriched with what the client measured."""
         if call is not None:
             return self._step_of(call)
-        # No observed call: an untraced client, or a resumed run whose earlier calls happened
-        # in another process. The ledger's own summary is the honest excerpt.
+        # Nothing was observed for this entry: the client is untraced, or the run resumed and
+        # the call happened in another process. Fall back to the ledger's own summary.
         return self._new_step(
             tool=entry.tool_name,
             arguments=dict(entry.arguments),
@@ -809,8 +811,8 @@ class RunReporter:
         return _Pending(
             {
                 "step": {
-                    # Monotonic across the run, and a REPEATED seq is a no-op on the platform
-                    # (plat #230), so a retried report cannot double a row.
+                    # Rises across the run, and the platform ignores a step number it has
+                    # already stored, so a retried report cannot create the row twice.
                     "seq": self._seq,
                     "kind": _step_kind(tool) if kind is None else kind,
                     "tool": _capped(tool, _MAX_NAME_CHARS),
@@ -832,44 +834,47 @@ class RunReporter:
         ``final`` carries the run's NEW state; earlier items carry the state it was in while it
         made those calls, which keeps a terminal transition's backlog reportable.
         """
-        # 1. The state and the stamp: an intermediate report carries the state the run was in
-        #    while it made the call, and the call's own moment.
+        # 1. Choose the state and the timestamp: an intermediate report carries the state the run
+        #    was in while it made the call, stamped with the call's own moment.
         state = run_state.state.value
         if not final and self._state_reported is not None:
             state = self._state_reported
         at = run_state.updated_at if (final or item is None) else item.at
-        # 2. What the console draws from the run itself.
+        # 2. The fields the console draws from the run itself: state, ranking and budget.
         payload: dict[str, Any] = {
             "run_id": self._run_id,
             "state": state,
-            # The agent's own clock for WHEN it moved: omitting it stamps the moment the report
-            # landed, a different fact.
+            # Send the agent's own clock reading. Leaving it out would stamp the row with the
+            # moment the report arrived, which is a different fact.
             "at": at.isoformat(),
             "current_hypothesis": top_hypothesis(run_state),
             "last_step": last_step(run_state),
             "hypotheses": ranked_hypotheses(run_state),
             "budget": budget_payload(run_state),
         }
-        # 3. The one pending item, and the old ``last_step`` field walked forward with it.
+        # 3. Add the one pending item, and move the older ``last_step`` field forward with it so
+        #    a console reading either field sees the same call.
         if item is not None:
             payload.update(item.payload)
             step = item.payload.get("step")
-            # A ``report`` step never becomes ``last_step``, and could not: v0.6.15's
-            # ``last_step.kind`` has no such member, so writing it would refuse the report.
+            # A thinking step never becomes ``last_step``: that field has no such kind, so
+            # writing one there would make the platform refuse the whole report.
             if step is not None and step["kind"] != "report":
-                # The old field walks forward with the new one, so either reader sees one call.
+                # The older field is filled from the new step, so a console reading either one
+                # sees the same call.
                 payload["last_step"] = {
                     "kind": step["kind"],
                     "tool": step["tool"],
                     "at": step["at"],
                 }
-        # 4. The plan, once per distinct plan, on the report that carries the new state.
+        # 4. Add the plan, but only when it differs from the one last sent, and only on the
+        #    report that carries the run's new state.
         if final:
             plan = plan_payload(run_state)
             if plan is not None and json.dumps(plan, sort_keys=True) != self._plan_sent:
                 payload["plan"] = plan
-        # 5. The identifying fields, on EVERY report: the tool fills them in once and never
-        #    clears them, so repeating costs nothing and a dropped first report is recoverable.
+        # 5. Add the identifying fields to EVERY report: the platform stores them once and never
+        #    clears them, so repeating is free and a lost first report still recovers.
         if self._run_label is not None:
             payload["run_label"] = _capped(self._run_label, _MAX_NAME_CHARS)
         if self._alert_id is not None:
@@ -886,7 +891,7 @@ class RunReporter:
         ``narrow_retry`` is False where the narrow form carries only a state the next report sends.
         ``may_narrow`` is False for a thinking report, where latching punishes one row (ADR 0075).
         """
-        # 1. The widened form, while this platform still accepts one.
+        # 1. Try the full report first, while this platform still accepts the newer fields.
         if self._widened:
             body = self._validated(payload)
             if body is not None:
@@ -894,7 +899,8 @@ class RunReporter:
                 if delivery.ok:
                     self._accept(body)
                     return
-                # 2. A transport, scope or run-level failure: fewer fields help none of them.
+                # 2. A call that never landed, a missing scope or a finished run: give up, since
+                #    sending fewer fields cannot fix any of those.
                 if not delivery.shape_refusal:
                     return
                 if not may_narrow:
@@ -906,7 +912,8 @@ class RunReporter:
                 self._narrow("the reporter's own widened payload failed local validation")
             if not narrow_retry:
                 return
-        # 3. The narrow form, so the state at least lands.
+        # 3. Send the older, smaller report instead, so the run's state at least reaches the
+        #    console.
         narrow = self._validated(_narrow_payload(payload))
         if narrow is None:
             return
@@ -932,8 +939,8 @@ class RunReporter:
         self._state_reported = str(body["state"])
         step = body.get("step")
         if isinstance(step, Mapping):
-            # Counted apart, because "N steps reported" is compared against the platform's
-            # ``agent.tool_invoked`` rows and a thinking row is not a call (WO-R3-336).
+            # Thinking rows are counted separately, because "N steps reported" is compared
+            # against the platform's record of tool calls, and thinking is not a call.
             if step.get("kind") == "report":
                 self.thinking_sent += 1
             else:
@@ -971,15 +978,15 @@ class RunReporter:
             )
         except MCPError as err:
             self._note(f"{tool}: MCPError: {err}")
-            # Only "invalid params" is a shape refusal. A 403 and a transport failure arrive as
-            # ``MCPError`` too, and fewer fields would only hide a missing scope.
+            # Only "invalid params" means the payload's shape was wrong. A missing scope and a
+            # transport failure arrive the same way, and fewer fields would only hide them.
             return Delivery(False, str(err), err.code == _INVALID_PARAMS)
         except Exception as err:  # noqa: BLE001 - fail-open is the whole contract
             self._note(f"{tool}: {type(err).__name__}: {err}")
             return Delivery(False, None)
         if result.is_error:
-            # A tool-level refusal is a 200 with `isError`, so reading only the transport counts
-            # a refused report as delivered (C-02).
+            # The platform can answer successfully and still refuse, by setting `isError`, so a
+            # check that only watched for transport errors counted refused reports as delivered.
             refusal = _error_text(result)
             self._note(f"{tool}: platform refused the report: {refusal}")
             return Delivery(False, refusal, _is_shape_refusal(refusal))

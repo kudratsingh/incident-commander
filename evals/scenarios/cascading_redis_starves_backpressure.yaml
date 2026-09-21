@@ -5,11 +5,18 @@
 # The chain is the platform's own, not a story about it:
 #
 #   1. Redis is the constraint (the root).
-#   2. The metrics loop caches worker-dispatcher's lag in Redis every ~60s under a 90s
-#      TTL; while Redis refuses or loses that write the entry is not refreshed, and a
-#      skipped write leaves the PREVIOUS entry to expire rather than writing a null
-#      (platform dispatcher.py: `lag is None` skips the cache write and the gauge).
-#      So the reading the admission check consumes goes stale and then goes absent.
+#   2. The metrics loop caches worker-dispatcher's lag in Redis once per pass, under a
+#      TTL of THREE passes; while Redis refuses or loses that write the entry is not
+#      refreshed, and a skipped write leaves the PREVIOUS entry to expire rather than
+#      writing a null (platform dispatcher.py: `lag is None` skips the cache write and
+#      the gauge). So the reading the admission check consumes goes stale and then goes
+#      absent.
+#      Both numbers are DERIVED from one setting since platform v0.6.18 / ADR 0039
+#      (`METRICS_LOOP_INTERVAL_SECONDS`), and this line used to read "every ~60s under a
+#      90s TTL" — true of the default and of nothing else. At the 60s default the TTL is
+#      180s; the demo stack runs the pass at 5s, so it is 15s there. The CHAIN is the same
+#      in either deployment — the reading goes stale and then absent — it just happens
+#      faster on a faster clock, and nothing below reads a number of seconds off here.
 #   3. `check_backpressure` reads exactly that cached entry and FAILS OPEN three ways —
 #      absent/expired key, unparseable value, failed read — so the throttle stops
 #      refusing anything (platform app/utils/backpressure.py).
@@ -86,9 +93,12 @@ chaos_plan:
       num_keys: 4096
       value_bytes: 65536
       ttl_seconds: 600
-  # The chain needs TIME, not just a hook: the cached entry lives for up to 90s after the
-  # last successful write, and the queue only grows once admission stops refusing. This
-  # is one wait for the whole plan, ahead of the per-probe polling below.
+  # The chain needs TIME, not just a hook: the cached entry lives for three metrics
+  # passes after the last successful write (180s at the platform's 60s default, 15s on the
+  # demo stack's 5s clock — derived since ADR 0039, not the flat 90s this comment used to
+  # name), and the queue only grows once admission stops refusing. This is one wait for
+  # the whole plan, ahead of the per-probe polling below. 120s is kept because it is the
+  # wait a DEFAULT deployment needs; a faster clock only makes it generous.
   settle_seconds: 120
 
 # The alert is the END of the chain, which is the whole point of the template: the only
@@ -445,9 +455,10 @@ expected_precondition:
   - path: ok
     equals: true
 # LINK 2. The cached measurement is gone: `lag_known false` on the group whose value is
-# the refreshed one. Polled, because the entry lives for up to 90s after the last
-# successful write and only then stops being served — ten looks at 15s covers that
-# window twice over. `source` is asserted beside it so a renamed or unrecognised group
+# the refreshed one. Polled, because the entry lives for three metrics passes after the
+# last successful write and only then stops being served — 180s at the platform's 60s
+# default (and 15s on the demo stack's 5s clock), so ten looks at 15s covers the default
+# window twice over and a faster one many times. `source` is asserted beside it so a renamed or unrecognised group
 # cannot satisfy the link with a null of a different kind.
 - tool: get_consumer_lag
   arguments:

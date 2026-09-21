@@ -31,7 +31,10 @@ from evals.graders.deterministic import (
 from evals.graders.root_cause import is_not_graded_detail
 from evals.runner import (
     _SCENARIOS_DIR,
+    ALERT_FROM_PLATFORM_FLAG,
     EXTERNAL_CHAOS_SEEDER,
+    PLATFORM_ALERT_SOURCE,
+    SCENARIO_ALERT_SOURCE,
     WORLD_ALREADY_FAULTED_FLAG,
     ChaosSetupFailed,
     PreconditionNotMet,
@@ -71,7 +74,7 @@ from incident_commander.api.schemas import AlertPayload
 from incident_commander.config import Settings, settings_env_var_names
 from incident_commander.llm.client import LLMResult
 from incident_commander.llm.fakes import CannedLLMClient
-from incident_commander.tools.mcp_client import MCPError, ToolResult
+from incident_commander.tools.mcp_client import LabProbeClient, MCPError, ToolResult
 
 _NOW = datetime(2026, 8, 8, tzinfo=UTC)
 # Stand-in for the path a real ``write_report`` returns, for the tests that
@@ -4606,3 +4609,296 @@ class TestTheWorldMayAlreadyBeFaulted:
         out = capsys.readouterr().out
         assert WORLD_ALREADY_FAULTED_FLAG in out
         assert "no scenarios ran, nothing was spent" in out
+
+
+def _platform_alert(
+    *,
+    fingerprint: str = "consumer_stalled",
+    subject: dict[str, Any] | None = None,
+    alert_id: str = "7a3e58d2-4b33-4349-9f03-b9c58a71c4f2",
+) -> dict[str, Any]:
+    """One row in the shape ``list_active_alerts`` returns for a rule the platform raised.
+
+    Recorded from the v0.6.18 stack on 2026-09-21, then parameterised: the fingerprint and
+    every subject field live inside ``extra_data``, the summary fields are repeated at the top
+    level, and ``source`` reads ``kafka:consumer_lag`` — which is NOT the spelling the corpus
+    uses, which is the point of several tests below.
+    """
+    payload: dict[str, Any] = {
+        "fingerprint": fingerprint,
+        "severity": "critical",
+        "source": "kafka:consumer_lag",
+        "lag": 41,
+        "threshold": 20,
+        "measured_at": "2026-09-21T07:26:12.306870+00:00",
+        "summary": "worker-dispatcher is 41 messages behind (threshold 20).",
+    }
+    payload.update(subject or {"consumer_group": "billing", "group": "billing"})
+    return {
+        "id": alert_id,
+        "severity": "critical",
+        "source": "kafka:consumer_lag",
+        "title": "Consumer lag on billing: 41 messages behind",
+        "description": payload["summary"],
+        "fired_at": "2026-09-21T07:26:12.308524Z",
+        "extra_data": payload,
+    }
+
+
+class TestTheAlertMayComeFromThePlatform:
+    """Owner decision O-36, platform ADR 0039: the agent is paged by the platform.
+
+    The fourth take's agent triaged an alert its own scenario file had written, while the
+    platform's stream read the same three seeded fixtures before, during and after the fault —
+    ``list_active_alerts`` answered ``total: 3`` throughout. The middle clause of "jobs pile
+    up, the platform pages, the agent responds" was a fixture.
+    """
+
+    @staticmethod
+    def _scenario() -> Scenario:
+        """A live scenario whose alert names a fingerprint AND a subject."""
+        base = _passing_scenario()
+        return base.model_copy(
+            update={
+                "name": "paged_by_the_platform",
+                "use_live_mcp": True,
+                "alert": AlertPayload(
+                    source="platform.kafka",
+                    severity="critical",
+                    fingerprint="consumer_stalled",
+                    group="billing",
+                ),
+            }
+        )
+
+    def _client(self, monkeypatch: pytest.MonkeyPatch, alerts: list[dict[str, Any]]) -> Any:
+        """A canned client that also answers ``list_active_alerts`` with ``alerts``."""
+        responses = dict(self._scenario().canned_tool_responses)
+        responses["list_active_alerts"] = ToolResult(
+            content=[
+                {"type": "text", "text": json.dumps({"total": len(alerts), "alerts": alerts})}
+            ],
+            is_error=False,
+        )
+        client = _ClosableCanned(responses)
+        monkeypatch.setattr("evals.runner.make_client", lambda *_a, **_kw: client)
+        return client
+
+    @staticmethod
+    def _settings() -> Settings:
+        return _test_settings(
+            platform_mcp_url="http://real.host:8001/mcp",
+            platform_smoke_token=SecretStr("eval-smoke"),
+        )
+
+    def test_the_run_starts_from_the_platforms_payload_verbatim(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        row = _platform_alert()
+        self._client(monkeypatch, [row])
+
+        result = run_scenario(self._scenario(), self._settings(), alert_from_platform=True)
+
+        # The brief the agent read is the alert row's own `extra_data` — every key, no key
+        # added, no key dropped. The scenario's `alert:` block is not merged in: a payload
+        # this harness had a hand in assembling would be the old arrangement with a step.
+        started = result.trajectory.checkpoints[0]
+        assert started.alert == row["extra_data"]
+        assert started.alert["source"] == "kafka:consumer_lag"
+
+    def test_the_provenance_names_the_row_it_was_paged_with(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        row = _platform_alert()
+        self._client(monkeypatch, [row])
+
+        result = run_scenario(self._scenario(), self._settings(), alert_from_platform=True)
+
+        provenance = result.outcome.provenance
+        assert provenance is not None
+        assert provenance.alert_source == PLATFORM_ALERT_SOURCE
+        # So a report can be joined to the `alert.raised` audit row that started it, which is
+        # the claim O-36 makes and the one thing a fingerprint cannot identify on its own.
+        assert provenance.alert_id == row["id"]
+
+    def test_the_default_is_the_scenarios_own_block_and_says_so(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        self._client(monkeypatch, [_platform_alert()])
+
+        result = run_scenario(self._scenario(), self._settings())
+
+        provenance = result.outcome.provenance
+        assert provenance is not None
+        assert (provenance.alert_source, provenance.alert_id) == (SCENARIO_ALERT_SOURCE, None)
+        assert result.trajectory.checkpoints[0].alert["source"] == "platform.kafka"
+
+    def test_the_match_ignores_source_and_reads_fingerprint_and_subject(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The platform's `source` is not the corpus's, and matching on it would find nothing.
+
+        `kafka:consumer_lag` / `dlq:threshold` on the row against `platform.kafka` /
+        `platform.dlq` in the YAML — platform ADR 0039's own divergence note. A run that keyed
+        on source would wait out its whole bound with the right alert in front of it.
+        """
+        self._client(monkeypatch, [_platform_alert()])
+
+        result = run_scenario(self._scenario(), self._settings(), alert_from_platform=True)
+
+        assert result.outcome.provenance is not None
+        assert result.outcome.provenance.alert_source == PLATFORM_ALERT_SOURCE
+
+    def test_a_different_subject_is_not_this_scenarios_page(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Same rule, another group. Matching on fingerprint alone would take it.
+
+        This is the 2026-08-30 failure one field along: that run probed the default group
+        while the alert named `unknown-consumer`, and only a VALUE comparison catches it.
+        """
+        self._client(
+            monkeypatch,
+            [
+                _platform_alert(
+                    subject={"consumer_group": "shipping-consumer", "group": "shipping-consumer"}
+                )
+            ],
+        )
+        monkeypatch.setattr(runner_module, "_PLATFORM_ALERT_TIMEOUT_SECONDS", 0.0)
+        monkeypatch.setattr(runner_module, "_PLATFORM_ALERT_POLL_SECONDS", 0.0)
+
+        with pytest.raises(ChaosSetupFailed, match="did not raise"):
+            run_scenario(self._scenario(), self._settings(), alert_from_platform=True)
+
+    def test_the_wait_is_bounded_and_fails_loudly_rather_than_forever(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # The three seeded fixtures are always there, so "no alerts" is never the world: the
+        # failure has to be "none of them is this one", with the count in the message.
+        self._client(monkeypatch, [_platform_alert(fingerprint="job_dispatch_latency_fast_burn")])
+        monkeypatch.setattr(runner_module, "_PLATFORM_ALERT_TIMEOUT_SECONDS", 0.0)
+        monkeypatch.setattr(runner_module, "_PLATFORM_ALERT_POLL_SECONDS", 0.0)
+
+        with pytest.raises(ChaosSetupFailed, match="1 active alert"):
+            run_scenario(self._scenario(), self._settings(), alert_from_platform=True)
+
+    def test_a_scenario_with_no_fingerprint_is_refused_rather_than_matched_loosely(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        self._client(monkeypatch, [_platform_alert()])
+        nameless = self._scenario().model_copy(
+            update={"alert": AlertPayload(source="platform.kafka", severity="critical")}
+        )
+
+        with pytest.raises(ChaosSetupFailed, match="no alert `fingerprint`"):
+            run_scenario(nameless, self._settings(), alert_from_platform=True)
+
+    def test_it_reads_under_the_smoke_principal_and_labels_the_probe(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """ADR 0074 + platform ADR 0038: the evaluator's question, on a token that cannot act.
+
+        An unlabelled read on the SMOKE account lands as `agent.tool_invoked` inside the take,
+        and the demo page then counts it as a call the agent made and never reported (F4).
+        """
+        seen: list[dict[str, Any]] = []
+        client = self._client(monkeypatch, [_platform_alert()])
+
+        def _make(_settings: Settings, **kwargs: Any) -> Any:
+            seen.append(kwargs)
+            return client
+
+        monkeypatch.setattr("evals.runner.make_client", _make)
+        labels: list[tuple[str, str]] = []
+        original = LabProbeClient.call_tool
+
+        def _spy(self: Any, name: str, arguments: dict[str, Any], **kw: Any) -> ToolResult:
+            labels.append((name, self.reason))
+            return original(self, name, arguments, **kw)
+
+        monkeypatch.setattr(LabProbeClient, "call_tool", _spy)
+
+        run_scenario(self._scenario(), self._settings(), alert_from_platform=True)
+
+        assert ("list_active_alerts", runner_module.PLATFORM_ALERT_PROBE_REASON) in labels
+        assert any(kwargs.get("token") == "eval-smoke" for kwargs in seen)
+
+    def test_an_unset_smoke_token_refuses_rather_than_using_the_agents(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        self._client(monkeypatch, [_platform_alert()])
+        settings = _test_settings(platform_mcp_url="http://real.host:8001/mcp")
+
+        with pytest.raises(ChaosSetupFailed, match="read-only principal"):
+            run_scenario(self._scenario(), settings, alert_from_platform=True)
+
+    def test_a_canned_run_refuses_rather_than_silently_doing_nothing(self) -> None:
+        """The quiet failure this guard exists for: no platform, and a row that claims one."""
+        canned = self._scenario().model_copy(update={"use_live_mcp": False})
+
+        with pytest.raises(ValueError, match="needs a live platform"):
+            run_scenario(canned, self._settings(), alert_from_platform=True)
+
+    def test_a_recorded_run_refuses_at_the_function_and_at_the_cli(
+        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        with pytest.raises(ValueError, match="no alert stream"):
+            run_scenario(
+                self._scenario(),
+                self._settings(),
+                recorded_world=Path("nowhere.json"),
+                alert_from_platform=True,
+            )
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            ["evals.runner", "--mode", "recorded", ALERT_FROM_PLATFORM_FLAG, "--only", "x"],
+        )
+        assert runner_module.main() == 2
+        out = capsys.readouterr().out
+        assert ALERT_FROM_PLATFORM_FLAG in out
+        assert "no scenarios ran, nothing was spent" in out
+
+    def test_a_crash_before_the_page_does_not_claim_one(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The asymmetry with ``chaos_seeded_by``, which IS the caller's instruction.
+
+        "A world somebody else broke" is true from the first line of the run; "the platform
+        paged this run" is only true once a row came back. So a run that died in its seeding
+        records ``scenario``, which is what happened.
+        """
+
+        def _boom(*_a: Any, **_kw: Any) -> Any:
+            raise ChaosInvocationError("platform said no")
+
+        monkeypatch.setattr("evals.runner.invoke_chaos_hook", _boom)
+        seeded = self._scenario().model_copy(
+            update={
+                "chaos_setup": ChaosHook(
+                    name="kill_consumer",
+                    arguments={"consumer_group": "billing", "ttl_seconds": 300},
+                )
+            }
+        )
+        self._client(monkeypatch, [_platform_alert()])
+
+        crashed = _crashed_result(
+            seeded,
+            _capture(lambda: run_scenario(seeded, self._settings(), alert_from_platform=True)),
+            settings=self._settings(),
+        )
+
+        provenance = crashed.outcome.provenance
+        assert provenance is not None
+        assert (provenance.alert_source, provenance.alert_id) == (SCENARIO_ALERT_SOURCE, None)
+
+
+def _capture(call: Any) -> BaseException:
+    """Run ``call`` and hand back whatever it raised — the shape ``run_all`` passes on."""
+    try:
+        call()
+    except BaseException as err:  # noqa: BLE001 - the exception IS the return value here
+        return err
+    raise AssertionError("expected the call to raise")

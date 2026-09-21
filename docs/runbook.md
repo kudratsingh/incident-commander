@@ -145,7 +145,7 @@ is a documented substring override, and neither path spends or shares state).
 
 Trace files land in `evals/traces/*.jsonl`; the formatter turns them into readable stepwise trajectories in `evals/reports/human/<scenario>/*.txt` — one folder per scenario, and one new file per run, not one per scenario per run (WO-R3-257). `evals/reports/README.md` maps the whole folder.
 
-**Cost:** roughly $0.05 per read-only scenario, $0.07 per remediation scenario. Current suite of 65 (~49 live: 34 read-only, 15 remediation) is ~$2.75 of tokens end to end — but never in one invocation, for the reason above. A smoke pass is ~$1.15 of that; the remediation scenarios are the rest, paid one run at a time.
+**Cost:** roughly $0.05 per read-only scenario, $0.07 per remediation scenario. Current suite of 66 (~50 live: 34 read-only, 16 remediation) is ~$2.82 of tokens end to end — but never in one invocation, for the reason above. A smoke pass is ~$1.15 of that; the remediation scenarios are the rest, paid one run at a time.
 
 **Side effects:** remediation scenarios fire real Tier-1 mutations against the platform. Idempotent — repeat runs with the same `(incident_id, tool, args)` hash return the cached result. But the *first* run of a scenario does apply changes.
 
@@ -1183,11 +1183,13 @@ and on `main` until the other half lands. Bless the new snapshot locally
 from the new pinned stack, then commit the compose bump, the snapshot, and
 any registry realignment together.
 
-Platform ships a new digest → ten steps on the agent side (the sixth arrived
+Platform ships a new digest → eleven steps on the agent side (the sixth arrived
 with v0.6.11, the first pin to make an existing tool's output field required; the
 seventh with v0.6.12; the eighth with v0.6.13; the ninth with v0.6.14, the first
 pin whose re-record would rewrite a graded trajectory; the tenth with v0.6.17, the
-first pin that moved the REQUEST and left `tools/list` byte-identical):
+first pin that moved the REQUEST and left `tools/list` byte-identical; the eleventh
+with v0.6.18, the first pin that made a platform CONSTANT a setting this stack then
+sets to something else):
 
 1. Update `demo/compose.yml` — **all THREE platform-code services**
    (`migrate`, `platform`, `api`) and the prose that names the version:
@@ -1683,6 +1685,81 @@ first pin that moved the REQUEST and left `tools/list` byte-identical):
     `list_audit_events` fixture recorded before this pin counts rows the agent can
     no longer see. None needed re-recording at v0.6.17 (`make fixture-drift` read
     `0 new / 0 stale`), because no canned fixture's world has a lab probe in it.
+
+    v0.6.18 (WO-R3-339) moved the surface again, by ONE entry, and it is the
+    cleanest reading of step 5 there has been: `get_consumer_lag`'s `description`
+    3,444 → 3,728 characters and the planner's tool block 29,168 → 29,452, **+284
+    both**, so every character of the block's growth is that one description and the
+    three `outputSchema` field descriptions that moved with it (`source`,
+    `age_seconds`, `recent_samples`) are provably not in the block — the block
+    renders a tool's description and its input arguments, never its output schema.
+    Quote both numbers in the PR body: subtracting them is the check.
+
+11. **A pin can turn a platform CONSTANT into a setting, and then the compose file
+    decides what the agent's world is like.** v0.6.18 is the first
+    (platform ADR 0039, owner decisions O-35 and O-36):
+    `METRICS_LOOP_INTERVAL_SECONDS` defaults to 60 and `demo/compose.yml` sets it to
+    **5** on the `platform` AND `api` services. Four things follow, and the first
+    one is the one that costs a session if it is missed.
+
+    **A description that hard-codes a number the setting can move is now FALSE, and
+    that is why this pin has a contract delta at all.** The old text promised a
+    measurement `every ~60s`, a `90s TTL` and a reading `up to a minute stale`. At
+    5 s all three are wrong, and the worst of them is "two calls a few seconds apart
+    return the SAME number" — the exact opposite of the truth on this stack, told
+    confidently to the agent. So the platform re-described it to point at
+    `age_seconds` and the gaps between `recent_samples` instead, and the commander
+    reblessed one snapshot entry. **The rule to carry forward: when a pin makes a
+    number configurable, grep the repo for the OLD number before anything else.** In
+    this one the sweep found `90s TTL` / `~60s` in the canned
+    `cascading_redis_starves_backpressure` comments, in `scripts/demo_live.py`'s
+    waits, and in this runbook. None was a fixture VALUE — `make fixture-drift` read
+    `0 new` — and all of them were text a reader would have trusted.
+
+    **The description must NOT interpolate the setting**, which is why the new text
+    names a reading rather than a number: a `tools/list` that differed between the
+    demo stack and CI would make the snapshot unpinnable, and the `contract` job
+    would go red on a difference that is a deployment rather than a change.
+
+    **Two platform numbers are derived from the interval now, and one of them moved
+    on the DEFAULT.** The lag value key's TTL is three passes — 180 s at the 60 s
+    default (it was a flat 90 s) and 15 s here — and the 15-minute sample ring is
+    pruned by TIME, so it holds ~180 points at 5 s instead of 15, with
+    `LAG_SAMPLES_MAX_ENTRIES = 240` as an absolute guard that binds only below a
+    3.75 s interval. The AGENT's `recent_samples` is capped at the newest 15, the
+    count and order it always returned, so its context cost does not move with the
+    tick; the operator endpoint serves the whole window, which is what makes the
+    console's chart step by the real clock. Nothing in the commander reads a sample
+    COUNT — checked by grep — so no fixture or claim moved with it.
+
+    **The platform pages itself now, and the demo takes that page** (O-36,
+    [ADR 0076](ADR/0076-the-demo-takes-the-platforms-page.md)). Two rules on the same
+    tick, `alert_rules_enabled` default ON: `consumer_stalled` (latest MEASURED lag
+    sample for a group ≥ 20) and `dlq_depth_warning` (a tenant's dead-letter total ≥
+    5, the seeded baseline of four plus one). An episode raises ONCE and resolves
+    when a reading crosses back, with one `alert.raised` / `alert.resolved` audit row
+    per transition — **not withheld from the agent**, because an alert is what the
+    agent was paged with. Three consequences for a re-pin:
+
+    * `make eval-reset` gains `rule_alerts_resolved` in its JSON, and the world
+      audit's `active alerts: 3` is only true afterwards. **Read that counter rather
+      than the row** when you want to know who closed an episode: a take that ends
+      with a reset can close its own page, so an `alert.resolved` inside a take
+      proves the rule only when the reset reports `rule_alerts_resolved: 0`.
+      Measured on the 2026-09-21 rehearsals, one of each — `consumer_outage`'s rule
+      resolved its own episode on a sample that read 8 against a threshold of 20 and
+      the reset then had nothing to close, while `dlq_backlog` finished first and the
+      reset closed it.
+    * **the tell that the rules are on** is a query, like step 10's:
+      `GET /api/v1/audit/logs?action_prefix=alert.` (operator login,
+      `scripts/bootstrap_agent_token.py`'s dev pair) after a take should hold exactly
+      one `alert.raised` for it. Zero rows means either the world never crossed a
+      threshold or `alert_rules_enabled` is off, and those look identical from the
+      commander side — check the depth or the lag before concluding anything.
+    * `--alert-from-platform` matches on fingerprint **plus subject and never on
+      `source`**: the platform's rows read `kafka:consumer_lag` and `dlq:threshold`
+      where the corpus writes `platform.kafka` and `platform.dlq`. A pin that changes
+      either spelling changes nothing here, and that is the point.
 
 ## Connection pool and run capacity ([ADR 0022](ADR/0022-connection-pool-sizing-and-the-run-concurrency-ceiling.md))
 

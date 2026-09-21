@@ -93,6 +93,38 @@ _JUSTIFIED: Final[dict[tuple[object, ...], tuple[str, str]]] = {
         "poison_message adds a dead-letter row, so the canned total counts a "
         "row the un-faulted world has not produced yet",
     ),
+    # WO-R3-339's demo-only world (ADR 0076), and the first DLQ block whose ids are
+    # UNNAMEABLE rather than derived. Every other hook in this family mints a uuid5 from
+    # the tenant and a fixture name, so a caller can pin the row before invoking and the
+    # blocks below say which namespace it came from. `seed_dlq_messages` takes a COUNT and
+    # mints a fresh uuid4 per row — nothing can pin them, not this ledger and not a
+    # grader — which is why every claim in that scenario selects a row by an id the boot
+    # seed owns or asserts a count. Both rows are POST_FAULT: the world holds seven
+    # dead-letter rows where the un-faulted world the check probes holds the boot-seeded
+    # four. THREE fixture elements share these two keys (the ledger excludes the index on
+    # purpose) and the third is the post-action reading, which is the same mechanism
+    # pointing the other way — 3 against a live 4.
+    (
+        "demo_dlq_replay_safe_backlog",
+        "list_dlq_messages",
+        "items[].id[]",
+        "not_live_reachable",
+    ): (
+        POST_FAULT,
+        "seed_dlq_messages mints a fresh uuid4 for each row it writes, so the three "
+        "seeded replay_safe ids in the recording name rows that exist only inside one "
+        "run of this scenario and no un-faulted reading of the DLQ can contain them. "
+        "Unlike every other hook in this family the id cannot be derived, so there is "
+        "nothing to pin — the scenario's claims select the boot-seeded fc8d2a03 instead",
+    ),
+    ("demo_dlq_replay_safe_backlog", "list_dlq_messages", "total", "value"): (
+        POST_FAULT,
+        "seed_dlq_messages adds three dead-letter rows, so the canned total of seven "
+        "counts rows the un-faulted world has not produced yet. The post-action element "
+        "reads 3 against the same live 4 for the mirror of the same reason: the agent's "
+        "replay has emptied the replay_safe slice by then, and the check probes a world "
+        "where neither the fault nor the remediation has happened",
+    ),
     # The `jobs_not_progressing` family (WO-R3-202, WP-4.3), four named mechanisms.
     # What is NOT here is the point: every other `get_outbox_status` field is either
     # volatile or matches live with no entry. `unpublished_count` is the one the
@@ -674,12 +706,6 @@ _JUSTIFIED: Final[dict[tuple[object, ...], tuple[str, str]]] = {
         "the verify leg re-reads the invalidated key and the fixture records "
         "exists=false; the walk probes the world before the deletion, where "
         "the key is still present",
-    ),
-    ("remediate_stale_cache_success", "get_cache_key_info", "size", "value", 0): (
-        WARM_STACK,
-        "the 90-byte stale value is visible on a warm developer stack, but CI's "
-        "fresh stack has not populated that cache entry and reads the fixture value; "
-        "the entry is timing-scoped, not a fixture correction",
     ),
     ("remediate_stale_cache_success", "get_cache_key_info", "size", "value", 1): (
         POST_ACTION,

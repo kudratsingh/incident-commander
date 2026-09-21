@@ -6017,7 +6017,7 @@ class TestRootCauseCoverageIsReported:
         assert "1 not graded" in capsys.readouterr().out
 
     def test_the_shipped_corpus_reports_partial_root_cause_coverage(self) -> None:
-        """Coverage is 54 of 65, and the report must say so rather than round it.
+        """Coverage is 55 of 66, and the report must say so rather than round it.
 
         It was 0 of 41 until WO-R3-261, and it did NOT move to 41: nine scenarios carry a
         recorded decision not to grade them on diagnosis, because none produces a
@@ -6028,12 +6028,14 @@ class TestRootCauseCoverageIsReported:
         WO-R3-331 is the first since to move the DENOMINATOR alone: INC-004's reproduction
         abstains on its `harness_control` family, so the abstentions are ten. WO-R3-332's
         sibling of it moves the denominator the same way and for the same reason, so they
-        are eleven.
+        are eleven. WO-R3-339 moves numerator and denominator together again: its demo-only
+        DLQ world is the first scenario added for the DEMO rather than for the benchmark, and
+        it carries a label because ADR 0038 makes one mandatory whatever a scenario is for.
         """
         shipped = _shipped()
         graded = [s.name for s in shipped if s.root_cause_graded]
-        assert len(shipped) == 65, "the corpus size is read from the loader, never a literal"
-        assert len(graded) == 54, (
+        assert len(shipped) == 66, "the corpus size is read from the loader, never a literal"
+        assert len(graded) == 55, (
             f"{len(graded)} of {len(shipped)} scenarios declare a ground truth — update "
             "this test, ``tests/unit/test_ground_truth_corpus.py``'s record and the "
             "root-cause accuracy reported in the PR body together."

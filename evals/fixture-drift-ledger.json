@@ -11,9 +11,9 @@
     "no-hook": "the fixture describes a fault no chaos hook can produce, so the canned value is the scenario's premise and the check probes a world that never had it. Not a defect; the fix, if that scenario is ever to run live, is a platform hook"
   },
   "_counts": {
-    "recorded": 185,
+    "recorded": 186,
     "fixture-defect": 10,
-    "explained": 175
+    "explained": 176
   },
   "known_drift": [
     {
@@ -335,6 +335,22 @@
       "kind": "value",
       "context": "post-fault",
       "why": "kill_consumer makes worker-dispatcher's lag climb; the check probes the un-faulted world, so the canned backlog cannot match by design"
+    },
+    {
+      "scenario": "demo_dlq_replay_safe_backlog",
+      "tool": "list_dlq_messages",
+      "path": "items[].id[]",
+      "kind": "not_live_reachable",
+      "context": "post-fault",
+      "why": "seed_dlq_messages mints a fresh uuid4 for each row it writes, so the three seeded replay_safe ids in the recording name rows that exist only inside one run of this scenario and no un-faulted reading of the DLQ can contain them. Unlike every other hook in this family the id cannot be derived, so there is nothing to pin \u2014 the scenario's claims select the boot-seeded fc8d2a03 instead"
+    },
+    {
+      "scenario": "demo_dlq_replay_safe_backlog",
+      "tool": "list_dlq_messages",
+      "path": "total",
+      "kind": "value",
+      "context": "post-fault",
+      "why": "seed_dlq_messages adds three dead-letter rows, so the canned total of seven counts rows the un-faulted world has not produced yet. The post-action element reads 3 against the same live 4 for the mirror of the same reason: the agent's replay has emptied the replay_safe slice by then, and the check probes a world where neither the fault nor the remediation has happened"
     },
     {
       "scenario": "dlq_human_required_escalates",
@@ -735,15 +751,6 @@
       "kind": "value",
       "context": "post-action",
       "why": "the verify leg re-reads the invalidated key and the fixture records records_referenced=null; the walk probes the world before the deletion, where the key is still there and names three records \u2014 which element 0 records verbatim, so only the post-action element disagrees"
-    },
-    {
-      "scenario": "remediate_stale_cache_success",
-      "tool": "get_cache_key_info",
-      "path": "size",
-      "kind": "value",
-      "context": "warm-stack",
-      "index": 0,
-      "why": "the 90-byte stale value is visible on a warm developer stack, but CI's fresh stack has not populated that cache entry and reads the fixture value; the entry is timing-scoped, not a fixture correction"
     },
     {
       "scenario": "remediate_stale_cache_success",

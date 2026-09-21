@@ -136,15 +136,16 @@ class TestSplitsAreByTemplate:
         }
 
     def test_the_shipped_corpus_loads(self) -> None:
-        """65 scenarios, no straddle. The check is inert until it is not.
+        """66 scenarios, no straddle. The check is inert until it is not.
 
         41 until WO-R3-202's four, 45 until WO-R3-214's four, 49 until WO-R3-226's
         four, 53 until WO-R3-228's two, 55 until WO-R3-236's two, 57 until
         WO-R3-229's cascade, 58 until WO-R3-221's four, 62 until WO-R3-284's
-        fifth `workflow_stuck` world, 63 until WO-R3-331's INC-004 reproduction
-        and 64 until WO-R3-332's sibling of it. A pin, not a derivation.
+        fifth `workflow_stuck` world, 63 until WO-R3-331's INC-004 reproduction,
+        64 until WO-R3-332's sibling of it and 65 until WO-R3-339's demo-only
+        replay-safe DLQ backlog. A pin, not a derivation.
         """
-        assert len(CORPUS) == 65
+        assert len(CORPUS) == 66
 
 
 class TestClosedVocabularies:

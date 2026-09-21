@@ -1,11 +1,13 @@
 import json
 from pathlib import Path
 from typing import Any
+from unittest.mock import patch
 
 import pytest
 from pydantic import ValidationError
 
 from evals.graders.deterministic import ScenarioExpectation
+from evals.scenarios import schema as schema_module
 from evals.scenarios.loader import load_scenarios
 from evals.scenarios.schema import (
     _SNAPSHOT_PATH,
@@ -232,16 +234,31 @@ class TestChaosHookClosedSet:
         for name in ("get_consumer_lag", "replay_dlq_messages", "pause_dag", "list_incidents"):
             assert name not in chaos_tool_names()
 
-    def test_seed_dlq_messages_excluded_even_when_the_snapshot_carries_it(self) -> None:
-        # Cross-repo rule: seed_dlq_messages stays out of the commander — deferred, flag-off
-        # platform work, excluded by construction so the rebless cannot widen it.
-        allowed = _chaos_names_from_snapshot(
-            _snapshot_payload(
-                ("kill_consumer", "[chaos: single_consumer] shut one down"),
-                ("seed_dlq_messages", "[chaos: environment_wide] seed N rows"),
+    def test_a_deferred_hook_is_excluded_even_when_the_snapshot_carries_it(self) -> None:
+        """The deferral mechanism, tested on its own rather than through its membership.
+
+        It used to be tested through `seed_dlq_messages`, the one hook it held out. WO-R3-339
+        (ADR 0076) admits that hook — it is the only one that can write a `replay_safe`
+        dead-letter row, which is what the demo's DLQ take needs — so `_DEFERRED_CHAOS_TOOLS`
+        is empty and the claim moves to the mechanism: whatever is in that set is excluded
+        from the closed name set even while the snapshot registers it as chaos. That is what
+        keeps a rebless from widening what a scenario may declare, and it has to stay
+        testable with nothing deferred.
+        """
+        with patch.object(schema_module, "_DEFERRED_CHAOS_TOOLS", frozenset({"freeze_clock"})):
+            allowed = _chaos_names_from_snapshot(
+                _snapshot_payload(
+                    ("kill_consumer", "[chaos: single_consumer] shut one down"),
+                    ("freeze_clock", "[chaos: environment_wide] stop time"),
+                )
             )
-        )
         assert allowed == frozenset({"kill_consumer"})
+
+    def test_nothing_is_deferred_today_and_that_is_a_decision(self) -> None:
+        # The other half: the set is EMPTY, so no hook the platform registers as chaos is
+        # being held out silently. A future deferral is a deliberate edit that fails this
+        # test and has to say why in the same commit.
+        assert not schema_module._DEFERRED_CHAOS_TOOLS
 
     def test_a_future_chaos_tool_joins_the_set(self) -> None:
         # A 27th tool must not break the derivation: anything the platform
@@ -658,13 +675,14 @@ class TestV0612ChaosSurfaceReachesTheEvaluator:
             == []
         )
 
-    def test_the_declarable_lab_surface_is_fourteen_hooks(self) -> None:
-        # The snapshot carries FIFTEEN `[chaos: …]` tools at v0.6.12; `seed_dlq_messages`
-        # is excluded from the commander by construction (deferred, flag-off platform
-        # work), so what a scenario may declare is fourteen. Counting the snapshot here
-        # instead would make the exclusion invisible.
-        assert len(chaos_tool_names()) == 14
-        assert "seed_dlq_messages" not in chaos_tool_names()
+    def test_the_declarable_lab_surface_is_fifteen_hooks(self) -> None:
+        # The snapshot has carried FIFTEEN `[chaos: …]` tools since v0.6.12, and since
+        # WO-R3-339 (ADR 0076) a scenario may declare all fifteen: `seed_dlq_messages` was
+        # the one exclusion and the demo's DLQ world needs it, because it is the only hook
+        # that writes a `replay_safe` dead-letter row. Counting the snapshot here instead
+        # would make the derivation invisible, which is why the number is written down.
+        assert len(chaos_tool_names()) == 15
+        assert "seed_dlq_messages" in chaos_tool_names()
 
 
 class TestChaosPlan:
@@ -1115,10 +1133,10 @@ class TestTheGraderSideCanReadTheAnswerKey:
     def test_coverage_is_reportable_over_the_whole_corpus(self) -> None:
         corpus = load_scenarios(_SCENARIOS_DIR)
         graded = [s.name for s in corpus if s.root_cause_graded]
-        # 54 of 63 carry a ground-truth label (ADR 0038 makes one mandatory); the other
-        # nine are recorded abstentions, pinned by test_ground_truth_corpus.py.
-        assert len(graded) == 54
-        assert len(corpus) >= 63
+        # 55 of 66 carry a ground-truth label (ADR 0038 makes one mandatory); the other
+        # eleven are recorded abstentions, pinned by test_ground_truth_corpus.py.
+        assert len(graded) == 55
+        assert len(corpus) >= 66
 
 
 class TestTheAgentVisibleProjection:

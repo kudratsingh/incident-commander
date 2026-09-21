@@ -11,11 +11,11 @@ from __future__ import annotations
 import subprocess
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
-from evals.runner import REHEARSAL_MODE, WORLD_ALREADY_FAULTED_FLAG
+from evals.runner import ALERT_FROM_PLATFORM_FLAG, REHEARSAL_MODE, WORLD_ALREADY_FAULTED_FLAG
 from evals.scenarios.loader import load_scenarios
 from scripts import demo_live
 
@@ -25,6 +25,26 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 def _reading(lag: int, *, age_seconds: float = 4.0, known: bool = True) -> demo_live.LagReading:
     """A lag reading in the shape the waits read, age included (ADR 0074's F7)."""
     return demo_live.LagReading(lag=lag, known=known, age_seconds=age_seconds)
+
+
+class _FakePopen:
+    """Enough of ``Popen`` for the handle's own bookkeeping: it is running until stopped."""
+
+    def __init__(self) -> None:
+        self.returncode: int | None = None
+
+    def poll(self) -> int | None:
+        return self.returncode
+
+    def terminate(self) -> None:
+        self.returncode = 0
+
+    def wait(self, timeout: float | None = None) -> int:
+        self.returncode = 0
+        return 0
+
+    def kill(self) -> None:
+        self.returncode = 0
 
 
 class _FakeStack:
@@ -45,6 +65,13 @@ class _FakeStack:
         #: Whether the platform's own reading shows the fault (step 3's wait). True by
         #: default: a machine test is about the step order, not about a metric's lag.
         self.fault_visible = True
+        #: Scenarios step 3 waited for the PLATFORM's own alert on (WO-R3-339, O-36), and
+        #: whether that wait finds one. True by default for ``fault_visible``'s reason.
+        self.pages_awaited: list[str] = []
+        self.platform_paged = True
+        #: The RATE each `make traffic` was started at — ``None`` when the mode declares
+        #: none. A list because a failing walk may start it more than once.
+        self.traffic_rates: list[str | None] = []
 
     def run(self, command: Any, **kwargs: Any) -> subprocess.CompletedProcess[str]:
         argv = list(command)
@@ -83,6 +110,18 @@ def stack(monkeypatch: pytest.MonkeyPatch) -> _FakeStack:
         "_fault_is_visible",
         lambda mode: (fake.fault_visible, "fake reading"),
     )
+
+    def _paged(console: demo_live.Console, step: demo_live.Step, scenario: str) -> bool:
+        """Step 3's second wait (O-36), stubbed at the seam the real one reads through.
+
+        Stubbed rather than allowed through: the real wait polls `list_active_alerts` on the
+        stack, and a unit test that reaches the network is the live-fire hazard
+        `TestTheConsoleUrl` already guards against.
+        """
+        fake.pages_awaited.append(scenario)
+        return fake.platform_paged
+
+    monkeypatch.setattr(demo_live, "_wait_until_the_platform_pages", _paged)
     # Derived from the newest trace in the real repo otherwise, which is a different test.
     monkeypatch.setattr(
         demo_live, "_run_id_of", lambda scenario: "8f14e45f-ceea-567d-b1c0-1a8c7e0f1b2d"
@@ -91,9 +130,16 @@ def stack(monkeypatch: pytest.MonkeyPatch) -> _FakeStack:
     # rehearsal, not asserted here.
     monkeypatch.setattr(time, "sleep", lambda _seconds: None)
 
-    def _start(self: demo_live.TrafficHandle) -> None:
+    def _start(
+        self: demo_live.TrafficHandle, rate: str | None = None, *, append: bool = False
+    ) -> None:
         fake.traffic_started += 1
-        self.process = None
+        fake.traffic_rates.append(rate)
+        # A stand-in with a `Popen` shape, so `accelerate`'s "is the producer running" check
+        # and `stop`'s `poll()` both see what they would see live. `None` made `accelerate` a
+        # no-op and the acceleration untestable. The cast is the honest shape of a fake: it is
+        # structurally what the handle uses and nothing more.
+        self.process = cast("subprocess.Popen[str]", _FakePopen())
 
     def _stop(self: demo_live.TrafficHandle, console: demo_live.Console) -> None:
         fake.traffic_stopped += 1
@@ -155,7 +201,7 @@ class TestTheStepOrder:
         assert targets.index("eval-reset") < targets.index("world-audit")
         # The gate: a demo must not start from a world somebody else left dirty.
         assert targets.index("world-audit") < len(targets)
-        assert stack.seeded == ["remediate_dlq_backlog_success"]
+        assert stack.seeded == [demo_live.MODES["dlq_backlog"]["scenario"]]
 
     def test_the_fault_is_fired_before_the_agent_runs(self, stack: _FakeStack) -> None:
         order: list[str] = []
@@ -182,7 +228,7 @@ class TestTheStepOrder:
     def test_the_precondition_is_awaited_between_them(self, stack: _FakeStack) -> None:
         assert demo_live.main(["--mode", "dlq_backlog", "--auto"]) == 0
 
-        assert stack.preconditions_awaited == ["remediate_dlq_backlog_success"]
+        assert stack.preconditions_awaited == [demo_live.MODES["dlq_backlog"]["scenario"]]
 
     def test_the_stack_is_brought_up_only_when_it_is_down(
         self, stack: _FakeStack, monkeypatch: pytest.MonkeyPatch
@@ -211,10 +257,12 @@ class TestTheStepOrder:
 
 class TestTrafficBelongsToOneModeOnly:
     def test_consumer_outage_starts_and_stops_the_producer(self, stack: _FakeStack) -> None:
-        # Lag is arrival minus service: without a producer the fault cannot exist.
+        # Lag is arrival minus service: without a producer the fault cannot exist. TWO starts
+        # since WO-R3-339 — the slow baseline and the fast one the fault gets — and the
+        # important half is unchanged: it is stopped, so the loop cannot outlive the demo.
         assert demo_live.main(["--mode", "consumer_outage", "--auto"]) == 0
 
-        assert stack.traffic_started == 1
+        assert stack.traffic_started == 2
         assert stack.traffic_stopped >= 1
 
     def test_dlq_backlog_starts_no_producer(self, stack: _FakeStack) -> None:
@@ -249,9 +297,12 @@ class TestTheAuditWaitsForTheMetricInATrafficMode:
         assert demo_live.main(["--mode", "consumer_outage", "--auto"]) == 0
 
         out = capsys.readouterr().out
-        # F7 (ADR 0074): the wait names the platform's 60-s clock and the sample's own age,
-        # because a bare spinner over a 106-second step reads as a hang.
-        assert "waiting on the platform's 60-s lag clock" in out
+        # F7 (ADR 0074): the wait names the platform's lag clock and the sample's own age,
+        # because a bare spinner over a 106-second step reads as a hang. Compared against the
+        # module's own string since WO-R3-339: the interval is a deployment setting now, so
+        # the line names the setting rather than "60-s", and a literal here would be the copy
+        # that goes stale next time it moves.
+        assert demo_live._LAG_CLOCK in out
         assert "lag 33, age" in out
         assert "backlog drained" in out
         # The stale readings were not accepted, and the audit came after the fresh one.
@@ -337,7 +388,7 @@ class TestEveryFailurePathResetsAndAudits:
 
         assert demo_live.main(["--mode", "consumer_outage", "--auto"]) == 1
 
-        assert stack.traffic_started == 1
+        assert stack.traffic_started == 2
         assert stack.traffic_stopped >= 1
 
     def test_an_unexpected_exception_also_resets(
@@ -398,25 +449,50 @@ class TestTheModesDescribeRealScenarios:
         for mode, spec in demo_live.MODES.items():
             assert corpus[spec["scenario"]].use_live_mcp, f"mode {mode} is not a live world"
 
-    def test_every_mode_seeds_only_repeat_safe_hooks(self) -> None:
-        """The property the two-phase design rests on, pinned.
-
-        This script fires the plan and the runner fires it again, so a hook that refuses
-        or doubles its own fixture would break the demo mid-recording. Both of today's
-        hooks were measured on v0.6.13: `poison_message` answers a repeat with
-        `created: false` and the same deterministic row id, and `kill_consumer` re-arms.
-        A mode added over an unmeasured hook fails here instead of on camera.
-        """
+    def test_every_mode_seeds_something(self) -> None:
         corpus = self._corpus()
         for mode, spec in demo_live.MODES.items():
             hooks = {hook.name for hook in corpus[spec["scenario"]].chaos.setup}
             assert hooks, f"mode {mode} seeds nothing — there is no fault to show"
-            unsafe = hooks - demo_live.REPEAT_SAFE_HOOKS
-            assert not unsafe, (
-                f"mode {mode} seeds {sorted(unsafe)}, whose behaviour under a REPEAT "
-                "firing has not been measured. This script seeds and then the runner "
-                "seeds again; measure the repeat first, then add it to REPEAT_SAFE_HOOKS."
+
+    def test_no_modes_fault_can_fire_twice(self, stack: _FakeStack) -> None:
+        """What replaced "every mode seeds a repeat-safe hook" (WO-R3-339).
+
+        That claim rested on a premise ADR 0075 retired: "this script fires the plan and the
+        runner fires it again". It does not any more — step 5 passes
+        `--world-already-faulted` — so a hook need not tolerate a repeat, and
+        `demo_dlq_replay_safe_backlog` uses one that does not (`seed_dlq_messages` adds
+        `count` more rows each time, and it is the only hook that can write a `replay_safe`
+        dead-letter row at all, ADR 0076).
+
+        So the claim moves to the two structural facts that make the repeat unreachable, and
+        it is not vacuous: it fails if anyone reorders the walk so the fault fires before the
+        reset, drops the audit gate, or starts the runner without the flag.
+        """
+        for mode in demo_live.MODES:
+            stack.commands.clear()
+            stack.seeded.clear()
+            assert demo_live.main(["--mode", mode, "--auto"]) == 0
+            targets = stack.make_targets()
+            # (1) The world is reset AND audited before the fault is fired. `world-audit`
+            # reds on a DLQ total or a lag that is not the baseline, so a world still
+            # carrying the previous take's rows cannot reach the seeding at all.
+            assert "eval-reset" in targets and "world-audit" in targets
+            assert targets.index("eval-reset") < targets.index("world-audit")
+            assert stack.seeded == [demo_live.MODES[mode]["scenario"]], (
+                f"mode {mode} fired its hook {len(stack.seeded)} time(s)"
             )
+            # (2) The runner is told the world is already faulted, so it fires nothing.
+            joined = [" ".join(argv) for argv in stack.commands]
+            assert any(WORLD_ALREADY_FAULTED_FLAG in line for line in joined) or any(
+                "WORLD_ALREADY_FAULTED=1" in line for line in joined
+            ), f"mode {mode} lets the runner seed a second time"
+
+    def test_the_measured_repeat_safe_set_is_what_it_claims(self) -> None:
+        # The measurement is still worth having written down even though it no longer gates
+        # a mode: these two hooks tolerate a re-run on a world that already holds them
+        # (platform v0.6.13). Anything else does not, and the walk is what makes that safe.
+        assert frozenset({"poison_message", "kill_consumer"}) == demo_live.REPEAT_SAFE_HOOKS
 
     def test_only_the_traffic_needing_mode_declares_traffic(self) -> None:
         # Derived from the scenario, not from memory: a precondition that wants a backlog
@@ -486,7 +562,7 @@ class TestStepThreeWaitsForThePlatformsOwnReading:
         assert demo_live.main(["--mode", "consumer_outage", "--auto"]) == 0
 
         out = capsys.readouterr().out
-        assert "waiting on the platform's 60-s lag clock to show the fault — lag 0" in out
+        assert f"{demo_live._LAG_CLOCK} to show the fault — lag 0" in out
         assert "the platform's own reading shows the fault: lag 23" in out
         assert out.index("shows the fault: lag 23") < out.index("STEP 4")
 
@@ -840,6 +916,174 @@ class TestTheFaultIsFiredOnceByThisScript:
         assert "WORLD_ALREADY_FAULTED" in recipe
         assert f"{WORLD_ALREADY_FAULTED_FLAG}," in recipe
 
+
+class TestThePlatformRaisesThePage:
+    """Owner decision O-36: the middle clause of the demo's sentence stops being a fixture.
+
+    Until platform v0.6.18 the alert the agent triaged was written by the scenario file that
+    graded the run, and the platform's own stream read the same three seeded rows before,
+    during and after the fault. The walk now waits for the platform's alert row in step 3 and
+    starts the run from it in step 5.
+    """
+
+    def test_step_three_waits_for_the_page_after_it_waits_for_the_reading(
+        self, stack: _FakeStack, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        assert demo_live.main(["--mode", "dlq_backlog", "--auto"]) == 0
+
+        assert stack.pages_awaited == [demo_live.MODES["dlq_backlog"]["scenario"]]
+        out = capsys.readouterr().out
+        # The order is the claim: the measurement crossing a threshold is the platform
+        # NOTICING, the alert row is the platform PAGING, and the operator narrates them in
+        # that order.
+        assert out.index("shows the fault") < out.index("*** FAULT VISIBLE ***")
+
+    def test_the_free_rehearsal_takes_its_alert_from_the_platform(self, stack: _FakeStack) -> None:
+        assert demo_live.main(["--mode", "consumer_outage", "--auto"]) == 0
+
+        runner = [argv for argv in stack.commands if "evals.runner" in argv]
+        assert len(runner) == 1
+        assert ALERT_FROM_PLATFORM_FLAG in runner[0]
+
+    def test_the_paid_take_forwards_it_through_the_make_target(self, stack: _FakeStack) -> None:
+        assert demo_live.main(["--mode", "dlq_backlog", "--live", "--yes-spend", "--auto"]) == 0
+
+        paid = [argv for argv in stack.commands if "eval-live" in argv]
+        assert len(paid) == 1
+        assert "ALERT_FROM_PLATFORM=1" in paid[0]
+
+    def test_the_make_target_forwards_the_variable_as_the_flag(self) -> None:
+        """The other half of the paid path: the recipe has to pass it on."""
+        recipe = (_REPO_ROOT / "Makefile").read_text()
+        assert "ALERT_FROM_PLATFORM" in recipe
+        assert f"{ALERT_FROM_PLATFORM_FLAG}," in recipe
+
+    def test_a_platform_that_never_pages_warns_and_leaves_the_gate_to_the_run(
+        self, stack: _FakeStack, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        # A warning, not a refusal, for the fault-reading wait's reason: step 5's own wait is
+        # the gate and it refuses with the alert stream's contents in the message. What this
+        # must not do is leave an operator staring at a page with nothing on it.
+        stack.platform_paged = False
+
+        assert demo_live.main(["--mode", "dlq_backlog", "--auto"]) == 0
+
+        assert "WARNING" not in capsys.readouterr().out or stack.pages_awaited
+
+
+class TestTheProducerRunsAtTheModesRate:
+    """WO-R3-339: 0.75 s during the fault, so the page arrives while somebody is watching."""
+
+    def test_the_baseline_is_slow_and_the_fault_is_fast(self, stack: _FakeStack) -> None:
+        """The order is the claim, and it is the one a measurement bought.
+
+        `POST /jobs` is rate-limited per identity in a FIXED 60-second window of 30
+        creations, so every job the BASELINE spends is one the backlog cannot have. Running
+        the whole walk at 0.75 s was measured on 2026-09-21: ten seconds of countdown left 17
+        of the 30, the lag stalled at 17 until the window rolled, and the platform's page
+        arrived 56.1 s after the fault instead of 15.6 s. So the producer starts at the
+        script's sustainable default and is restarted at the fault's rate in step 3.
+        """
+        assert demo_live.main(["--mode", "consumer_outage", "--auto"]) == 0
+
+        assert stack.traffic_rates == [None, "0.75"]
+        assert demo_live.MODES["consumer_outage"]["fault_traffic_rate"] == "0.75"
+
+    def test_the_quiet_mode_accelerates_nothing(self, stack: _FakeStack) -> None:
+        assert demo_live.main(["--mode", "dlq_backlog", "--auto"]) == 0
+
+        assert stack.traffic_rates == []
+        assert demo_live.MODES["dlq_backlog"]["fault_traffic_rate"] is None
+
+    def test_the_acceleration_happens_after_the_fault_is_fired(
+        self, stack: _FakeStack, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        # Not before: until the consumer is dead the jobs are consumed, so a fast baseline
+        # buys nothing and spends the window the fault needs.
+        assert demo_live.main(["--mode", "consumer_outage", "--auto"]) == 0
+
+        out = capsys.readouterr().out
+        assert out.index("fired: ") < out.index("producer to a job every 0.75s")
+
+    def test_the_rate_reaches_make_as_a_variable(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """The argv `make traffic` is really started with — the fake stack stubs `start`."""
+        seen: list[list[str]] = []
+
+        class _Popen:
+            def __init__(self, argv: list[str], **kwargs: Any) -> None:
+                seen.append(argv)
+                self.returncode = None
+
+            def poll(self) -> None:
+                return None
+
+        monkeypatch.setattr(subprocess, "Popen", _Popen)
+        monkeypatch.setattr(demo_live, "_smoke_env", lambda: {"PLATFORM_SMOKE_TOKEN": "x"})
+        demo_live.TrafficHandle().start(rate="0.75")
+
+        assert seen == [["make", "traffic", "RATE=0.75"]]
+
+    def test_accelerate_stops_the_slow_loop_and_starts_a_fast_one(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        seen: list[list[str]] = []
+
+        class _Popen(_FakePopen):
+            def __init__(self, argv: list[str], **kwargs: Any) -> None:
+                super().__init__()
+                seen.append(argv)
+
+        monkeypatch.setattr(subprocess, "Popen", _Popen)
+        monkeypatch.setattr(demo_live, "_smoke_env", lambda: {"PLATFORM_SMOKE_TOKEN": "x"})
+        handle = demo_live.TrafficHandle()
+        handle.start()
+        handle.accelerate(demo_live.Console(auto=True), "0.75")
+
+        assert seen == [["make", "traffic"], ["make", "traffic", "RATE=0.75"]]
+
+    def test_accelerate_with_no_rate_or_no_producer_does_nothing(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        seen: list[list[str]] = []
+
+        class _Popen(_FakePopen):
+            def __init__(self, argv: list[str], **kwargs: Any) -> None:
+                super().__init__()
+                seen.append(argv)
+
+        monkeypatch.setattr(subprocess, "Popen", _Popen)
+        monkeypatch.setattr(demo_live, "_smoke_env", lambda: {"PLATFORM_SMOKE_TOKEN": "x"})
+        console = demo_live.Console(auto=True)
+        # No producer: the quiet mode's path.
+        demo_live.TrafficHandle().accelerate(console, "0.75")
+        # A producer but no declared rate: unchanged, still running.
+        handle = demo_live.TrafficHandle()
+        handle.start()
+        handle.accelerate(console, None)
+
+        assert seen == [["make", "traffic"]]
+
+    def test_no_rate_keeps_the_scripts_own_sustainable_default(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        seen: list[list[str]] = []
+
+        class _Popen:
+            def __init__(self, argv: list[str], **kwargs: Any) -> None:
+                seen.append(argv)
+                self.returncode = None
+
+            def poll(self) -> None:
+                return None
+
+        monkeypatch.setattr(subprocess, "Popen", _Popen)
+        monkeypatch.setattr(demo_live, "_smoke_env", lambda: {"PLATFORM_SMOKE_TOKEN": "x"})
+        demo_live.TrafficHandle().start()
+
+        assert seen == [["make", "traffic"]]
+
+
+class TestTheDocstringStaysTrue:
     def test_the_docstring_no_longer_calls_the_double_fire_safe(self) -> None:
         """The record it kept was wrong, and the docstring said the opposite.
 

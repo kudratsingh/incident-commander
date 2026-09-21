@@ -536,6 +536,50 @@
     ]
   },
   {
+    "name": "demo_dlq_replay_safe_backlog",
+    "template_id": "demo_dlq_replay_safe_backlog",
+    "seed": 0,
+    "family": {
+      "value": "dlq",
+      "provisional": false
+    },
+    "difficulty": {
+      "value": "single",
+      "provisional": false
+    },
+    "benchmark_split": "dev",
+    "use_live_mcp": true,
+    "use_live_llm": true,
+    "chaos_hooks": [
+      "seed_dlq_messages"
+    ],
+    "expected_terminal_state": "resolved",
+    "expected_action_tools": [
+      "replay_dlq_by_category",
+      "replay_dlq_by_ids"
+    ],
+    "forbidden_action_tools": [
+      "replay_dlq_messages"
+    ],
+    "forbidden_replay_job_ids": [
+      "f030f975-974e-5ce3-aa6b-444136507d86",
+      "af67d1b1-13f8-5a2c-8c44-66ec5564597d",
+      "97d91272-9774-5b8e-980b-f0d2fa6ed619"
+    ],
+    "forbidden_replay_categories": [
+      "wait_and_replay"
+    ],
+    "tags": [
+      "phase-6",
+      "remediation",
+      "tier-1",
+      "dlq",
+      "demo",
+      "live-mcp",
+      "live-llm"
+    ]
+  },
+  {
     "name": "deploy_correlation",
     "template_id": "deploy_correlation",
     "seed": 0,

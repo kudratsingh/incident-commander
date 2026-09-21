@@ -707,12 +707,6 @@ _JUSTIFIED: Final[dict[tuple[object, ...], tuple[str, str]]] = {
         "exists=false; the walk probes the world before the deletion, where "
         "the key is still present",
     ),
-    ("remediate_stale_cache_success", "get_cache_key_info", "size", "value", 0): (
-        WARM_STACK,
-        "the 90-byte stale value is visible on a warm developer stack, but CI's "
-        "fresh stack has not populated that cache entry and reads the fixture value; "
-        "the entry is timing-scoped, not a fixture correction",
-    ),
     ("remediate_stale_cache_success", "get_cache_key_info", "size", "value", 1): (
         POST_ACTION,
         "same recording, same reason: an absent key reports size=null",

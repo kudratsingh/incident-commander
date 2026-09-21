@@ -31,21 +31,21 @@ class PlannerCall:
     in ``LLMCallRecord.tokens_used`` and as its own ``llm`` trace record.
     """
 
-    #: Trace-record id of the call that parsed, or ``""`` when the client is
-    #: untraced (every canned run, and any live run without ``EVAL_TRACE_DIR``).
+    #: Id of the trace record for the call whose output parsed, or empty where the client
+    #: writes no trace — every offline run, and any live run with no trace directory set.
     record_id: str = ""
     input_tokens: int = 0
     output_tokens: int = 0
     cache_read_tokens: int = 0
     cache_creation_tokens: int = 0
-    #: Characters of system prompt + user message in the FIRST ask of this step. Measured
-    #: locally, so it is a real number on a canned run, where every counter above is zero.
+    #: How many characters of prompt this step's first ask sent. Counted here rather than
+    #: reported by the provider, so it is a real number even on an offline run.
     context_chars: int = 0
-    #: Wall time of the call that PARSED, as the client measured it: a repair's rejected leg
-    #: is its own logical call. ``None`` when the client does not time itself.
+    #: How long the call whose output parsed took, as the client measured it; a rejected
+    #: re-ask before it is timed as its own call. ``None`` where the client does not time.
     elapsed_ms: int | None = None
-    #: Everything this step's planner call billed, repair legs included: a strategy composing
-    #: over it must carry this when a LATER call of the same step fails (ADR 0045).
+    #: Everything this step's planner call was billed, re-asked attempts included, so an arm
+    #: whose LATER call fails can still report what this one cost.
     billed_usage: LLMUsage | None = None
 
     @property
@@ -63,15 +63,15 @@ class CandidateRecord:
     category: HypothesisCategory
     name: str
     confidence: float
-    #: Evidence-entry references for and against. Empty for ``baseline``, whose planner does
-    #: not cite evidence per hypothesis — the honest reading of "it did not say".
+    #: Which evidence entries this candidate cites for and against itself. Empty for
+    #: ``baseline``, whose planner is never asked to cite any, so it said nothing either way.
     evidence_for: tuple[str, ...] = ()
     evidence_against: tuple[str, ...] = ()
-    #: The read tool this candidate would probe next, when the emitted step is
-    #: a probe; ``None`` when the step remediates or stops.
+    #: The read this candidate would make next, where the step is a probe; ``None`` where the
+    #: step remediates or stops instead.
     proposed_probe: str | None = None
-    #: Trace-record id of the LLM call that generated this candidate, or ``""``
-    #: when the seam cannot name it (see ``LLMCallRecord.call_id``).
+    #: Id of the trace record for the model call that produced this candidate, or empty where
+    #: the client writes no trace.
     generation_call_id: str = ""
 
     def as_record(self) -> dict[str, Any]:
@@ -84,13 +84,13 @@ class SelectorRecord:
     """The ``candidate_selector`` role's decision over a candidate set. ``None`` on every
     ``baseline`` and best-of-N-only record: nothing to select between."""
 
-    #: ``None`` on ``probe_more`` and ``escalate``: ``SelectionResult`` states a selection only
-    #: when it commits to one (ADR 0048), and ``""`` would read as a candidate with an empty id.
+    #: ``None`` where the selector asked for another read or escalated instead of choosing: it
+    #: names a candidate only when it commits to one, and empty would read as a real id.
     selected_candidate_id: str | None
     scores: dict[str, float] = field(default_factory=dict)
     uncertainty: float | None = None
-    #: ``select`` | ``probe_more`` | ``escalate`` — ``SelectionDecision``'s value as a ``str``,
-    #: not the enum: a records module that imported it would import the selector.
+    #: What the selector decided: ``select``, ``probe_more`` or ``escalate``. Held as a plain
+    #: string, because importing the enum here would make this module import the selector.
     decision: str
     call_id: str = ""
 
@@ -106,21 +106,21 @@ class RevisionRecord:
     that kept only its output could not be measured for HARM.
     """
 
-    #: What the first planner call proposed, before any critique. Equal in shape to what
-    #: ``baseline`` would have emitted from the same turn.
+    #: The step the first planner call proposed, before any critique — the same thing
+    #: ``baseline`` would have handed the loop from that turn.
     initial_step: InvestigationStep
-    #: ``keep`` | ``revise`` — ``RevisionVerdict``'s value as a ``str``, for the reason
-    #: ``SelectorRecord.decision`` is one.
+    #: What the critic decided: ``keep`` or ``revise``. A plain string, for the same reason
+    #: the selector's decision above is one.
     verdict: str
-    #: Every finding the critique named, class-prefixed (``StepCritique.findings``).
+    #: Every problem the critique named, each prefixed with the kind of problem it is.
     findings: tuple[str, ...] = ()
-    #: Ledger entries the critique said the step contradicts, as strings.
+    #: The evidence entries the critique said the proposed step contradicts.
     contradicted_evidence_ids: tuple[str, ...] = ()
-    #: Did a second planner call actually run? The same fact as ``verdict == "revise"`` today;
-    #: written separately so a future gate between them is visible.
+    #: Whether a second planner call actually ran. Today that is the same as the verdict being
+    #: ``revise``, but it is recorded separately so any later gate between the two is visible.
     revised: bool = False
-    #: Passes taken and the cap they were taken against, written rather than implied: a reader
-    #: of an archive must not have to know this release's constant.
+    #: How many revision passes were taken, and the limit they were taken against. Both written
+    #: down, so reading an old record needs no knowledge of that release's constant.
     passes_used: int = 0
     passes_allowed: int = 1
     critic_call_id: str = ""
@@ -150,33 +150,33 @@ class BranchRecord:
     """
 
     branch_id: str
-    #: ``""`` on the root node — the step the generator proposed before any branch ran.
+    #: Empty on the root node, which is the step the generator proposed before any branch ran.
     parent_id: str = ""
     depth: int
     evidence_snapshot_ref: str
-    #: The candidate whose proposed read opened this branch, so a reader can join a branch to
-    #: the diagnosis that wanted it. ``""`` on the root.
+    #: Which candidate diagnosis proposed the read that opened this branch, so a reader can tie
+    #: the branch to the diagnosis that wanted it. Empty on the root.
     candidate_id: str = ""
-    #: The read that was taken to reach this node; ``None`` on the root.
+    #: The read that was actually made to reach this node; ``None`` on the root, where none was.
     probe: str | None = None
     probe_arguments: dict[str, Any] = field(default_factory=dict)
-    #: The read this node would take next; ``None`` when its path would stop or act.
+    #: The read this node would make next; ``None`` where its path would stop or remediate.
     proposed_probe: str | None = None
-    #: Plan 02 § 257's score and each of its four terms, so a reader sees which term decided
-    #: the path rather than only that one number beat another.
+    #: This node's score and each of the four terms it is made of, so a reader can see which
+    #: term decided the walk rather than only that one number beat another.
     score: float
     selector_confidence: float
     tool_cost: float
     token_cost: float
     safety_risk: float
-    #: This node's own ledger deltas — the per-branch cost the report reads.
+    #: What this one node cost, which is the per-branch figure a report reads.
     tool_calls_used: int = 0
     tokens_used: int = 0
     usd_used: Decimal = Decimal("0")
-    #: Exactly one node per step is the path the run took.
+    #: True on exactly one node per step: the path the run actually took.
     chosen: bool = False
-    #: Why this branch never became a scored node (a tier refusal, a replay miss, the
-    #: shared ledger). ``None`` on every node that ran.
+    #: Why this branch never became a scored node — the read was not allowed, the recording had
+    #: no answer for it, or the shared budget was spent. ``None`` on every node that ran.
     refused: str | None = None
 
     def as_record(self) -> dict[str, Any]:
@@ -200,8 +200,8 @@ class SearchRecord:
     pruned_by_ledger: int = 0
     nodes: tuple[BranchRecord, ...] = ()
     chosen_branch_id: str = ""
-    #: What the whole walk spent, branches and chosen path together — the number the
-    #: shared-ceiling claim is checked against.
+    #: What the whole walk spent, branches and chosen path together, which is the number the
+    #: claim about one shared ceiling is checked against.
     tool_calls_used: int = 0
     tokens_used: int = 0
 
@@ -228,25 +228,26 @@ class RungRecord:
     rather than inferring them from which rungs are present (WP-13.2).
     """
 
-    #: ``Rung``'s value as a ``str``, for ``SelectorRecord.decision``'s reason.
+    #: Which rung this is, as a plain string, for the same reason the selector's decision is one.
     rung: str
-    #: 0-based position in the ladder this step ran.
+    #: This rung's position in the ladder, counting from zero.
     index: int
-    #: Signal values that sent the run to this rung. Empty on the first, which is entered
-    #: unconditionally — the ladder's whole point is that it starts at the control group.
+    #: Which uncertainty signals sent the step up to this rung. Empty on the first rung, which
+    #: every step enters: the point of the ladder is that it starts at the control group.
     entered_because: tuple[str, ...] = ()
-    #: Signals still firing AFTER this rung ran, and the ones nothing here could measure.
+    #: Which signals were still firing after this rung ran, and which nothing here could measure.
     fired: tuple[str, ...] = ()
     unmeasured: tuple[str, ...] = ()
-    #: ``FiredSignals.reasons`` — each firing signal in words, with its number.
+    #: Each firing signal written out in words, with the number that made it fire.
     reasons: tuple[str, ...] = ()
-    #: LLM calls this rung made. 0 on the ``escalate`` rung, which buys nothing.
+    #: How many model calls this rung made. Zero on the ``escalate`` rung, which makes none.
     llm_calls: int = 0
-    #: This rung's OWN ledger deltas, so "what did the ladder add" is read, not derived.
+    #: What this rung alone cost, so "what did the ladder add" is read off the record rather
+    #: than worked out from the rungs around it.
     tokens_used: int = 0
     usd_used: Decimal = Decimal("0")
     tool_calls_used: int = 0
-    #: Exactly one rung per step emitted the step the loop got; every earlier one climbed.
+    #: Exactly one rung per step produced the step the loop ran; every rung before it climbed.
     climbed: bool = False
     emitted: bool = False
 
@@ -263,21 +264,22 @@ class LadderRecord:
     claim as a number, 0 on a step that stayed on the baseline rung.
     """
 
-    #: The rung order this step ran, resolved: the tail is ``search`` where a branch prober
-    #: exists and ``escalate`` where none does (ADR 0060).
+    #: The rungs this step could have climbed, in order, with the last one resolved: ``search``
+    #: where this run may read the world in a branch, ``escalate`` where it may not.
     ladder: tuple[str, ...]
     terminated_on: str
     rungs_used: int
-    #: Calls beyond the baseline rung's one. The falsifiable half of "easy stays cheap".
+    #: How many model calls this step made beyond the first rung's one, which is the arm's
+    #: claim that an easy step stays cheap, stated as a number that can be checked.
     extra_llm_calls: int
-    #: Whether the ``search`` rung was reachable at all, so a run that could not climb to it
-    #: is never read as a run that chose not to.
+    #: Whether the search rung could be reached at all on this run, so a run that was unable
+    #: to climb to it is never read as one that chose not to.
     search_available: bool
-    #: Signals still firing at the terminating rung that no rung could clear — today the
-    #: failed-remediation one (ADR 0056), which is about the RUN rather than this step.
+    #: Signals still firing on the last rung that no amount of extra thinking could clear —
+    #: today only the failed-remediation one, which is about the run rather than this step.
     unclearable: tuple[str, ...] = ()
-    #: The live value of every threshold this climb compared against; the splits behind them
-    #: are in the run's ``strategy_config`` (ADR 0061).
+    #: The value of every threshold this climb actually compared against; which data split each
+    #: one came from is stored with the run's settings.
     thresholds: dict[str, float] = field(default_factory=dict)
     rungs: tuple[RungRecord, ...] = ()
 
@@ -305,8 +307,8 @@ class LLMCallRecord:
 
     role: str
     model: str
-    #: Total token volume charged to the ledger by this step (ADR 0015's
-    #: definition: input + output + cache creation + cache read + discarded).
+    #: Every token this step charged to the run's budget: input, output, cache writes, cache
+    #: reads, and the output of any attempt that was billed and then thrown away.
     tokens_used: int
     usd_used: Decimal
     input_tokens: int = 0
@@ -314,8 +316,8 @@ class LLMCallRecord:
     cache_read_tokens: int = 0
     cache_creation_tokens: int = 0
     call_id: str = ""
-    #: Wall time of the call that parsed (``LLMResult.elapsed_ms``); it belongs with the four
-    #: counters, not the ledger delta. ``None`` means not measured; a zero would read as fast.
+    #: How long the call whose output parsed took. ``None`` means nobody measured it; a zero
+    #: here would be read as a call that returned instantly.
     elapsed_ms: int | None = None
 
     def as_record(self) -> dict[str, Any]:
@@ -336,29 +338,29 @@ class StepRecord:
     model: str
     candidate_set: tuple[CandidateRecord, ...]
     selector: SelectorRecord | None = None
-    #: The ``reflection`` pass over this step, or ``None`` when none ran (every other strategy).
+    #: The critique-and-revise pass over this step, or ``None`` where no arm ran one.
     revision: RevisionRecord | None = None
-    #: The ``search`` walk over this step, or ``None`` when none ran (WP-12.1).
+    #: The exploration walk over this step, or ``None`` where no arm ran one.
     search: SearchRecord | None = None
-    #: The ``adaptive`` ladder over this step, or ``None`` when none ran (WP-13.2).
+    #: The ladder climb over this step, or ``None`` where no arm ran one.
     ladder: LadderRecord | None = None
-    #: The ``InvestigationStep`` handed back to the loop — the one thing in
-    #: this record that has consequences for the run.
+    #: The step actually handed back to the loop: the one thing in this record that changes
+    #: what the run does next.
     emitted_step: InvestigationStep
     hypothesis_state_before: tuple[Hypothesis, ...] = ()
     hypothesis_state_after: tuple[Hypothesis, ...] = ()
-    #: This step's causes by slot (WP-11.3), stamped by the loop: the bar stays in
-    #: ``investigation.py``. ``None`` means nobody computed them, never "there were none".
+    #: The causes this step named, sorted into slots by the loop, which is where the confidence
+    #: bar lives. ``None`` means nobody worked them out, never that there were none.
     incidents: IncidentSlots | None = None
     llm_calls: tuple[LLMCallRecord, ...] = ()
-    #: Context size fed to the planner this step (``PlannerCall.context_tokens``). ``None`` when
-    #: no call was measured; a canned run reports 0, the true number it was charged.
+    #: How many tokens of context the planner was fed this step, as the provider counted them.
+    #: ``None`` where nothing was measured; an offline run reports 0, which is what it was billed.
     planner_input_tokens: int | None = None
-    #: The same context measured locally, in characters. Beyond plan 02 § 7, for divergence D1:
-    #: on the offline suite's fake client every token count is honestly zero.
+    #: The same context measured here instead, in characters, so there is still a real number on
+    #: an offline run, where the fake client honestly reports zero tokens.
     planner_context_chars: int | None = None
-    #: Validation classes of the billed calls rejected before the accepted one (WP-5.2); feeds
-    #: ``evals/candidate_metrics.py``.
+    #: What was wrong with each billed call that was rejected before the accepted one; the
+    #: candidate metrics are computed from this.
     generation_rejections: tuple[str, ...] = ()
 
     def as_trace_record(self) -> dict[str, Any]:
@@ -390,6 +392,6 @@ class StepRecord:
         }
 
 
-#: Where a strategy writes its records. ``None`` means nobody is recording — every offline run,
-#: since ``evals/runner.py`` needs ``EVAL_TRACE_DIR`` (divergence D1).
+#: Where a strategy sends its research records. ``None`` means nothing is recording, which is the
+#: case for every run without a trace directory set.
 StepSink = Callable[["StepRecord"], None]

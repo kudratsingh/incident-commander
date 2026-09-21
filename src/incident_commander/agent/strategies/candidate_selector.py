@@ -43,12 +43,12 @@ from incident_commander.agent.strategies.records import (
 from incident_commander.llm.client import LLMError, LLMUsage
 from incident_commander.llm.repair import RepairedCall, sum_usage, usage_of
 
-#: Raised when a step is planned with no selector client on the context. Named so a test can
-#: assert the guard's own marker rather than that something raised (F-007).
+#: The message this arm refuses with when a step is planned without a separate selector client.
+#: Named so a test can assert the reason rather than merely that something raised.
 NO_SELECTOR_CLIENT: Final[str] = "no selector client is on the strategy context"
 
-#: The stop reason for a ``probe_more`` whose candidate proposes no probe. A constant because
-#: grader, briefing and test all read it, and three spellings would not match.
+#: The reason the run stops when the selector asks for another read but the candidate it points
+#: at proposes none. One constant, because the grader, the briefing and a test all read it.
 PROBE_MORE_WITHOUT_A_PROBE: Final[str] = (
     "selector asked for another probe and the candidate it points at proposes none"
 )
@@ -96,8 +96,8 @@ class CandidateSelectorStrategy:
         self._generator: Final[CandidateGenerator] = built
         self.config: Mapping[str, Any] = MappingProxyType(
             {
-                # All three parts of the arm identity, the generator's own knobs folded in
-                # rather than restated, so a report row carries what actually ran.
+                # All three parts of this arm's identity, with the generator's own settings
+                # merged in rather than copied, so a report row shows what actually ran.
                 **dict(built.config),
                 "generator": built.name,
                 "selector": SELECTOR_ROLE,
@@ -114,16 +114,19 @@ class CandidateSelectorStrategy:
     ) -> tuple[RunState, InvestigationStep, StepRecord]:
         """Generate the set, select from it, emit the selection's step. Order matters: the
         generation is charged before the selector is asked."""
-        # 1. The selector needs its own metered client, or its cost folds into generation's.
+        # 1. Refuse unless a separate client is available for the selector: sharing the
+        #    planner's client would report selection's tokens as generation's.
         if ctx.selector_llm_client is None:
             raise ValueError(
                 f"{NO_SELECTOR_CLIENT}. The selector is its own metered role "
                 "(agent/selection.SELECTOR_ROLE); falling back to the planner's "
                 "client would report selection's tokens under generation's role."
             )
-        # 2. Generate the set — charged before the selector is asked.
+        # 2. Ask the generator for the candidate set, which charges its call to the budget
+        #    before the selector is asked anything.
         generation = self._generator.generate(run_state, at, ctx)
-        # 3. Select from it. A failure carries the generation's bill too (ADR 0045).
+        # 3. Ask the selector to choose one candidate. If that call fails, the error carries
+        #    the generation's bill as well, so the earlier call is still charged.
         try:
             call = select_candidate(
                 ctx.selector_llm_client,
@@ -137,13 +140,14 @@ class CandidateSelectorStrategy:
                 err,
                 sum_usage(generation.billed_usage, usage_of(err)),
             ) from err
-        # 4. Turn the decision into the step the loop runs, and charge the selector call.
+        # 4. Turn the selector's decision into the step the loop will run, and charge the
+        #    selector's own call to the budget.
         decision = call.result.output
         step = self._step_for(decision, generation)
         updated = generation.run_state.model_copy(
             update={
-                # The same function every other call is charged through, so a repaired
-                # selector call bills both legs (ADR 0015).
+                # The same charging function every other call goes through, so a selector
+                # call that had to be re-asked bills both attempts.
                 "budget": accrue_structured_call(generation.run_state.budget, call, ctx.model),
                 "hypotheses": step.hypotheses,
                 "updated_at": at,
@@ -238,15 +242,15 @@ def step_for_selection(
             next_action=StopAction(reason=f"selector escalated: {decision.reasoning}"),
         )
     if chosen is None:
-        # Only reachable with empty ``scores`` on a ``probe_more``, which the schema forbids;
-        # stated rather than asserted away in case that rule loosens.
+        # Only reachable if the selector asked for another read while scoring no candidate,
+        # which its schema forbids. Handled rather than asserted away, in case that loosens.
         return InvestigationStep(
             hypotheses=(_hypothesis_of(candidates[0], decision),),
             next_action=StopAction(reason=PROBE_MORE_WITHOUT_A_PROBE),
         )
     if decision.decision is SelectionDecision.SELECT:
-        # One hypothesis, the selected one: the schema re-sorts by confidence, so a whole set
-        # emitted here could gate the run on a diagnosis the selector rejected.
+        # Emit only the chosen candidate: the step's schema re-sorts a ranking by confidence,
+        # so handing over the whole set could act on a diagnosis the selector rejected.
         return InvestigationStep(
             hypotheses=(_hypothesis_of(chosen, decision),),
             next_action=committed_action,

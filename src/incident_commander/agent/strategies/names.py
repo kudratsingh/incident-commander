@@ -17,21 +17,21 @@ class StrategyName(StrEnum):
     """
 
     BASELINE = "baseline"
-    #: WP-5.2, plan 02 § 11.1: one planner call asking for N distinct diagnoses. Measures
-    #: enumeration, not the literature's pass@k (decision D4).
+    #: One planner call asked for several distinct diagnoses at once. This measures how well the
+    #: model can enumerate alternatives, not the sampling metric the literature calls pass@k.
     BEST_OF_N_ENUMERATED = "best_of_n_enumerated"
-    #: WP-5.3, plan 02 § 11.2: N independent planner calls at a configured temperature, the set
-    #: being the union of their top hypotheses. N× planner cost, and the pass@k half of D4.
+    #: Several independent planner calls at a set temperature, whose candidate set is their top
+    #: answers put together. Costs N planner calls, and is the sampling half of the comparison.
     BEST_OF_N_SAMPLED = "best_of_n_sampled"
-    #: WP-6.2, plan 02 § 12: a generator arm plus a ``candidate_selector`` call over its set.
-    #: The arm is ``(generator, N, selector)``, so ``strategy_config`` stamps all three.
+    #: One of the arms above, plus an extra call that chooses between the candidates it produced.
+    #: The arm is really three choices, so all three are stored with the run.
     CANDIDATE_SELECTOR = "candidate_selector"
-    #: WP-9.1, plan 02 § 13: ``baseline``'s call, one critique of it, at most one revision.
-    #: One pass per step, capped in code rather than in the critic's instructions.
+    #: The baseline call, one critique of what it produced, and at most one revision after that.
+    #: The single revision is enforced in code, not merely asked for in the critic's prompt.
     REFLECTION = "reflection"
-    #: WP-12.1, plan 02 § 14: a bounded walk over evidence-gathering decisions — depth ≤ 2,
-    #: branch ≤ 3, one shared ledger, RECORDED mode only (a live world would move under it).
+    #: A bounded exploration of which read to make next: at most two levels deep and three
+    #: branches wide, sharing one budget, and only on a replayed world, which cannot move.
     SEARCH = "search"
-    #: WP-13.2, plan 02 § 15: the ladder. ``baseline`` on an easy step, and a rung above it for
-    #: each of WP-13.1's escalation signals that fired on the rung below (ADR 0064).
+    #: The ladder: the baseline call on an easy step, and one more expensive rung for as long as
+    #: an uncertainty signal is still firing after the rung below has run.
     ADAPTIVE = "adaptive"

@@ -40,14 +40,15 @@ from incident_commander.agent.strategies.records import (
 from incident_commander.llm.client import LLMError, LLMUsage
 from incident_commander.llm.repair import RepairedCall, sum_usage, usage_of
 
-#: Same role, and so the same trace label, as ``baseline``'s planner call — for BOTH of this
-#: arm's planner calls. A split by call index would stop the token total being comparable.
+#: Both of this arm's planner calls are labelled with the same role as ``baseline``'s, so their
+#: cost lands in one bucket. Labelling first and second apart would stop the totals comparing.
 _PLANNER_ROLE: Final[str] = "investigation_planner"
 
-#: Named so a test asserts the guard's own marker rather than that something raised (F-007).
+#: The message this arm refuses with when no separate critic client is available. Named so a
+#: test can assert the reason rather than merely that something raised.
 NO_CRITIC_CLIENT: Final[str] = "no critic client is on the strategy context"
 
-#: Which call of the step failed, for ``ReflectionFailed``'s message.
+#: Names for the two extra calls this arm makes, so a failure can say which one failed.
 CRITIC_STAGE: Final[str] = "critic"
 REVISION_STAGE: Final[str] = "revision"
 
@@ -80,11 +81,12 @@ class ReflectionStrategy:
         self.config: Mapping[str, Any] = MappingProxyType(
             {
                 "passes": MAX_REVISION_PASSES,
-                # How the bound is held, so no row has to trust the number above.
+                # The one-pass limit is enforced in code, not by configuration, so a report
+                # need not trust the number above.
                 "cap": "structural",
                 "critic": CRITIC_ROLE,
-                # Of the PLANNER's view (ADR 0044): both turns get ``baseline``'s context. The
-                # critic does see ids, which is why that is a separate key.
+                # This says what the PLANNER sees: both of its turns get ``baseline``'s context,
+                # without evidence ids. The critic does see them, hence the separate key.
                 "evidence_ids_rendered": False,
                 "critic_sees_evidence_ids": True,
             }
@@ -98,7 +100,8 @@ class ReflectionStrategy:
         Straight-line: the single pass is taken through a ``RevisionPass``, so a later edit that
         added a loop would raise instead of billing again.
         """
-        # 1. The critic needs its own metered client, or "added tokens" is unreportable.
+        # 1. Refuse unless a separate client is available for the critic: sharing the planner's
+        #    would report the critique's tokens as the planner's, and cost is what this arm reports.
         if ctx.critic_llm_client is None:
             raise ValueError(
                 f"{NO_CRITIC_CLIENT}. The critic is its own metered role "
@@ -106,12 +109,12 @@ class ReflectionStrategy:
                 "would report the critique's tokens under the planner's role, and "
                 '"added tokens" is the number this arm exists to report.'
             )
-        # 2. `baseline`'s planner call, verbatim.
+        # 2. Make exactly the planner call ``baseline`` makes, with the same schema.
         step_model = ctx.step_model(InvestigationStep)
         planned, initial_step, planner = _plan_next_step(
             run_state, at, ctx.llm_client, ctx.model, step_model
         )
-        # 3. One critique of the step it produced.
+        # 3. Ask the critic for one critique of the step that call produced, and charge it.
         budget = RevisionPass()
         try:
             critic = critique_step(
@@ -124,13 +127,13 @@ class ReflectionStrategy:
         critique = critic.result.output
         after_critic = planned.model_copy(
             update={
-                # The same function every other call is charged through, so a repaired
-                # critique bills both legs (ADR 0015).
+                # The same charging function every other call goes through, so a critique
+                # that had to be re-asked bills both attempts.
                 "budget": accrue_structured_call(planned.budget, critic, ctx.model),
                 "updated_at": at,
             }
         )
-        # 4. Nothing found: the first step stands, and this arm cost one critique.
+        # 4. The critic found nothing: keep the first step, so this arm cost one extra call.
         if critique.verdict is RevisionVerdict.KEEP:
             record = self._record(
                 before=run_state,
@@ -149,8 +152,8 @@ class ReflectionStrategy:
             if ctx.record_step is not None:
                 ctx.record_step(record)
             return after_critic, initial_step, record
-        # 5. A finding: spend the ONE pass and re-ask the planner with the critique appended.
-        #    A local, not inline, because the record measures the string that was SENT.
+        # 5. The critic found something: spend the single revision pass and ask the planner
+        #    again with the critique appended to its context.
         budget.spend()
         revision_context = format_revision_context(run_state, initial_step, critique)
         try:
@@ -158,8 +161,8 @@ class ReflectionStrategy:
                 ctx.llm_client,
                 user_message=revision_context,
                 model=ctx.model,
-                # Same schema as the first call: a narrowing cannot lapse because a critic
-                # spoke (ADR 0074).
+                # The same schema as the first call, so a probe the loop withdrew stays
+                # withdrawn just because a critic spoke.
                 output_model=step_model,
             )
         except Exception as err:
@@ -168,7 +171,7 @@ class ReflectionStrategy:
                 err,
                 sum_usage(planner.billed_usage, _billed(critic), usage_of(err)),
             ) from err
-        # 6. The revised step is what the loop gets; both steps reach the record.
+        # 6. Hand the loop the revised step; the record keeps the first step as well.
         revised_step = revision.result.output
         updated = after_critic.model_copy(
             update={
@@ -278,7 +281,8 @@ class ReflectionStrategy:
                     ),
                 ),
             ),
-            # No selector: this arm revises one diagnosis, it does not choose between several.
+            # No selection was made: this arm revises one diagnosis rather than choosing
+            # between several.
             selector=None,
             revision=RevisionRecord(
                 initial_step=initial_step,
@@ -297,8 +301,8 @@ class ReflectionStrategy:
             hypothesis_state_before=before.hypotheses,
             hypothesis_state_after=after.hypotheses,
             llm_calls=calls,
-            # BOTH planner turns, summed: a revised step fed the planner twice. The per-turn
-            # split is in ``llm_calls``.
+            # Both planner turns added together, because a revised step was planned twice. The
+            # per-call split is in ``llm_calls``.
             planner_input_tokens=(
                 planner.context_tokens
                 + (

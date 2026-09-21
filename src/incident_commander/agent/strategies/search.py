@@ -59,11 +59,12 @@ from incident_commander.agent.strategies.records import (
 from incident_commander.llm.client import LLMError, LLMUsage
 from incident_commander.llm.repair import RepairedCall, sum_usage, usage_of
 
-#: Named so a test asserts the guard's own marker rather than that something raised (F-007).
+#: The exact messages this arm refuses with, named so a test can assert the reason rather than
+#: merely that something raised.
 NO_BRANCH_PROBER: Final[str] = "no branch prober is on the strategy context"
 NO_SELECTOR_CLIENT: Final[str] = "no selector client is on the strategy context"
 
-#: Which call of the walk failed, for ``SearchFailed``'s message.
+#: Names for the two kinds of model call a walk makes, so a failure can say which one failed.
 GENERATION_STAGE: Final[str] = "generation"
 SELECTOR_STAGE: Final[str] = "selector"
 
@@ -95,13 +96,13 @@ class _Path:
     candidates: tuple[DiagnosisCandidate, ...]
     selection: SelectionResult
     step: InvestigationStep
-    #: What a ``select`` at this node acts on: the action its generation proposed.
+    #: The action this node would take if its path is chosen: the one its generation proposed.
     committed_action: NextAction
-    #: This node's OWN ledger delta; ``node.cost`` is the whole path's.
+    #: What this one node cost, where ``node.cost`` is the cost of the whole path to it.
     own_cost: NodeCost
     generation_call_id: str
     selector_call_id: str
-    #: The candidate whose proposed read opened this branch. ``""`` on the root.
+    #: Which candidate diagnosis proposed the read that opened this branch; empty at the root.
     candidate_id: str = ""
 
 
@@ -116,12 +117,13 @@ class SearchStrategy:
         from incident_commander.agent.strategies.registry import STRATEGIES
 
         resolved = knobs if knobs is not None else StrategyKnobs()
-        # Built and dropped: it raises ``SearchCapExceeded`` above the maximums, and each step
-        # gets its own walk.
+        # Built only to be thrown away: constructing it raises if the requested depth or branch
+        # is above the structural maximum, and each step gets a fresh walk of its own anyway.
         SearchWalk(depth_allowed=resolved.search_depth, branch_allowed=resolved.search_branch)
         self._depth: Final[int] = resolved.search_depth
         self._branch: Final[int] = resolved.search_branch
-        # N is the branch factor: one candidate's proposed read is one branch.
+        # The generator is asked for as many candidates as the branch factor, because each
+        # candidate's proposed read is one branch of the walk.
         built = STRATEGIES.create(
             resolved.selector_generator, replace(resolved, n=resolved.search_branch)
         )
@@ -139,9 +141,11 @@ class SearchStrategy:
                 "selector": SELECTOR_ROLE,
                 "depth": resolved.search_depth,
                 "branch": resolved.search_branch,
-                # How the bounds are held, so no row has to trust the two numbers above.
+                # The depth and branch limits are enforced in code, not by configuration, so a
+                # report need not trust the two numbers above.
                 "cap": "structural",
-                # Both ceilings are the run's own, shared by every branch.
+                # The tool-call and token ceilings are the run's own, and every branch of the
+                # walk spends from them.
                 "caps_shared_across_branches": True,
                 "mode": "recorded",
             }
@@ -185,9 +189,10 @@ class _Walk:
     at: datetime
     walk: SearchWalk
     strategy: SearchStrategy
-    #: The one ledger every call and every read of this step is charged to.
+    #: The single budget every model call and every read of this step is charged to.
     ledger: BudgetLedger | None = None
-    #: The largest single call this step has paid for — the measured token reserve.
+    #: The largest single call this step has paid for, held back so the chosen path can
+    #: still afford one more call of that size.
     token_reserve: int = 0
     calls: tuple[LLMCallRecord, ...] = ()
     billed: tuple[LLMUsage | None, ...] = ()
@@ -200,30 +205,33 @@ class _Walk:
 
     def run(self, run_state: RunState) -> tuple[RunState, InvestigationStep, StepRecord]:
         """Root, then one level per bound, then the chosen path's handoff."""
-        # 1. Seed the ONE shared ledger, then score the root — the step as generated.
+        # 1. Start the one shared budget from the run's own, then score the root node: the step
+        #    as the generator proposed it, with nothing read yet.
         self.ledger = run_state.budget
         root = self._root(run_state)
         best = root
         frontier = root
-        # 2. One level per allowed depth, best-first.
+        # 2. Go one level deeper per allowed depth, always from the best-scoring node so far.
         for level in range(self.walk.depth_allowed):
             self.walk.descend()
-            # 3. Branch on the frontier's proposed reads; no affordable branch ends the walk.
+            # 3. Open one branch per read the current node's candidates propose. If none can be
+            #    afforded or taken, the walk stops here.
             children = self._branch_out(frontier)
             if not children:
                 break
             frontier = _best_of(children)
             best = _best_of((best, frontier))
-            # 4. Re-generate over the new evidence, so the next level has fresh reads to pick.
+            # 4. Ask the generator again over the evidence this level gathered, so the next
+            #    level has fresh reads to choose between rather than the old ones.
             if level + 1 < self.walk.depth_allowed:
                 regrown = self._regrow(frontier)
                 if regrown is None:
                     break
                 frontier = regrown
-        # 5. Hand the loop the best-scoring path, carrying the WHOLE walk's ledger.
+        # 5. Hand the loop the best-scoring path's step, charged with what the WHOLE walk spent.
         return self._handoff(run_state, best)
 
-    # --- the walk ---------------------------------------------------------
+    # --- walking the tree: root, branches, and one regeneration per level ---
 
     def _root(self, run_state: RunState) -> _Path:
         """Depth 0: the generator's set, scored as the path that gathers nothing more."""
@@ -251,25 +259,27 @@ class _Walk:
         children: list[_Path] = []
         taken: set[str] = set()
         for candidate in parent.candidates:
-            # 1. This node's branch allowance.
+            # 1. Stop once this node has opened as many branches as it is allowed.
             if allowance.exhausted:
                 break
-            # 2. A candidate proposing no read opens no branch.
+            # 2. Skip a candidate that proposes no read: there is nothing to branch on.
             probe = candidate.next_probe
             if probe is None:
                 continue
-            # 3. Two candidates naming the same read are one decision, so the second is refused.
+            # 3. Refuse a second candidate proposing a read already taken here: it is the same
+            #    evidence-gathering decision, and would pay twice for one answer.
             fingerprint = _probe_fingerprint(probe)
             if fingerprint in taken:
                 self._refused(parent, probe, candidate, DUPLICATE_BRANCH_PROBE)
                 continue
-            # 4. The SHARED ledger, which stops the walk rather than this candidate.
+            # 4. Stop the whole walk, not just this candidate, once the shared budget has no
+            #    room for another branch.
             reason = room_for_a_branch(self._budget(), token_reserve=self.token_reserve)
             if reason is not None:
                 self._refused(parent, probe, candidate, reason)
                 self.pruned_by_ledger += 1
                 break
-            # 5. Take the branch: one read, then score what the reading says.
+            # 5. Take the branch: make the one read, then score the node it leads to.
             taken.add(fingerprint)
             child = self._branch(parent, candidate, probe, allowance)
             if child is not None:
@@ -290,8 +300,8 @@ class _Walk:
             raise ValueError(f"{NO_BRANCH_PROBER}. {SEARCH_IS_RECORDED_MODE_ONLY}")
         before = self._budget()
         outcome = prober(_with_ledger(parent.run_state, before), probe)
-        # The ledger moves forward whatever the outcome; whether a refusal cost anything is
-        # the ledger's business, not this walk's.
+        # Take the budget the prober hands back whatever the outcome: whether a refused read
+        # cost anything is for the prober to say, not for this walk to assume.
         self.ledger = outcome.run_state.budget
         if outcome.refused is not None:
             self._refused(parent, probe, candidate, outcome.refused)
@@ -328,7 +338,7 @@ class _Walk:
             generation_call_id=_generation_call_id(generation),
         )
 
-    # --- calls ------------------------------------------------------------
+    # --- the two kinds of model call a node makes --------------------------
 
     def _generate(self, run_state: RunState) -> CandidateGeneration:
         """One generation call, charged to the shared ledger."""
@@ -389,7 +399,7 @@ class _Walk:
         )
         return call.result.output, after, call.result.record_id
 
-    # --- nodes ------------------------------------------------------------
+    # --- scoring a node, and recording a branch that never became one ------
 
     def _scored(
         self,
@@ -410,20 +420,23 @@ class _Walk:
         ``cost_from`` is the ledger before this node's first charge, so a branch's own cost
         includes its read; the score reads the PATH's cost, which is what paths differ by.
         """
-        # 1. One selector call over this node's set, and the step its path would emit.
+        # 1. Ask the selector to choose between this node's candidates, and build the step this
+        #    path would hand the loop if it wins.
         selection, after, selector_call_id = self._select(run_state, candidates)
         chosen = chosen_candidate(selection, candidates)
         step = step_for_selection(selection, candidates, committed_action=committed_action)
-        # 2. This node's own ledger delta, and the whole path's.
+        # 2. Work out what this node alone cost, and what the whole path to it has cost.
         own = cost_between(cost_from, after.budget)
         accumulated = path_cost.plus(own)
-        # 3. Score the PATH: confidence minus the two cost terms minus the safety risk.
+        # 3. Score the whole path, not just this node: the selector's confidence, less the tool
+        #    and token cost so far, less the safety risk of what it would do.
         node = SearchNode(
             node_id=new_node_id(),
             parent_id=parent_id,
             depth=depth,
             evidence_snapshot_ref=evidence_snapshot_ref(after.evidence),
-            # The node's ranking IS the step its path would hand the loop.
+            # The ranking recorded on the node is the one the step above carries, so a
+            # reader sees exactly what this path would have handed the loop.
             hypotheses=step.hypotheses,
             proposed_probe=None if chosen is None else chosen.next_probe,
             probe_taken=probe_taken,
@@ -436,7 +449,7 @@ class _Walk:
             ),
             cost=accumulated,
         )
-        # 4. Carry the live objects the next level needs, and record the node.
+        # 4. Keep the live objects the next level will need, and add this node to the record.
         path = _Path(
             node=node,
             run_state=after,
@@ -480,7 +493,7 @@ class _Walk:
             ),
         )
 
-    # --- the handoff ------------------------------------------------------
+    # --- handing the chosen path back to the loop --------------------------
 
     def _handoff(
         self, before: RunState, best: _Path
@@ -511,8 +524,8 @@ class _Walk:
             iteration=self.ctx.iteration,
             strategy=self.strategy.name,
             model=self.ctx.model,
-            # The CHOSEN path's set, so pass@k means what it means elsewhere; every other node
-            # is under ``search``.
+            # Only the chosen path's candidates go here, so this field means the same thing as
+            # it does for every other arm; the other nodes are recorded under ``search``.
             candidate_set=tuple(
                 candidate_record_of(candidate, generation_call_id=best.generation_call_id)
                 for candidate in best.candidates
@@ -544,7 +557,7 @@ class _Walk:
             planner_context_chars=self.planner_context_chars,
         )
 
-    # --- the ledger -------------------------------------------------------
+    # --- the one shared budget, and the reserve held back for the last call -
 
     def _budget(self) -> BudgetLedger:
         """The shared ledger. One carrier, so no branch spends a copy of it."""

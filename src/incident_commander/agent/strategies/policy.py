@@ -61,13 +61,14 @@ class ThresholdSplit(StrEnum):
     UNTUNED = "untuned"
 
 
-#: The splits a default may be set on. ``holdout`` is absent by design (plan 03 § 4).
+#: The data splits a threshold default may be tuned on. The holdout split is deliberately absent:
+#: a number tuned on it would make the holdout no longer held out.
 TUNABLE_SPLITS: Final[frozenset[ThresholdSplit]] = frozenset(
     {ThresholdSplit.DEV, ThresholdSplit.VALIDATION, ThresholdSplit.UNTUNED}
 )
 
-#: Prefix every threshold's environment variable carries, so the ``Settings`` field names and
-#: these are ONE derivation instead of two lists that drift.
+#: The prefix every threshold's environment variable carries, so the settings field names and
+#: these names are derived from one another rather than being two lists that can drift apart.
 ENV_PREFIX: Final[str] = "UNCERTAINTY_"
 
 
@@ -120,9 +121,8 @@ class ThresholdDefault:
         return env_var_for(self.name)
 
 
-# The ONE place a number in this packet is written. Every row names its split and
-# `__post_init__` refuses `holdout`, so that rule is a property of the declaration. Nothing here
-# has been tuned yet, so `untuned` is the true provenance until WP-13.2's sweep runs.
+# The one place these threshold numbers are written down. Each row names the data split its value
+# came from, and construction refuses a holdout split, so that rule cannot be bypassed here.
 _DECLARED: Final[tuple[ThresholdDefault, ...]] = (
     ThresholdDefault(
         name=ThresholdName.TOP1_CONFIDENCE_FLOOR,
@@ -222,7 +222,7 @@ _DECLARED: Final[tuple[ThresholdDefault, ...]] = (
     ),
 )
 
-#: The declared defaults, by name. The report reads its splits from here.
+#: The declared defaults above, keyed by name, which is how a report looks up each one's split.
 UNCERTAINTY_DEFAULTS: Final[Mapping[ThresholdName, ThresholdDefault]] = MappingProxyType(
     {declared.name: declared for declared in _DECLARED}
 )
@@ -326,11 +326,11 @@ def _or_declared[T: (float, int)](override: T | None, declared: T) -> T:
 class UncertaintyReading:
     """What an arm measured this step. ``None`` means "not measured", never "zero"."""
 
-    #: ``SelectionResult.uncertainty`` from a ``candidate_selector`` step (ADR 0048).
+    #: How uncertain the selector said it was, on a step where a selector ran.
     selector_uncertainty: float | None = None
-    #: Share of the candidate set disagreeing with the leader — see ``candidate_disagreement``.
+    #: What share of the candidate set names a different cause than the leading candidate does.
     candidate_disagreement: float | None = None
-    #: ``evidence_against`` references on the leading candidate (ADR 0042).
+    #: How many pieces of evidence the leading candidate itself cites against its own case.
     contradictory_evidence: int | None = None
 
 
@@ -405,7 +405,8 @@ def evaluate(
     Four of the seven read the run alone; the three needing a candidate set or a selector's
     number come in through ``reading``. No measurement is reported UNMEASURED, never "not fired".
     """
-    # 1. The operating point, the reading, and the three lists a caller reads back.
+    # 1. Fall back to the declared thresholds and an empty reading where none were passed, and
+    #    set up the three lists this function returns.
     bars = thresholds if thresholds is not None else UncertaintyThresholds()
     seen = reading if reading is not None else UncertaintyReading()
     fired: list[EscalationSignal] = []
@@ -416,8 +417,8 @@ def evaluate(
         fired.append(signal)
         reasons.append(f"{signal.value}: {reason}")
 
-    # 2. Three signals off the RANKING: top-1's confidence, its margin over top-2, and its
-    #    confidence after K probes. With no ranking, all three are unmeasured.
+    # 2. Three signals read from the ranking itself: how confident the leader is, how far it
+    #    leads the runner-up, and its confidence after several probes. No ranking means no answer.
     ranked = iter(run_state.hypotheses)
     top = next(ranked, None)
     second = next(ranked, None)
@@ -455,7 +456,8 @@ def evaluate(
                 f"{bars.confidence_floor_after_probes} floor",
             )
 
-    # 3. The selector's own uncertainty — only an arm that ran one can report it.
+    # 3. The selector's own stated uncertainty, which only a step that ran a selector can
+    #    report; otherwise this signal is recorded as unmeasured rather than as not fired.
     if seen.selector_uncertainty is None:
         unmeasured.append(EscalationSignal.SELECTOR_UNCERTAINTY_HIGH)
     elif seen.selector_uncertainty > bars.selector_uncertainty_ceiling:
@@ -465,8 +467,8 @@ def evaluate(
             f"{bars.selector_uncertainty_ceiling} ceiling",
         )
 
-    # 4. Two signals off the candidate SET: how much of it disagrees with the leader, and how
-    #    much evidence the leader cites against itself.
+    # 4. Two signals read from the candidate set: how much of it disagrees with the leader, and
+    #    how much evidence the leader cites against its own case.
     if seen.candidate_disagreement is None:
         unmeasured.append(EscalationSignal.CANDIDATE_DISAGREEMENT_HIGH)
     elif seen.candidate_disagreement > bars.candidate_disagreement_ceiling:
@@ -485,7 +487,8 @@ def evaluate(
             f"against itself, at or over the {bars.contradictory_evidence_count} that fires",
         )
 
-    # 5. The one signal about the RUN rather than this step, which no rung can clear (ADR 0056).
+    # 5. The one signal about the whole run rather than this step: a remediation attempt that
+    #    did not end the incident. No amount of extra thinking on this step can clear it.
     if (failed := failed_attempts(run_state)) >= bars.failed_attempt_count:
         fire(
             EscalationSignal.REMEDIATION_ATTEMPT_FAILED,

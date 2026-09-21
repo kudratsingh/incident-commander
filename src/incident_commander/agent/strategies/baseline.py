@@ -25,12 +25,12 @@ from incident_commander.agent.strategies.records import (
     StepRecord,
 )
 
-#: The planner call's prompt role, and the label the tracer writes its LLM records with. One
-#: string, so a record's ``role`` and the trace's ``role`` cannot drift apart.
+#: The prompt this arm asks with, and the label the tracer files its calls under. One string for
+#: both, so the record's role and the trace's role cannot come to disagree.
 _PLANNER_ROLE: Final[str] = "investigation_planner"
 
-#: Nothing to configure. Read-only so a caller cannot fill the empty block and have it stamped
-#: into a provenance record as if it were a setting.
+#: This arm has nothing to configure. Read-only, so a caller cannot put something in the empty
+#: block and have it stored with the run as though it were a real setting.
 _NO_CONFIG: Final[Mapping[str, Any]] = MappingProxyType({})
 
 
@@ -54,7 +54,8 @@ class BaselineStrategy:
             at,
             ctx.llm_client,
             ctx.model,
-            # Whole unless the loop withdrew this step's probe (ADR 0074); the arm decides nothing.
+            # The full step schema, unless the loop withdrew the probe option for this step;
+            # this arm never makes that decision itself.
             ctx.step_model(InvestigationStep),
         )
         record = self._record(run_state, updated, step, call, ctx)
@@ -79,7 +80,8 @@ class BaselineStrategy:
             name=top.name,
             confidence=top.confidence,
             proposed_probe=(action.tool_name if isinstance(action, ProbeAction) else None),
-            # One call generated the whole ranking, so the one candidate names it.
+            # A single call produced the whole ranking, so this one candidate records that
+            # call's id as the call that generated it.
             generation_call_id=call.record_id,
         )
         return StepRecord(
@@ -88,7 +90,7 @@ class BaselineStrategy:
             strategy=self.name,
             model=ctx.model,
             candidate_set=(candidate,),
-            # No selector: with one candidate there is nothing to select between.
+            # No selection was made: with one candidate there is nothing to choose between.
             selector=None,
             emitted_step=step,
             hypothesis_state_before=before.hypotheses,
@@ -97,8 +99,8 @@ class BaselineStrategy:
                 LLMCallRecord(
                     role=_PLANNER_ROLE,
                     model=ctx.model,
-                    # The ledger's own delta, the number ADR 0015 holds the run to: it includes
-                    # billed-then-discarded attempts, which the counters below cannot see.
+                    # What the run's own budget moved by, which is the number the budget rules
+                    # hold a run to: it includes attempts that were billed and then rejected.
                     tokens_used=after.budget.tokens_used - before.budget.tokens_used,
                     usd_used=after.budget.usd_used - before.budget.usd_used,
                     input_tokens=call.input_tokens,
@@ -106,8 +108,8 @@ class BaselineStrategy:
                     cache_read_tokens=call.cache_read_tokens,
                     cache_creation_tokens=call.cache_creation_tokens,
                     call_id=call.record_id,
-                    # Filled since WO-R3-260, from the client's own stopwatch. ``None`` is a
-                    # real answer (a canned client does not time itself); never invent one.
+                    # How long the call took, as the LLM client measured it. ``None`` is a real
+                    # answer — an offline client does not time itself — so never fill one in.
                     elapsed_ms=call.elapsed_ms,
                 ),
             ),

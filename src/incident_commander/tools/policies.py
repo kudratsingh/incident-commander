@@ -1,9 +1,8 @@
 """Tier policy: which tools the agent may call in which state.
 
-``READ`` is safe any time. ``TIER_1`` mutates with a bounded, reversible blast
-radius the remediation planner may execute directly. ``TIER_2`` needs propose →
-approve → execute against a platform approval object, and is not populated yet.
-This is the agent-side first filter — the platform decides (CLAUDE.md invariant 2).
+``READ`` is safe any time; ``TIER_1`` mutates with a bounded, reversible blast radius the
+remediation planner may execute directly; ``TIER_2`` needs propose → approve → execute and
+is not populated yet. The agent-side first filter — the platform decides (invariant 2).
 """
 
 from __future__ import annotations
@@ -29,12 +28,8 @@ class PolicyCoverageError(RuntimeError):
     """
 
 
-# Explicit map — every tool the registry knows about is classified in exactly
-# one of the three sets below. A tool added to the registry but not here
-# fails ``ensure_covered`` AND ``tier_of``.
-#
-# The read set is written out, not inferred as "everything else": the default
-# answer to "what may this tool do" is "refuse to say" (ADR 0003).
+# Every registered tool is classified in exactly one set below; one that is not fails
+# ``ensure_covered`` AND ``tier_of``. The read set is written out, never inferred (ADR 0003).
 _READ_TOOLS: Final[frozenset[str]] = frozenset(
     {
         "get_cache_key_info",
@@ -62,8 +57,7 @@ _TIER_1_TOOLS: Final[frozenset[str]] = frozenset(
         "pause_dag",
         "replay_dlq_messages",
         "invalidate_cache_key",
-        # v0.4.0 DLQ categorization tools. All idempotent, all bounded by
-        # platform-side scope check (actions:execute) + tier policy here.
+        # v0.4.0 DLQ tools: idempotent, bounded by `actions:execute` + this tier policy.
         "replay_dlq_by_ids",
         "replay_dlq_by_category",
         "mark_dlq_permanent",
@@ -102,16 +96,8 @@ class ResolutionPolicy(NamedTuple):
     rationale: str
 
 
-# Single source of truth for "can this action end an incident?".
-#
-# TOTAL over the Tier-1 slice, like ``VERIFY_PROBE_FOR_ACTION``: an absent entry
-# is a safety decision nobody took, so ``resolution_class_of`` raises and
-# ``tests/unit/test_policies.py::TestResolutionClass`` fails on a Tier-1 tool
-# with no entry.
-#
-# What this closes (2026-09-07): the one RESOLVED transition asked only whether
-# the judge said `verified`, which `pause_dag` satisfies trivially — the judge
-# was right, the question was wrong.
+# Single source of truth for "can this action end an incident?". TOTAL over the Tier-1
+# slice: an absent entry raises in ``resolution_class_of`` (``test_policies.py`` pins it).
 RESOLUTION_CLASS: Final[dict[str, ResolutionPolicy]] = {
     "pause_dag": ResolutionPolicy(
         Resolution.STABILIZES,
@@ -150,19 +136,9 @@ RESOLUTION_CLASS: Final[dict[str, ResolutionPolicy]] = {
         "legacy bulk re-submit. Kept resolving for parity with the two "
         "targeted replay tools it predates.",
     ),
-    # STABILIZES since 2026-09-08 (WO-R2-140, decided by the user); ADR 0026
-    # shipped it as RESOLVES with the disagreement recorded rather than
-    # settled. The platform's own words point one way — fence, then escalate:
-    # the mark "doesn't change job.status — the entry stays in DLQ, just won't
-    # be auto-replayed", the planner prompt routes `human_required` to
-    # "`mark_dlq_permanent` … then `stop`", and the scenario is named
-    # `dlq_human_required_escalates`.
-    #
-    # So it is the `pause_dag` shape in a different dress: a verified success
-    # that holds the incident still. The fence stops a later bulk replay from
-    # re-running the poison; the job is still dead and a human fixes the CSV,
-    # the producer or the schema. Unlike a pause it does not self-expire and
-    # does not block the real fix — a better stabilizer, not a resolution.
+    # STABILIZES since WO-R2-140 (user decision), amending ADR 0026's RESOLVES: the fence
+    # stops a later bulk replay from re-running the poison, but the job is still dead and a
+    # human still fixes the payload. Scenario: `dlq_human_required_escalates`.
     "mark_dlq_permanent": ResolutionPolicy(
         Resolution.STABILIZES,
         "fences one dead-lettered job out of auto-replay — it sets "
@@ -216,10 +192,8 @@ def stabilize_only_tools() -> frozenset[str]:
     )
 
 
-# Read tools served from a cache, with the declared staleness window in seconds:
-# a reading inside its window may predate the fault — a 60s-cached lag of 0 once
-# killed a correct consumer_saturation hypothesis (ADR 0009). The loop uses this
-# to decide when a contradicting probe deserves a fresh re-read.
+# Read tools served from a cache, with their declared staleness window in seconds: a reading
+# inside its window may predate the fault, so a contradicting probe earns a re-read (ADR 0009).
 CACHED_READ_FRESHNESS_SECONDS: Final[dict[str, int]] = {
     "get_consumer_lag": 60,
 }
@@ -230,23 +204,19 @@ def is_cached_read(tool_name: str) -> bool:
     return tool_name in CACHED_READ_FRESHNESS_SECONDS
 
 
-# Per-tool argument fields whose values NAME a platform resource (a cache key, a
-# job id) rather than filter. A remediation plan may fill these only from values
-# copied verbatim out of the alert or the evidence ledger — the planner once
-# re-typed a key minus its `cache:jobs:` prefix (ADR 0009). Total over
-# TOOL_REGISTRY, and `tests/unit/test_policies.py` fails on an unclassified tool.
+# Argument fields whose values NAME a platform resource (a cache key, a job id) rather than
+# filter. A plan may fill these only from values copied VERBATIM out of the alert or the
+# evidence ledger (ADR 0009). Total over TOOL_REGISTRY; `test_policies.py` pins that.
 RESOURCE_ARG_FIELDS: Final[dict[str, frozenset[str]]] = {
     # `key` NAMES a resource — same copy-don't-re-type rule as the write tool.
     "get_cache_key_info": frozenset({"key"}),
-    # No arguments — declared empty rather than omitted (ADR 0003), the same
-    # record `get_outbox_status` below is: the question was asked.
+    # No arguments — declared empty rather than omitted (ADR 0003).
     "get_circuit_breakers": frozenset(),
     "get_consumer_lag": frozenset({"consumer_group"}),
     "get_dag_state": frozenset({"job_id"}),
     "get_deploy_history": frozenset(),
     "get_incident": frozenset({"id"}),
-    # No arguments, so nothing can name a resource. Declared empty, not
-    # omitted (ADR 0003).
+    # No arguments, so nothing can name a resource. Declared empty (ADR 0003).
     "get_outbox_status": frozenset(),
     "get_postgres_health": frozenset(),
     "get_redis_health": frozenset(),
@@ -290,9 +260,8 @@ def _derive_uuid_resource_fields() -> dict[str, frozenset[str]]:
     return derived
 
 
-# Resource-naming fields whose values must be canonical UUIDs, per tool. Total
-# over ``TOOL_REGISTRY``, where an empty entry is a *declared* "nothing to
-# check" rather than silence.
+# Resource-naming fields whose values must be canonical UUIDs, per tool. Total over
+# ``TOOL_REGISTRY``: an empty entry is a DECLARED "nothing to check", not silence.
 UUID_RESOURCE_FIELDS: Final[dict[str, frozenset[str]]] = _derive_uuid_resource_fields()
 
 

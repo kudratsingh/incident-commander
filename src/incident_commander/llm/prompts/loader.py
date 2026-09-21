@@ -1,9 +1,8 @@
 """Read prompts from ``src/incident_commander/llm/prompts/<name>.md``.
 
-Returns the file content with every shared rule expanded; ``tests/unit/test_prompts_snapshot.py``
-gates drift. A file may write ``{{rule:<key>}}`` for a rule from ``shared_rules.py``, and
-expanding it here means no caller opts in or out (ADR 0054, INC-002). ``raw_prompt`` is the
-unexpanded file, for tests that check a ``*.md`` carries the placeholder, not a copy.
+A file may write ``{{rule:<key>}}`` for a rule from ``shared_rules.py``; expanding it here
+means no caller opts in or out (ADR 0054, INC-002). ``tests/unit/test_prompts_snapshot.py``
+gates drift.
 """
 
 from __future__ import annotations
@@ -23,8 +22,7 @@ class PromptNotFoundError(RuntimeError):
 def raw_prompt(name: str) -> str:
     """``prompts/<name>.md`` exactly as authored, shared rules unexpanded.
 
-    Not for a role. It lets a test assert a prompt file *delegates* the shared
-    rule instead of restating it.
+    For tests that assert a prompt file *delegates* the shared rule; not for a role.
     """
     path = _PROMPTS_DIR / f"{name}.md"
     if not path.is_file():
@@ -39,9 +37,8 @@ def load_prompt(name: str) -> str:
 
 
 def available_prompts() -> tuple[str, ...]:
-    """Every name ``load_prompt`` can serve, sorted — the directory, enumerated.
+    """Every name ``load_prompt`` can serve: file *stems*, sorted, uncached so it cannot stale.
 
-    So ``tests/unit/test_prompts_snapshot.py`` walks the directory instead of its own
-    hand-maintained dict. Returns file *stems*, and is uncached so it cannot go stale.
+    Lets ``tests/unit/test_prompts_snapshot.py`` walk the directory, not a hand-kept dict.
     """
     return tuple(sorted(path.stem for path in _PROMPTS_DIR.glob("*.md")))

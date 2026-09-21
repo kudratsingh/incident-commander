@@ -1,9 +1,8 @@
 """Decoding rules for the agent's OWN structured output (ADR 0035).
 
-Every ``record_output`` model inherits :class:`StructuredOutput`: a ``mode="before"``
-validator that decodes a nested object or array which arrived as a JSON string — the
-shape that cost paid run ``779b19a287a7`` a RED scenario. It substitutes only on a
-type match, tolerates trailing ``]``/``}`` alone, and never sees tool output.
+Every ``record_output`` model inherits :class:`StructuredOutput`, whose ``mode="before"``
+validator decodes a nested object or array that arrived as a JSON string (paid run
+``779b19a287a7``). It substitutes only on a type match, and never sees tool output.
 """
 
 from __future__ import annotations
@@ -16,14 +15,12 @@ from typing import Any, Final, Literal, get_args, get_origin
 
 from pydantic import BaseModel, model_validator
 
-#: Allowed to trail a decoded value: container terminators, so a
-#: delimiter leak, never content.
+#: Allowed to trail a decoded value: container terminators — a delimiter leak, never content.
 TRAILING_DELIMITERS: Final[str] = "]}"
 
 _WHITESPACE: Final[str] = " \t\r\n"
 
-# Sentinel for "this string is not a stringified container" — distinct from
-# ``None``, which is a value ``json.loads`` can legitimately return.
+# Sentinel for "not a stringified container"; ``None`` is a value ``json.loads`` returns.
 _UNDECODED: Final[object] = object()
 
 _MAPPING_ORIGINS: Final[frozenset[Any]] = frozenset({dict, Mapping})
@@ -102,15 +99,9 @@ class StructuredOutput(BaseModel):
     def output_refused(cls, error: Exception) -> bool:
         """Whether this failure is the SCHEMA refusing a move, not a payload it cannot read.
 
-        ADR 0074's hook, and the reason it lives on the model: a step model handed to the
-        planner with a choice narrowed (``hypothesis.without_probe``) rejects the withdrawn
-        move at validation, and that is not the malformation ADR 0035's one bounded re-ask
-        exists for — "your output was invalid" is the wrong sentence for "that move was not on
-        offer". ``llm/repair.py`` asks the model rather than inspecting the error itself, so
-        the knowledge of what a model offers stays with the model, and every caller that passes
-        a narrowed schema gets the behaviour without knowing about it.
-
-        ``False`` by default: every model that narrows nothing keeps ADR 0035 exactly.
+        ADR 0074's hook: a narrowed model (``hypothesis.without_probe``) rejects the withdrawn
+        move at validation, not the malformation ADR 0035's re-ask exists for. ``False`` by
+        default, so a model that narrows nothing keeps ADR 0035 exactly.
         """
         return False
 

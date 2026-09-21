@@ -32,8 +32,7 @@ class _EmptyInput(BaseModel):
 
 class GetConsumerLagInput(BaseModel):
     model_config = _EMPTY_CONFIG
-    # No min_length: the platform accepts ANY group string (lag:null for
-    # unknown ones) and the snapshot inputSchema has none either.
+    # No min_length: the platform accepts ANY group string, and the snapshot has none either.
     consumer_group: str = Field(default="worker-dispatcher")
 
 
@@ -46,11 +45,8 @@ class LagSample(BaseModel):
 
 
 class GetConsumerLagOutput(BaseModel):
-    # `lag` is null for "could not determine", NOT zero — check `lag_known`
-    # before comparing. `source`: only `live` is refreshed (~60s). v0.6.7
-    # (plat #204, WO-R3-254) added `measured_at` / `age_seconds` /
-    # `recent_samples` (newest first); null or empty is absent history, never
-    # a flat line. All three are optional, so a v0.6.5 response still parses.
+    # `lag` null is "could not determine", never zero — check `lag_known` first. Only
+    # `source: live` is refreshed (~60s); empty `recent_samples` is absent history (v0.6.7).
     model_config = ConfigDict(extra="ignore", frozen=True)
     consumer_group: str
     lag: int | None
@@ -86,11 +82,9 @@ class DagEdge(BaseModel):
 
 
 class GetDagStateOutput(BaseModel):
-    # v0.4.9: the pause flag became observable here (pause_dag was a shipped
-    # no-op — docs/lessons/live-campaign-2026-08-03.md exhibit 2).
+    # v0.4.9: the pause flag became observable here (pause_dag was a shipped no-op).
     model_config = ConfigDict(extra="ignore", frozen=True)
-    # v0.5.0 moved the title, not the wire name `seed_id`; the snapshot
-    # test compares titles strictly.
+    # v0.5.0 moved the title, not the wire name `seed_id`; the snapshot test pins titles.
     seed_id: str = Field(title="Root Job Id")
     nodes: list[DagNode]
     edges: list[DagEdge]
@@ -176,55 +170,41 @@ class ListIncidentsOutput(BaseModel):
 
 # --- get_postgres_health / get_redis_health -----------------------------
 #
-# v0.6.14 (plat #227, WO-R3-289, platform ADR 0033) adds the `pools` group below.
-# It is a SAMPLE, not a live reading: every process rewrites its own entry on a
-# fixed cadence under a 60 s TTL, so `reported_age_s` of a few seconds is normal,
-# and a process that stopped publishing leaves the list rather than freezing at its
-# last healthy number. An absent process is therefore not a healthy one, which is
-# the one inference this group invites and forbids.
+# `pools` is a SAMPLE, not a live reading (v0.6.14, plat #227, platform ADR 0033): each
+# process rewrites its entry under a 60 s TTL, so a few seconds of `reported_age_s` is
+# normal and a process that stopped publishing LEAVES the list — absent is not healthy.
 
 
 class PoolGaugeReading(BaseModel):
     model_config = ConfigDict(extra="ignore", frozen=True)
     # Declaration order IS the snapshot's `required` order; the mirror test checks.
-    # `api_worker` (REST + the background workers, one pool) or `mcp` (this tool
-    # surface). A plain string on the platform side, so a Literal here would reject
-    # a process a later release adds.
+    # `api_worker` (REST + background workers) or `mcp`. A plain string platform-side, so
+    # a Literal here would reject a process a later release adds.
     process: str
     size: int
-    # A 0 here is a measurement: that pool was idle. Read against `size` +
-    # `max_overflow`; on its own the number says nothing.
+    # 0 is a measurement (idle). Read against `size` + `max_overflow`, never on its own.
     checked_out: int
     overflow: int
     max_overflow: int | None = None
-    # Callers in THAT process that waited for a connection and gave up in the 60 s
-    # before the reading was written. 0 is a measurement, not an unknown.
+    # Callers in THAT process that gave up waiting in the 60 s before the reading; 0 is real.
     wait_timeouts_1m: int
-    # That process's own clock, not the clock of the process answering the call, so
-    # a second either way between `written_at` and `reported_age_s` is noise.
+    # That process's own clock, not the answering one's — a second either way is skew.
     written_at: datetime
     reported_age_s: float
 
 
 class PostgresHealthOutput(BaseModel):
-    # v0.6.11 (plat #218, WO-R3-217) adds the twelve fields below. All of them
-    # are mirrored, in the snapshot's declaration order, because `extra="ignore"`
-    # drops an unmirrored field in silence (LESSONS 2026-09-08, cmd #206) —
-    # `tests/unit/test_registry_matches_snapshot.py` holds this schema to exact
-    # equality with the snapshot AND names any dropped field.
-    #
-    # `null` is unknown and `0` is a measurement, everywhere here. The two
-    # `*_unknown_reason` strings say which case a null is.
+    # Every field is mirrored in the snapshot's declaration order, because `extra="ignore"`
+    # drops an unmirrored one in silence (`test_registry_matches_snapshot.py` pins it).
+    # `null` is unknown and `0` is a measurement throughout; `*_unknown_reason` says which.
     model_config = ConfigDict(extra="ignore", frozen=True)
     ok: bool
     ping_latency_ms: float | None = None
     active_connections: int | None = None
     dialect: str
     error: str | None = None
-    # WHOSE POOL: the pool of the process that ANSWERED the call — the MCP
-    # service — and no other. The api service hosts the worker loops and has its
-    # own pool, so a pool exhausted there reads healthy in these five fields. The
-    # gap ADR 0030 left open is closed by `pools` below, not by these (v0.6.14).
+    # WHOSE POOL: only the process that ANSWERED the call (MCP). A pool exhausted in the
+    # api service reads healthy in these five fields — see `pools` below (ADR 0030).
     pool_size: int | None = None
     # Includes the connection this very call holds, so an otherwise idle process
     # reads 1, never 0. Only meaningful against `pool_size` + `pool_max_overflow`.
@@ -237,23 +217,18 @@ class PostgresHealthOutput(BaseModel):
     # every process — the pool fields' limit does not apply. The server's clock.
     longest_active_query_ms: float | None = None
     active_queries_over_slow_threshold: int | None = None
-    # Required (no default): the yardstick the count above is read against is
-    # never absent, and the platform offers no argument to change it.
+    # Required (no default): the yardstick above is never absent and cannot be changed.
     slow_query_threshold_ms: float
-    # ALWAYS null in this release (O-28): there is no per-minute query history,
-    # and `query_stats_unknown_reason` says which of three cases applies.
-    # `longest_active_query_ms` + `active_queries_over_slow_threshold` are the
-    # live equivalents. Mirrored anyway — a field the agent may be shown must
-    # parse, and the day the platform can answer it, nothing here has to move.
+    # ALWAYS null in this release (O-28); `query_stats_unknown_reason` says which of three
+    # cases. Mirrored anyway — the live equivalents are the two query fields above.
     p95_query_ms_1m: float | None = None
     slow_query_count_1m: int | None = None
     query_stats_unknown_reason: str | None = None
     # v0.6.14: where a pool held in ANOTHER process shows up — the flat `pool_*`
     # fields above cannot show it. Not a page: no cap, nothing truncated.
     pools: tuple[PoolGaugeReading, ...] = ()
-    # Null exactly when at least one process reported. So an empty `pools` with this
-    # null is a response the platform does not produce, and an empty `pools` with it
-    # SET means nothing could be read about any pool — which is not "no pool is busy".
+    # Null exactly when at least one process reported, so an empty `pools` with this SET
+    # means nothing could be read about any pool — which is not "no pool is busy".
     pool_gauges_unknown_reason: str | None = None
 
 
@@ -271,15 +246,9 @@ class RedisHealthOutput(BaseModel):
 
 # --- get_outbox_status (read) --------------------------------------------
 #
-# v0.6.9 (plat #211, WO-R3-201). A READ tool under `telemetry:read` over the
-# transactional outbox: rows committed and waiting to be PUBLISHED — NOT
-# consumer lag, which is published and not yet consumed. Nothing cached.
-#
-# All fourteen fields are mirrored because `extra="ignore"` drops an unmirrored
-# one silently; `tests/unit/test_registry_matches_snapshot.py` holds the schema
-# to exact equality with the snapshot's `outputSchema`. Null is "nothing to
-# report", never zero, and `unpublished_past_attempt_limit` counts rows INSIDE
-# `unpublished_count`.
+# A READ tool under `telemetry:read` (v0.6.9, plat #211) over the transactional outbox: rows
+# committed and waiting to be PUBLISHED, NOT consumer lag. Null is "nothing to report", never
+# zero; `unpublished_past_attempt_limit` counts rows INSIDE `unpublished_count`.
 
 
 class GetOutboxStatusOutput(BaseModel):
@@ -294,8 +263,7 @@ class GetOutboxStatusOutput(BaseModel):
     unpublished_past_attempt_limit: int
     last_publish_at: datetime | None = None
     seconds_since_last_publish: float | None = None
-    # Recorded by the worker process on ITS clock, unlike everything above:
-    # the age compares two hosts and carries whatever skew is between them.
+    # The worker process's own clock, unlike everything above — the age carries skew.
     relay_last_tick_at: datetime | None = None
     relay_heartbeat_age_s: float | None = None
     relay_heartbeat_known: bool
@@ -305,20 +273,9 @@ class GetOutboxStatusOutput(BaseModel):
 
 # --- get_slo_status (read) -----------------------------------------------
 #
-# v0.6.11 (plat #218, WO-R3-217, platform ADR 0030). A READ tool under
-# `telemetry:read`, no arguments, surfacing the objective computation that had
-# exactly one caller before this — an admin REST route — so an alert saying an
-# objective was missed could be neither confirmed nor refuted from the tool
-# surface. No paging: every objective the platform declares comes back.
-#
-# Two readings that are easy to get backwards, both spelled out in the
-# platform's own descriptions: `total: 0` means nothing settled in the window,
-# which makes `current_success_rate: 1.0` and `healthy: true` an absence of
-# evidence rather than health; and `burn_rate: null` means the rate is
-# UNBOUNDED — above every threshold — not unknown.
-#
-# No class docstrings on these models: a docstring is the schema's
-# `description`, and this schema is a tool contract.
+# A READ tool under `telemetry:read`, no arguments, no paging (v0.6.11, platform ADR 0030).
+# Two readings that are easy to get backwards: `total: 0` makes `current_success_rate: 1.0`
+# an absence of evidence, not health; `burn_rate: null` means UNBOUNDED, not unknown.
 
 
 class SloObjective(BaseModel):
@@ -326,8 +283,7 @@ class SloObjective(BaseModel):
     # Declaration order IS the snapshot's `required` order; the mirror test checks.
     id: str
     name: str
-    # The objective's own prose, not a field about this model. Shadows nothing:
-    # Pydantic treats it as an ordinary field.
+    # The objective's own prose, not a field about this model; an ordinary field.
     description: str
     target: float
     window_hours: int
@@ -351,22 +307,9 @@ class GetSloStatusOutput(BaseModel):
 
 # --- get_circuit_breakers (read) -----------------------------------------
 #
-# v0.6.11 (plat #218, WO-R3-217, platform ADR 0030). A READ tool under
-# `telemetry:read`, no arguments: whether the platform has stopped calling
-# something, which is the difference between "a downstream dependency is
-# failing" and "something inside this platform is wrong".
-#
-# Each breaker's state lives in Redis under `breaker:state:<name>` precisely so
-# a reader in ANOTHER process can see it — the registry is in-process and the
-# MCP server is its own process (platform ADR 0006), so the obvious
-# implementation reported every breaker closed. The timestamps are therefore on
-# the OWNING process's clock while `measured_at` is on the answering one's:
-# treat a second either way as skew.
-#
-# `reported_age_s` is not a heartbeat. A record is refreshed while calls flow,
-# so a large age on a closed breaker means nothing has called through it
-# lately. `unknown_reason` set with an empty `breakers` list is "could not
-# tell", which is not the same fact as "no breaker is open".
+# A READ tool under `telemetry:read`, no arguments (v0.6.11, plat #218, platform ADR 0030).
+# State lives in Redis under `breaker:state:<name>`, so its timestamps are the OWNING
+# process's clock. `reported_age_s` is not a heartbeat; empty + `unknown_reason` ≠ none open.
 
 
 class CircuitBreakerReading(BaseModel):
@@ -428,8 +371,7 @@ class TracedAuditRow(BaseModel):
 
 
 class GetTraceOutput(BaseModel):
-    # v0.6.0 (plat #180): capped — when `truncated`, conclude nothing from
-    # absence. `total_audit_events` null is not zero.
+    # v0.6.0: capped — when `truncated`, conclude nothing from absence. Null is not zero.
     model_config = ConfigDict(extra="ignore", frozen=True)
     trace_id: str
     jobs: list[TracedJob]
@@ -527,8 +469,7 @@ class ListDlqMessagesInput(BaseModel):
     # v0.4.0+: replay_safe | wait_and_replay | human_required; omit for all.
     remediation_hint: str | None = None
     limit: int = Field(default=50, ge=1, le=200)
-    # v0.6.0 (plat #180, R2-53): paging. Compare against `total` to know
-    # whether more remain.
+    # v0.6.0 (plat #180, R2-53): paging — compare against `total` to know if more remain.
     offset: int = Field(default=0, ge=0)
 
 
@@ -556,14 +497,10 @@ class DlqEntry(BaseModel):
     remediation_hint: str | None = None
     # v0.6.0 (plat #180, R2-53): terminal time, and the list's order — not `created_at`.
     dead_lettered_at: datetime | None = None
-    # v0.6.2 (plat #198, WO-R2-158): who fenced this row, and when — a THIRD
-    # clock beside `created_at` (submission) and `dead_lettered_at` (death).
-    # Verify a fence on `fenced_at`, never on `remediation_hint`, which reads
-    # the same from triage. Null until fenced; a replay clears them. Declared,
-    # not `extra="ignore"` (`tests/unit/test_registry_matches_snapshot.py`).
+    # v0.6.2 (WO-R2-158): a THIRD clock beside `created_at` and `dead_lettered_at`. Verify a
+    # fence on `fenced_at`, never on `remediation_hint`. Null until fenced; a replay clears it.
     fenced_at: datetime | None = None
-    # `"{principal_type}:{principal_id}"`, per-stack (minted by `make
-    # bootstrap-token`) — never pin it; assert `fenced_at is not null`.
+    # `"{principal_type}:{principal_id}"`, per-stack — never pin it; assert `fenced_at`.
     fenced_by: str | None = None
     extra: dict[str, Any] | None = None
 
@@ -576,8 +513,7 @@ class ListDlqMessagesOutput(BaseModel):
 
 # --- Tier-1 write actions (remediation) ---------------------------------
 #
-# Platform enforces authz + idempotency + audit; ``policies.py`` bars the
-# investigation planner.
+# Platform enforces authz + idempotency + audit; ``policies.py`` bars the investigation planner.
 
 
 class RestartConsumerGroupInput(BaseModel):
@@ -587,8 +523,7 @@ class RestartConsumerGroupInput(BaseModel):
 
 
 class RestartConsumerGroupOutput(BaseModel):
-    # v0.4.5+: `latency_key_cleared` makes this the single compensating action
-    # for both `kill_consumer` and `inject_latency`.
+    # v0.4.5+: the single compensating action for both `kill_consumer` and `inject_latency`.
     model_config = ConfigDict(extra="ignore", frozen=True)
     consumer_group: str
     kill_key_cleared: bool
@@ -617,8 +552,7 @@ class ReplayDlqMessagesInput(BaseModel):
     model_config = _EMPTY_CONFIG
     job_type: str | None = None
     limit: int = Field(default=25, ge=1, le=200)
-    # v0.6.0 (plat #172, R2-22): the bulk path FENCES `human_required` by
-    # default. True opts back in to replaying that category.
+    # v0.6.0 (plat #172, R2-22): the bulk path FENCES `human_required`; True opts back in.
     include_human_required: bool = False
     idempotency_key: str = Field(min_length=8, max_length=255)
 
@@ -660,9 +594,8 @@ class ReplayResult(BaseModel):
 
 # --- get_cache_key_info (read) -------------------------------------------
 #
-# v0.6.0 (plat #146/#182, R2-54). A READ tool, not Tier-1: the SHAPE of an
-# entry (existence, TTL, type, size), never the value. Same prefixes
-# `invalidate_cache_key` deletes — check an entry before and after.
+# A READ tool, not Tier-1 (v0.6.0, plat #146/#182, R2-54): the SHAPE of an entry (existence,
+# TTL, type, size), never the value. Same prefixes `invalidate_cache_key` deletes.
 
 
 class GetCacheKeyInfoInput(BaseModel):
@@ -671,10 +604,8 @@ class GetCacheKeyInfoInput(BaseModel):
 
 
 class GetCacheKeyInfoOutput(BaseModel):
-    # v0.6.8 (plat #209, WO-R3-267): `records_referenced` is how many records
-    # the entry means to name, `records_found` how many the tenant holds now.
-    # Fewer found means it names records the platform lacks; equal counts do
-    # not say the copied fields are current. Null is not zero; both OPTIONAL.
+    # v0.6.8 (WO-R3-267): `records_referenced` is what the entry names, `records_found` what
+    # the tenant holds now. Equal counts do NOT say the copied fields are current; null ≠ 0.
     model_config = ConfigDict(extra="ignore", frozen=True)
     key: str
     exists: bool
@@ -700,18 +631,16 @@ class InvalidateCacheKeyOutput(BaseModel):
 
 # --- v0.4.0 DLQ categorization tools ------------------------------------
 #
-# Category-aware replacements for the coarse ``replay_dlq_messages``:
-# ``replay_dlq_by_ids`` (targeted, cap 50), ``replay_dlq_by_category`` (bulk,
-# replay_safe / wait_and_replay only), ``mark_dlq_permanent`` (human_required).
-# ``delay_seconds`` (None = immediate) defers the enqueue, platform-side.
+# Category-aware replacements for the coarse ``replay_dlq_messages``: ``replay_dlq_by_ids``
+# (targeted, cap 50), ``replay_dlq_by_category`` (bulk, replay_safe / wait_and_replay only),
+# ``mark_dlq_permanent`` (human_required). ``delay_seconds`` defers the enqueue, platform-side.
 
 
 class ReplayDlqByIdsInput(BaseModel):
     model_config = _EMPTY_CONFIG
     job_ids: list[UUID] = Field(min_length=1, max_length=50)
     idempotency_key: str = Field(min_length=8, max_length=255)
-    # v0.4.1+: the platform defers each replay when set; omit for immediate.
-    # Capped at 1 hour. Used for ``wait_and_replay``.
+    # v0.4.1+: defers each replay (cap 1 hour) for ``wait_and_replay``; omit for immediate.
     delay_seconds: int | None = Field(default=None, ge=1, le=3600)
 
 
@@ -724,8 +653,7 @@ class ReplayDlqByIdsOutput(BaseModel):
     model_config = ConfigDict(extra="ignore", frozen=True)
     requested: int
     replayed: int
-    # Platform advertises scheduled with default=0 (delay_seconds omitted →
-    # nothing scheduled, that's the modal case). replayed stays required.
+    # Platform advertises `scheduled` with default=0; `replayed` stays required.
     scheduled: int = 0
     failed: int
     results: list[ReplayResult]
@@ -785,14 +713,11 @@ class MarkDlqPermanentOutput(BaseModel):
     # Nullable but required (no default) per v0.4.8 outputSchema.
     previous_hint: str | None
     remediation_hint: str
-    # v0.6.2 (plat #198) CORRECTS THIS FIELD'S MEANING: no longer a no-op.
-    # Every mark writes the hint, `fenced_at`, `fenced_by` and an audit row
-    # whatever the previous hint was, so `already_marked` says only "you were
-    # not the first" — never "nothing happened" (LESSONS 2026-09-08, WO-R2-158).
+    # v0.6.2 (WO-R2-158) CORRECTS THIS FIELD: every mark writes the hint, `fenced_at`,
+    # `fenced_by` and an audit row, so this says "you were not the first", never "no-op".
     already_marked: bool
-    # v0.6.2 (plat #198): when THIS call fenced the row. Required, so no
-    # default — absence must fail parsing, not read as "not fenced".
-    # Verify a fence here, never on `remediation_hint`.
+    # v0.6.2: when THIS call fenced the row. Required, so absence fails parsing rather than
+    # reading as "not fenced". Verify a fence here, never on `remediation_hint`.
     fenced_at: datetime
 
 
@@ -812,29 +737,16 @@ _SNAPSHOT_PATH: Final[Path] = (
     Path(__file__).resolve().parents[3] / "contracts" / "platform-tools.snapshot.json"
 )
 
-#: Description prefixes the platform stamps on tools this registry deliberately does
-#: NOT mirror. Both are structural filters rather than hand-lists, because a hand-list
-#: of excluded tools has drifted three times in this repo.
-#:
-#: ``[chaos:`` is the lab's (v0.4.9). The agent's principal holds no ``chaos:invoke``
-#: and the evaluator fires hooks through ``evals/chaos_hooks.py``, so a hook has no
-#: typed model here and never reaches the planner's page.
-#:
-#: ``[commander:`` is the commander's OWN telemetry (v0.6.13, platform ADR 0035):
-#: ``report_agent_run`` and ``report_agent_briefing``, which the run reporter calls
-#: from the loop's checkpoint seam. They are excluded for the opposite reason to the
-#: chaos hooks — the agent's principal CAN call them — and the reason is the same
-#: shape: a tool in this registry is a tool the planner may propose, and reporting
-#: is not a choice the model gets to make. Keeping them out is also what holds
-#: ``format_tool_block()`` byte-identical across a telemetry-only pin.
+#: Description prefixes for tools this registry deliberately does NOT mirror — a structural
+#: filter, not a hand-list. ``[chaos:`` are the lab's hooks (``evals/chaos_hooks.py`` fires
+#: them); ``[commander:`` is the agent's own telemetry, which the planner may not propose.
 EXCLUDED_DESCRIPTION_PREFIXES: Final[tuple[str, ...]] = ("[chaos:", "[commander:")
 
 
 def mirrored_in_registry(description: str) -> bool:
     """Whether a snapshot tool carrying this description belongs in ``TOOL_REGISTRY``.
 
-    The one predicate the coverage pin reads, so "which tools the agent mirrors" is
-    answered in the code that mirrors them rather than in a test's local copy.
+    The one predicate the coverage pin reads, so no test keeps its own copy of the list.
     """
     return not description.startswith(EXCLUDED_DESCRIPTION_PREFIXES)
 
@@ -901,8 +813,7 @@ TOOL_REGISTRY: Final[dict[str, ToolSpec]] = {
     "invalidate_cache_key": ToolSpec(
         "invalidate_cache_key", InvalidateCacheKeyInput, InvalidateCacheKeyOutput
     ),
-    # v0.4.0 DLQ categorization tools — remediation planner routes on
-    # ``DlqEntry.remediation_hint`` between these.
+    # v0.4.0 DLQ tools — the remediation planner routes on ``DlqEntry.remediation_hint``.
     "replay_dlq_by_ids": ToolSpec("replay_dlq_by_ids", ReplayDlqByIdsInput, ReplayDlqByIdsOutput),
     "replay_dlq_by_category": ToolSpec(
         "replay_dlq_by_category", ReplayDlqByCategoryInput, ReplayDlqByCategoryOutput

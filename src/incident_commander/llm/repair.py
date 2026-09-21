@@ -1,9 +1,8 @@
 """One bounded re-ask when the agent's own structured output does not parse.
 
-ADR 0035: a payload the schema rejects is a harness event, not a decision to
-escalate on, so it gets one re-ask carrying the validation error. The cap is 1,
-as in ``remediation._MAX_ARGUMENT_REFUSALS`` (ADR 0030); both calls are accrued
-(ADR 0015). Only an **output** failure is repairable, never a transport error.
+ADR 0035: a rejected payload is a harness event, not a reason to escalate, so it
+gets one re-ask carrying the validation error; both calls are accrued (ADR 0015).
+Only an **output** failure is repairable, never a transport error.
 """
 
 from __future__ import annotations
@@ -24,8 +23,7 @@ from incident_commander.llm.client import (
 from incident_commander.llm.prompts.loader import load_prompt
 from incident_commander.llm.structured import StructuredOutput
 
-#: Re-asks before escalating; cap as in
-#: ``remediation._MAX_ARGUMENT_REFUSALS``.
+#: Re-asks before escalating; cap as in ``remediation._MAX_ARGUMENT_REFUSALS`` (ADR 0030).
 MAX_OUTPUT_REPAIRS: Final[int] = 1
 
 #: Quoted back to the model: it needs the complaint, not the echo.
@@ -44,8 +42,7 @@ OUTPUT_INVALID_PREFIXES: Final[tuple[str, ...]] = (
     VERIFY_JUDGE_INVALID,
 )
 
-#: ``failure_class`` for a run whose only defect was its output
-#: shape, not ``transport``.
+#: ``failure_class`` for a run whose only defect was its output shape, not ``transport``.
 PLANNER_OUTPUT_INVALID_CLASS: Final[str] = "planner_output_invalid"
 
 # ``ValidationError`` subclasses ``ValueError``; both listed for the reader.
@@ -59,15 +56,9 @@ _REPAIRABLE: Final[tuple[type[Exception], ...]] = (
 class OutputNotOffered(LLMError):
     """The model asked for a move its own output schema did not offer (ADR 0074).
 
-    Raised INSTEAD of re-asking, and that is the decision: a re-ask carries "your output was
-    invalid", which is the wrong sentence for a payload that was perfectly readable and named a
-    move the caller had withdrawn. It is also the wrong ACTION — the re-ask would spend a
-    second billed call to be told the same thing, and against a scripted planner it would
-    consume the next step's answer as this step's correction.
-
-    An ``LLMError`` so nothing that escalated on a failed planner call stops escalating; every
-    caller that means to steer rather than escalate catches this type first (the investigation
-    loop does, and records the refusal).
+    Raised INSTEAD of re-asking: the payload was readable, so a second billed call would
+    only hear the same answer. An ``LLMError``, so anything that escalated still
+    escalates; a caller that means to steer catches this type first.
     """
 
     def __init__(self, failure: Exception) -> None:
@@ -119,13 +110,9 @@ def call_with_output_repair[T: BaseModel](
 ) -> RepairedCall[T]:
     """Call ``llm_client``; on an output-shape failure, re-ask once.
 
-    Raises ``OutputRepairExhausted`` when the repair fails too; a transport
-    ``LLMError`` passes through; the loop bound caps ``MAX_OUTPUT_REPAIRS + 1``.
-
-    One failure is never re-asked: a payload ``output_model`` itself calls a REFUSED move
-    rather than an unreadable one (``StructuredOutput.output_refused``, ADR 0074) raises
-    ``OutputNotOffered`` straight away, so the caller that narrowed the schema can steer
-    instead of paying for a second call to hear the same answer.
+    Raises ``OutputRepairExhausted`` when the repair fails too; a transport ``LLMError``
+    passes through. A payload ``output_model`` reads as a REFUSED move
+    (``StructuredOutput.output_refused``, ADR 0074) raises ``OutputNotOffered`` instead.
     """
     failures: list[Exception] = []
     message = user_message
@@ -146,8 +133,7 @@ def call_with_output_repair[T: BaseModel](
             if _refused_by(output_model, err):
                 raise OutputNotOffered(err) from err
             failures.append(err)
-            # Each re-ask carries the ORIGINAL turn plus the latest error, never
-            # a stack of previous corrections.
+            # Each re-ask carries the ORIGINAL turn plus the latest error, not a stack.
             message = repair_message(user_message, err)
             repair_of = getattr(err, "record_id", None)
             continue
@@ -158,8 +144,7 @@ def call_with_output_repair[T: BaseModel](
 def _refused_by(output_model: type[BaseModel], error: Exception) -> bool:
     """Whether ``output_model`` reads this failure as a refused move (ADR 0074).
 
-    Asks the model, and only a ``StructuredOutput`` has an opinion: every other output model is
-    an ordinary Pydantic one and keeps ADR 0035's re-ask exactly as it was.
+    Only a ``StructuredOutput`` has an opinion; every other model keeps ADR 0035's re-ask.
     """
     return issubclass(output_model, StructuredOutput) and output_model.output_refused(error)
 
@@ -188,8 +173,8 @@ def usage_of(err: BaseException) -> LLMUsage | None:
 def sum_usage(*usages: LLMUsage | None) -> LLMUsage | None:
     """Add up what several billed-and-failed calls each charged.
 
-    ``discarded_max_tokens`` is carried as the **maximum** while ``discarded_attempts`` is
-    summed, keeping ADR 0015's over-estimate. Public since WP-5.3 (ADR 0045).
+    ``discarded_max_tokens`` carries the MAXIMUM, ``discarded_attempts`` the sum, keeping
+    ADR 0015's over-estimate.
     """
     present = [usage for usage in usages if usage is not None]
     if not present:

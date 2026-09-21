@@ -36,8 +36,7 @@ class CannedLLMClient:
         self._index = 0
         self.calls: list[tuple[str, str]] = []
         self.repair_of: list[str | None] = []
-        #: The ``temperature`` each call was made with; ``None`` is "none sent".
-        #: Recorded so a test can assert it was APPLIED (WP-5.3).
+        #: The ``temperature`` each call carried; ``None`` is "none sent" (WP-5.3).
         self.temperatures: list[float | None] = []
 
     @property
@@ -55,8 +54,7 @@ class CannedLLMClient:
         repair_of: str | None = None,
         temperature: float | None = None,
     ) -> LLMResult[T]:
-        # ``repair_of`` and ``temperature`` have no canned equivalent; both are
-        # recorded so a test can assert the call carried them (ADR 0035, WP-5.3).
+        # Recorded, not replayed: a test asserts the call carried them (ADR 0035, WP-5.3).
         self.calls.append((system_prompt, user_message))
         self.repair_of.append(repair_of)
         self.temperatures.append(temperature)

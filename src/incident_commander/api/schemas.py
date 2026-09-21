@@ -1,4 +1,8 @@
-"""HTTP request/response models. Alert content is untrusted (invariant 4)."""
+"""The request and response shapes of the agent's own HTTP surface.
+
+Everything in an inbound alert is content someone else wrote, so it is evidence to reason about and
+never an instruction to follow, wherever it ends up inside the run (invariant 4).
+"""
 
 from __future__ import annotations
 
@@ -9,10 +13,10 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class AlertPayload(BaseModel):
-    """Loose validation over the platform's alert shape.
+    """Deliberately loose validation of the platform's alert shape.
 
-    Known fields are typed; unknown ones are preserved (``extra="allow"``) so a platform-side
-    addition drops no content. Still untrusted evidence inside the state machine.
+    The fields we act on are typed; anything else is kept rather than dropped (``extra="allow"``),
+    so a field the platform adds still reaches the investigation instead of disappearing here.
     """
 
     model_config = ConfigDict(extra="allow")
@@ -21,12 +25,13 @@ class AlertPayload(BaseModel):
     severity: str = "unknown"
     fingerprint: str | None = None
     group: str | None = None
-    # The platform's hint vocabulary (`replay_safe`, `wait_and_replay`, `human_required`),
-    # read by `investigation.ALERT_SUBJECT_PROBES`. `None` = no category, so the guard is inert.
+    # The platform's verdict on the job the alert is about: `replay_safe`, `wait_and_replay` or
+    # `human_required`. `investigation.ALERT_SUBJECT_PROBES` reads it to decide what to look at
+    # first; null means the platform had no verdict, and that check then simply does nothing.
     remediation_hint: str | None = None
-    # The THIRD way a DLQ alert names its subject (ADR 0032), because `remediation_hint: null`
-    # means "no category", not "the null category" (ADR 0031). `unclassified` is the only value
-    # `ALERT_SUBJECT_PROBES` reads; loose, not a `Literal`, so an unknown word fails open.
+    # A third way an alert about the dead-letter queue can say what it is about (ADR 0032), needed
+    # because a null `remediation_hint` means "no verdict", not "the null category" (ADR 0031).
+    # `unclassified` is the only value read, and an unknown word is ignored rather than rejected.
     dlq_scope: str | None = None
 
 

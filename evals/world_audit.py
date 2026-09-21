@@ -279,6 +279,7 @@ def audit_world(
     client: MCPClientProtocol, roots: Sequence[str] = ()
 ) -> tuple[list[BaselineLine], list[dict[str, Any]]]:
     """The pre-run audit adds checks to the shared dossier post-reset baseline."""
+    # 1. The shared baseline the dossier also re-reads after its reset.
     lines = audit_baseline(client)
 
     def check(label: str, observed: object, expected: object) -> None:
@@ -286,6 +287,8 @@ def audit_world(
         passed = type(observed) is type(expected) and observed == expected
         lines.append(BaselineLine(label, str(expected), str(observed), passed))
 
+    # 2. The DLQ, row by row — and only if the listing is COMPLETE, since a partial page
+    #    would under-count unclassified and fenced rows rather than fail.
     dlq = read(client, _probe("list_dlq_messages", {"limit": 50}, "world audit"))
     rows: list[dict[str, Any]] = []
     items = dlq.payload.get("items") if dlq.ok and dlq.payload else None
@@ -317,6 +320,7 @@ def audit_world(
         for label in ("DLQ unclassified rows", "DLQ fenced rows"):
             lines.append(BaselineLine(label, "0", dlq.error or "incomplete listing", False))
 
+    # 3. The two single-resource reads: the alerted group's backlog, and the hot set.
     for tool, arguments, fields in (
         (
             "get_consumer_lag",
@@ -333,12 +337,14 @@ def audit_world(
         for label, field, expected in fields:
             observed = reading.payload.get(field) if reading.ok and reading.payload else None
             check(label, observed, expected)
+    # 4. Each chain the caller named: present, and not left paused by an earlier run.
     for root in roots:
         reading = read(client, _probe("get_dag_state", {"job_id": root}, "world audit"))
         payload = reading.payload if reading.ok and reading.payload else {}
         check(f"chain {root} paused", payload.get("paused"), False)
         nodes = payload.get("nodes")
         check(f"chain {root} present", isinstance(nodes, list) and bool(nodes), True)
+    # 5. And this machine: a traffic or runner process still up would move the world under it.
     count, detail = process_count()
     lines.append(
         BaselineLine(
@@ -353,10 +359,12 @@ def audit_world(
 
 def main(argv: Sequence[str] | None = None) -> int:
     """Audit the seeded world under the read-only token and print PASS/FAIL per line."""
+    # 1. The roots to check, if any were named.
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--roots", default="", help="comma-separated root job ids; read only")
     args = parser.parse_args(argv)
     roots = tuple(part.strip() for part in args.roots.split(",") if part.strip())
+    # 2. Settings and the read-scoped token — exit 3 is the configuration code.
     try:
         settings = Settings()  # type: ignore[call-arg]
     except ValidationError as error:
@@ -370,17 +378,18 @@ def main(argv: Sequence[str] | None = None) -> int:
     credential = token.get_secret_value()
     client = make_client(settings, token=credential)
     try:
+        # 3. Prove the principal cannot write before reading anything with it.
         try:
             assert_read_only_principal(client, lab_principal_token=credential)
         except PrincipalGuardError:
             print("[FAIL] token is not verified read-only; audit refused")
             return 3
         print("[PASS] token is read-only")
-        # Every read from here on is labelled `lab.probe`. The smoke account is its own lab
-        # credential (platform ADR 0038 honours it by name and re-checks it holds no write
-        # scope), so Authorization and X-Lab-Principal carry the same token.
+        # 4. Every read from here on is labelled `lab.probe`, or the demo page reads these as a
+        #    new agent run. The smoke account is its own lab credential (platform ADR 0038).
         lab_client = LabProbeClient(client, reason=LAB_PROBE_REASON, principal_token=credential)
         lines, rows = audit_world(lab_client, roots)
+        # 5. One line per check, the DLQ rows in full, then the verdict.
         for line in lines:
             print(
                 f"[{'PASS' if line.passed else 'FAIL'}] {line.name}: "

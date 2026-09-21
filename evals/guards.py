@@ -230,24 +230,27 @@ def _assert_scope_absent(
     different files. Shared, not copied — a second copy reintroduces the fail-open bug.
     """
     reason, token = _label(lab_probe_reason, lab_principal_token)
+    # 1. Fire the deliberately invalid probe under the lab's label.
     try:
         result = client.call_tool(
             probe_tool, probe_args, lab_probe=reason, lab_principal_token=token
         )
+    # 2. A refused LABEL is a request bug, not a verdict, and is never re-sent unlabelled —
+    #    a silent retry is how F4's rows became the agent's.
     except LabProbeRefused:
-        # A refused LABEL is a request bug, not a verdict about the scope, and its -32602
-        # is the code the clause below reads as "the scope check passed". Never re-sent
-        # unlabelled: a silent retry is how F4's rows became the agent's.
         raise
     except MCPError as err:
+        # 3. The scope refusal this probe exists to elicit: the token does NOT carry it.
         if err.code == _SCOPE_REFUSAL_CODE and "scope" in str(err).lower():
             return
+        # 4. Refused on the ARGUMENTS instead, so the scope check passed: it does carry it.
         if err.code in _ARGUMENT_REFUSAL_CODES:
             raise PrincipalGuardError(
                 f"{label}: the negative probe on {probe_tool} was refused on its "
                 f"ARGUMENTS (MCPError {err.code}: {err}), which means the scope "
                 f"check passed. The token carries {scope}, {carried_consequence}"
             ) from err
+        # 5. Any other code never reached argument validation, so it proves nothing.
         raise PrincipalGuardError(
             f"{label}: the negative probe on {probe_tool} failed with MCPError "
             f"{err.code}: {err} — neither the scope refusal "
@@ -258,14 +261,15 @@ def _assert_scope_absent(
             f"validation, so it proves nothing about {scope}. Failing closed — "
             "the run does not proceed on an unverified control."
         ) from err
+    # 6. An unverified guard is an unmet precondition, not a warning: a safety check that
+    #    shrugs is the bypass F-001 is about.
     except Exception as err:  # noqa: BLE001 — fail closed, deliberately
-        # An unverified guard is an unmet precondition, not a warning: a safety check
-        # that shrugs is the bypass F-001 is about.
         raise PrincipalGuardError(
             f"{label}: could not verify the principal "
             f"({type(err).__name__}: {err}). Failing closed — the run does "
             "not proceed on an unverified control."
         ) from err
+    # 7. And an invalid call that SUCCEEDED is never a pass.
     raise PrincipalGuardError(
         f"{label}: the negative probe on {probe_tool} SUCCEEDED "
         f"(result: {str(result)[:200]}). A deliberately invalid call must never "
@@ -292,24 +296,27 @@ def _assert_scope_carried(
     shipped with is what a second hand-written copy would reintroduce.
     """
     reason, token = _label(lab_probe_reason, lab_principal_token)
+    # 1. Fire the same deliberately invalid probe under the lab's label.
     try:
         result = client.call_tool(
             probe_tool, probe_args, lab_probe=reason, lab_principal_token=token
         )
+    # 2. Worse here than in the negative guard: a -32602 is the PASS condition, so a refused
+    #    label would read as "the principal can act".
     except LabProbeRefused:
-        # Worse here than in the negative guard: a -32602 is the PASS condition, so a
-        # refused label would read as "the principal can act".
         raise
     except MCPError as err:
+        # 3. Refused on SCOPE: this token lacks it, which is the failure.
         if err.code == _SCOPE_REFUSAL_CODE and "scope" in str(err).lower():
             raise PrincipalGuardError(
                 f"{label}: the negative probe was refused on SCOPE "
                 f"(MCPError {err.code}: {err}). This token lacks {scope}, "
                 f"{refusal_consequence}"
             ) from err
+        # 4. Refused on the arguments, not the scope: the principal can act.
         if err.code in _ARGUMENT_REFUSAL_CODES:
-            # Refused on the arguments, not the scope: the principal can act.
             return
+        # 5. Any other code never reached argument validation, so it proves nothing.
         raise PrincipalGuardError(
             f"{label}: the negative probe on {probe_tool} failed with MCPError "
             f"{err.code}: {err} — neither the scope refusal "
@@ -319,12 +326,14 @@ def _assert_scope_carried(
             f"validation, so it proves nothing about {scope}. {unreached_hint} "
             "Failing closed — the run does not proceed on an unverified control."
         ) from err
+    # 6. Anything else leaves the control unverified, which fails closed.
     except Exception as err:  # noqa: BLE001 — fail closed, deliberately
         raise PrincipalGuardError(
             f"{label}: could not verify the principal "
             f"({type(err).__name__}: {err}). Failing closed — the run does "
             "not proceed on an unverified control."
         ) from err
+    # 7. And an invalid call that SUCCEEDED means the probe is no longer safe to fire.
     raise PrincipalGuardError(
         f"{label}: the negative probe SUCCEEDED "
         f"(result: {str(result)[:200]}). A deliberately invalid "
@@ -470,6 +479,7 @@ def assert_no_tier1_successes(
     leaves the guard deliberately over-broad. Without ``scan``, a single post-stage page is
     inconclusive above 200 rows.
     """
+    # 1. One scan per window, and it must be THIS window.
     if scan is None:
         scan = AuditWindowScan(since, lab_principal_token=lab_principal_token)
     elif scan.since != since:
@@ -478,22 +488,23 @@ def assert_no_tier1_successes(
             f"about {since.isoformat()}; a window graded against the wrong "
             "start is not a graded window."
         )
+    # 2. One last page, folded in. An audit query we could not run proves nothing.
     try:
         scan.checkpoint(client)
     except PrincipalGuardError:
         raise
     except Exception as err:  # noqa: BLE001 — fail closed, deliberately
-        # An audit query we couldn't run proves nothing: inconclusive is a failure.
         raise PrincipalGuardError(
             "post-stage audit could not be read "
             f"({type(err).__name__}: {err}); treating as a failure — an "
             "unverifiable stage is not a clean stage."
         ) from err
     violations = scan.violations(principal_ids)
+    # 3. A window with a hole in it fails: the rows nobody could fetch may hold the successes
+    #    this exists to catch (A-13), and what IS visible is named rather than swallowed.
     if not scan.fully_scanned:
-        # A-13: the rows we could not fetch may hold the successes this exists to catch, so
-        # inconclusive is a failure — and what is already visible is named, not swallowed.
         raise PrincipalGuardError(scan.inconclusive_reason() + _visible_suffix(violations))
+    # 4. Then the verdict the platform's own audit log supports.
     if violations:
         raise PrincipalGuardError(
             f"read-only stage executed {len(violations)} successful Tier-1 "

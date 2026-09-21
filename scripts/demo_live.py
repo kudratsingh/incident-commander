@@ -455,6 +455,7 @@ def _console_url(mode: str, run_id: str | None = None) -> str:
 
 def main(argv: list[str] | None = None) -> int:
     """Parse, refuse if unsafe, then walk the six steps and always put the world back."""
+    # 1. What the operator asked for.
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--mode", choices=sorted(MODES), required=True)
     parser.add_argument(
@@ -483,8 +484,8 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
-    # PROTOCOL step 0, before anything is started, seeded or spent. Readiness is not
-    # authorization, so the flag that costs money is not the flag that grants it.
+    # 2. PROTOCOL step 0, before anything is started, seeded or spent: readiness is not
+    #    authorization, so the flag that costs money is not the flag that grants it.
     if args.live and not args.yes_spend:
         print(
             "REFUSING: --live runs a real model and spends real money.\n"
@@ -499,12 +500,14 @@ def main(argv: list[str] | None = None) -> int:
         # Not an error worth failing over, but worth saying: YES_SPEND alone buys nothing.
         print("note: YES_SPEND=1 without LIVE=1 changes nothing — this run is free.")
 
+    # 3. The machinery the steps share, and the handle that puts the world back.
     console = Console(auto=args.auto)
     mode = MODES[args.mode]
     scenario = str(mode["scenario"])
     traffic = TrafficHandle()
     wind_down = WindDown(traffic, drained=bool(mode["needs_traffic"]))
 
+    # 4. What the audience is about to watch, said out loud before it starts.
     console.say(f"LIVE DEMO — mode {args.mode}, scenario {scenario}")
     console.say(f"  the story: {mode['story']}")
     console.say(
@@ -514,6 +517,7 @@ def main(argv: list[str] | None = None) -> int:
     console.say("  the platform: real, and so are the fault and the remediation")
     console.say(f"  recording from: {args.record_from}")
 
+    # 5. The six steps.
     code = 0
     try:
         _walk(console, args, scenario, traffic, wind_down)
@@ -525,18 +529,16 @@ def main(argv: list[str] | None = None) -> int:
         console.say()
         console.say("INTERRUPTED by the operator.")
         code = 130
+    # The catch-all was earned: the first rehearsal died at step 3 with a ModuleNotFoundError,
+    # and with only DemoFailed caught it left without resetting.
     except Exception as err:  # noqa: BLE001 - see below; a bare traceback is the bug
-        # The catch-all was earned: the first rehearsal died at step 3 with a
-        # ModuleNotFoundError, and with only DemoFailed caught it left without resetting.
-        # A demo's own bug must not be the thing that leaves the shared world dirty.
         console.say()
         console.say(f"UNEXPECTED FAILURE: {type(err).__name__}: {err}")
         console.say("  (this is a bug in the demo machine, not a finding about the agent)")
         code = 1
     finally:
-        # The one place the world goes back, on EVERY path including the ones nobody
-        # named — a second interrupt, a `SystemExit` from a library, a bug above. Step 6
-        # has normally run it already, and it refuses to run twice.
+        # 6. The one place the world goes back, on EVERY path including the ones nobody named.
+        #    Step 6 has normally run it already, and it refuses to run twice.
         wind_down.run(console)
         console.say(console.timings())
     return code
@@ -553,7 +555,7 @@ def _walk(
     mode = MODES[args.mode]
     record_from_baseline = args.record_from == "baseline"
 
-    # ---- STEP 1: a world that is provably healthy, and a console to watch it on -------
+    # 1. A world that is provably healthy, and a console to watch it on.
     step = console.begin(1, "stack, reset, audit, and the console URL")
     if _stack_is_up():
         console.note(step, "stack is already up")
@@ -561,13 +563,12 @@ def _walk(
         console.note(step, "stack is down — bringing it up (this pulls images the first time)")
         _must(["make", "demo"], "make demo")
     _must(["make", "eval-reset", "PURGE_IDEMPOTENCY=1"], "make eval-reset")
-    # The audit is a GATE, not a formality: a demo that starts from a dirty world shows
-    # the audience a fault somebody else left behind. Exit non-zero means stop.
+    # The audit is a GATE, not a formality: a demo that starts from a dirty world shows the
+    # audience a fault somebody else left behind.
     _must(["make", "world-audit"], "make world-audit")
     console.note(step, "world audit PASS — the world is the seeded baseline")
-    # AFTER the reset, deliberately. The reset writes the `lab.world_reset` boundary the
-    # page reads (WO-R3-327), and a page loaded before it is a page showing the world on
-    # the other side of that line.
+    # The URL comes AFTER the reset, which writes the `lab.world_reset` boundary the page reads
+    # (WO-R3-327): a page loaded before it shows the world on the other side of that line.
     console.note(step, f"CONSOLE: {_console_url(args.mode)}")
     console.note(
         step,
@@ -582,7 +583,7 @@ def _walk(
     console.end(step)
     console.wait("open (or reload) the console, log in, and put it on screen")
 
-    # ---- STEP 2: the baseline the audience should see before anything breaks ----------
+    # 2. The baseline the audience should see before anything breaks.
     step = console.begin(2, "baseline")
     if mode["needs_traffic"]:
         console.note(
@@ -612,7 +613,7 @@ def _walk(
         console.end(step)
         console.wait("ready? then the fault fires")
 
-    # ---- STEP 3: break it, on a countdown, so the moment is narratable ----------------
+    # 3. Break it, on a countdown, so the moment is narratable.
     step = console.begin(3, "inject the fault, and wait for the platform to show it")
     for remaining in range(_FAULT_COUNTDOWN_SECONDS, 0, -1):
         console.say(f"  fault in {remaining}…")
@@ -630,8 +631,8 @@ def _walk(
         "that row comes from the platform's chaos audit stream, which the AGENT cannot see "
         "(ADR 0012) — the console sees it because a human operator is allowed to",
     )
-    # The page shows a MEASUREMENT, and the measurement trails the fault. Waiting for it
-    # here is what makes "start recording" in step 4 a promise rather than a hope.
+    # The page shows a MEASUREMENT and the measurement trails the fault, so waiting for it here
+    # is what makes "start recording" in step 4 a promise rather than a hope.
     _wait_until_the_fault_shows(console, step, args.mode)
     # And then the page itself. This is the step's second half since WO-R3-339 (O-36): the
     # measurement crossing a threshold is the platform NOTICING, and the alert row is the
@@ -643,7 +644,7 @@ def _walk(
     _wait_until_the_platform_pages(console, step, scenario)
     console.end(step)
 
-    # ---- STEP 4: prove the fault is real before spending anything on it ---------------
+    # 4. Prove the fault is real before spending anything on it.
     step = console.begin(4, "prove the premise the scenario grades against")
     console.note(step, "polling the scenario's own precondition probes")
     _await_precondition(scenario)
@@ -658,14 +659,14 @@ def _walk(
         console.say("  *** FAULT VISIBLE — START RECORDING NOW ***")
         console.wait("recording? then say what is broken and start the agent")
 
-    # ---- STEP 5: the agent ------------------------------------------------------------
+    # 5. The agent.
     step = console.begin(5, "run the agent" + (" — PAID" if args.live else " (free rehearsal)"))
     if args.live:
         console.note(step, "PAID: make eval-live with MODEL_ROLE=benchmark")
         _must(
             # `WORLD_ALREADY_FAULTED=1` is how the make target forwards
-            # `--world-already-faulted`: step 3 already fired the hook, and a second
-            # injection is the wrong moment for every reader that anchors on it (ADR 0075).
+            # `--world-already-faulted`: step 3 fired the hook, and a second injection is the
+            # wrong moment for every reader that anchors on it (ADR 0075).
             [
                 "make",
                 "eval-live",
@@ -689,9 +690,8 @@ def _walk(
         )
         _must(
             # `--mode rehearsal` keeps the PLATFORM leg real while the model leg is the
-            # scenario's script (ADR 0069); without it the runner falls to offline settings
-            # that hardcode `eval.local`. `--world-already-faulted`: step 3 fired the hook,
-            # and the second row is what the fourth take's timeline was measured from (ADR 0075).
+            # scenario's script (ADR 0069); without it the runner falls to offline settings that
+            # hardcode `eval.local`. `--world-already-faulted` is step 3's hook again (ADR 0075).
             [
                 sys.executable,
                 "-m",
@@ -711,9 +711,8 @@ def _walk(
                 "EVAL_TRACE_DIR": "evals/traces",
             },
         )
-        # What `make eval-live` does after its own run: the JSONL is the record, this is
-        # the readable rendering, and step 6 resolves its path. Never fatal — losing the
-        # render must not fail a demo whose run already happened.
+        # What `make eval-live` does after its own run: the JSONL is the record, this is the
+        # readable rendering. Never fatal — losing it must not fail a demo that already ran.
         render = _run([sys.executable, "scripts/format_traces.py"], env={"PYTHONPATH": "."})
         if render.returncode != 0:
             console.note(step, f"note: the trace render exited {render.returncode}")
@@ -721,7 +720,7 @@ def _walk(
     console.end(step)
     console.wait("walk through the briefing, then wind down")
 
-    # ---- STEP 6: say what happened, put the world back, prove it -----------------------
+    # 6. Say what happened, put the world back, and prove it.
     step = console.begin(6, "wind down")
     run_id = _run_id_of(scenario)
     if run_id is None:

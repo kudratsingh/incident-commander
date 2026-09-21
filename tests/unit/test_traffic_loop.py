@@ -6,15 +6,21 @@ arriving the backlog stays at zero and the scenario asserts a fault that cannot 
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 import httpx
 import pytest
 
+from incident_commander.tools.mcp_client import LAB_PRINCIPAL_HEADER, LAB_PROBE_PARAM
 from scripts.traffic_loop import (
     DEFAULT_INTERVAL_SECONDS,
+    DEFAULT_MAX_PER_WINDOW,
+    DEFAULT_WINDOW_SECONDS,
+    LAB_PROBE_REASON,
     LagReader,
     Tally,
+    WindowPacer,
     main,
     run,
     submit_one,
@@ -155,27 +161,186 @@ class TestRunLoop:
 
 class TestLagReader:
     def test_disabled_without_a_token(self) -> None:
-        reader = LagReader("http://x/mcp", None, _client(_created))
+        reader = LagReader("http://x/mcp", None)
         assert reader.enabled is False
         assert reader.read() is None
 
     def test_disabled_on_an_empty_token(self) -> None:
-        assert LagReader("http://x/mcp", "   ", _client(_created)).enabled is False
+        assert LagReader("http://x/mcp", "   ").enabled is False
 
     def test_reads_the_lag_out_of_an_mcp_result(self) -> None:
         payload = {
             "result": {"content": [{"type": "text", "text": '{"consumer_group":"wd","lag":4200}'}]}
         }
         reader = LagReader(
-            "http://x/mcp", "tok", _client(lambda _r: httpx.Response(200, json=payload))
+            "http://x/mcp",
+            "tok",
+            transport=httpx.MockTransport(lambda _r: httpx.Response(200, json=payload)),
         )
         assert reader.read() == 4200
+        reader.close()
 
     def test_an_unreadable_response_is_none_not_a_crash(self) -> None:
         reader = LagReader(
-            "http://x/mcp", "tok", _client(lambda _r: httpx.Response(500, text="nope"))
+            "http://x/mcp",
+            "tok",
+            transport=httpx.MockTransport(lambda _r: httpx.Response(500, text="nope")),
         )
         assert reader.read() is None
+        reader.close()
+
+
+class TestTheLagReadIsTheLabsOwnRead:
+    """The fifth take's F5: `agent.tool_invoked get_consumer_lag` every ~0.8 s, from here.
+
+    With no run selected the demo page counted every tool row as the agent's, so the ledger
+    showed the agent reading lag ten seconds before the lab had injected anything. The read is
+    the lab's, so it says so on the wire and lands as `lab.probe` (platform ADR 0038).
+    """
+
+    @staticmethod
+    def _captured() -> tuple[list[httpx.Request], httpx.MockTransport]:
+        seen: list[httpx.Request] = []
+
+        def _handler(request: httpx.Request) -> httpx.Response:
+            seen.append(request)
+            payload = {"result": {"content": [{"type": "text", "text": '{"lag": 7}'}]}}
+            return httpx.Response(200, json=payload)
+
+        return seen, httpx.MockTransport(_handler)
+
+    def test_the_read_carries_the_label_and_the_lab_credential(self) -> None:
+        seen, transport = self._captured()
+        reader = LagReader("http://x/mcp", "smoke-token", transport=transport)
+
+        assert reader.read() == 7
+        reader.close()
+
+        params = json.loads(seen[0].content)["params"]
+        assert params[LAB_PROBE_PARAM] == LAB_PROBE_REASON == "traffic: lag read"
+        # Beside `arguments`, never inside it: inside, the field would reach a tool's input
+        # model and therefore `tools/list`, which is the contract the commander pins.
+        assert LAB_PROBE_PARAM not in params["arguments"]
+        assert seen[0].headers[LAB_PRINCIPAL_HEADER] == "Bearer smoke-token"
+
+    def test_the_loop_reads_the_lag_only_when_it_has_a_use_for_it(self) -> None:
+        """119 of the take's 162 audit rows were this read on every submission, and nothing
+        looked at most of them. It is taken for `--until-lag` and for a printed tick."""
+        reads = {"n": 0}
+
+        class _Reader(LagReader):
+            def __init__(self) -> None:
+                self.enabled = True
+
+            def read(self) -> int | None:
+                reads["n"] += 1
+                return 3
+
+        run(
+            _client(_created),
+            "jwt",
+            job_type="bulk_api_sync",
+            interval=0.0,
+            max_submissions=9,
+            until_lag=None,
+            lag_reader=_Reader(),
+            sleep=lambda _s: None,
+            on_tick=lambda _m: None,
+        )
+
+        assert reads["n"] == 0, "nine submissions print no tick, so no lag read is needed"
+
+
+class TestThePacerStaysUnderThePlatformsAllowance:
+    """The fifth take's F4: the lag climbed to 28 and then sat flat at 28 for 25 seconds.
+
+    `POST /jobs` allows 30 creations per FIXED 60-second window, so a producer at 0.75 s spends
+    the whole window in 22 s and then collects 429s until the window rolls — which on the
+    console's chart is a climb that stops being a climb. The pacer reads the same clock the
+    platform cuts its window from and spreads what is left over the time that is left.
+    """
+
+    @staticmethod
+    def _pacer(
+        *, at: float, floor: float = 0.0, limit: int = 30
+    ) -> tuple[WindowPacer, dict[str, float]]:
+        clock = {"t": at}
+        pacer = WindowPacer(limit=limit, window=60.0, floor=floor, clock=lambda: clock["t"])
+        return pacer, clock
+
+    def test_the_published_allowance_is_what_it_paces_against(self) -> None:
+        assert (DEFAULT_MAX_PER_WINDOW, DEFAULT_WINDOW_SECONDS) == (30, 60.0)
+
+    def test_a_whole_window_is_spread_evenly_across_it(self) -> None:
+        pacer, _ = self._pacer(at=1_200_000.0)
+        assert pacer.wait_seconds() == pytest.approx(2.0)
+
+    def test_the_tail_of_a_window_is_used_at_the_rate_it_allows(self) -> None:
+        # 20 s left and 30 creations unspent: the honest interval is shorter, not refused.
+        pacer, _ = self._pacer(at=1_200_040.0)
+        assert pacer.wait_seconds() == pytest.approx(20.0 / 30.0)
+
+    def test_a_spent_window_waits_for_the_next_one_and_nothing_longer(self) -> None:
+        pacer, clock = self._pacer(at=1_200_000.0)
+        for _ in range(30):
+            pacer.spend()
+        clock["t"] = 1_200_022.0
+
+        assert pacer.wait_seconds() == pytest.approx(38.0)
+
+    def test_the_next_window_restores_the_whole_allowance(self) -> None:
+        pacer, clock = self._pacer(at=1_200_000.0)
+        for _ in range(30):
+            pacer.spend()
+        clock["t"] = 1_200_060.0
+
+        assert pacer.wait_seconds() == pytest.approx(2.0)
+
+    def test_a_refusal_marks_the_window_spent_rather_than_asking_again(self) -> None:
+        """Another producer may have spent this window — the baseline loop, or the operator's
+        own browser — and the pacer cannot see those. A 429 is how it finds out."""
+        pacer, clock = self._pacer(at=1_200_010.0)
+        pacer.refused()
+
+        assert pacer.wait_seconds() == pytest.approx(50.0)
+        clock["t"] = 1_200_060.0
+        assert pacer.wait_seconds() == pytest.approx(2.0)
+
+    def test_the_requested_interval_is_a_floor_the_pacer_never_undercuts(self) -> None:
+        pacer, _ = self._pacer(at=1_200_040.0, floor=3.0)
+        assert pacer.wait_seconds() == pytest.approx(3.0)
+
+    def test_a_zero_limit_switches_the_pacing_off(self) -> None:
+        pacer, _ = self._pacer(at=1_200_040.0, floor=0.5, limit=0)
+        assert pacer.wait_seconds() == pytest.approx(0.5)
+
+    def test_a_paced_loop_never_asks_for_more_than_the_window_allows(self) -> None:
+        """The property, over a simulated two minutes: no 429 is ever earned."""
+        clock = {"t": 1_200_000.0}
+        pacer = WindowPacer(limit=30, window=60.0, floor=0.0, clock=lambda: clock["t"])
+        created: list[float] = []
+
+        def _handler(_request: httpx.Request) -> httpx.Response:
+            bucket = int(clock["t"] // 60)
+            if sum(1 for at in created if int(at // 60) == bucket) >= 30:
+                return httpx.Response(429)
+            created.append(clock["t"])
+            return httpx.Response(201, json={"id": "job"})
+
+        tally = run(
+            _client(_handler),
+            "jwt",
+            job_type="bulk_api_sync",
+            interval=0.0,
+            max_submissions=60,
+            until_lag=None,
+            pacer=pacer,
+            sleep=lambda seconds: clock.__setitem__("t", clock["t"] + seconds),
+            on_tick=lambda _m: None,
+        )
+
+        assert tally.rate_limited == 0, "the pacer must never earn a refusal"
+        assert tally.created == 60
 
 
 class TestCli:

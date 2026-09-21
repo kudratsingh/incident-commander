@@ -1156,6 +1156,164 @@ class TestAVerificationPerPoll:
         assert "verification" in sent and "step" not in sent
 
 
+class TestAVerdictTravelsWithItsJudgeStep:
+    """The fifth take's F3: the verdict list on the console filled at the very end.
+
+    The `verify_judge` thinking steps were live, but the verdicts they announced were read off
+    the evidence ledger at the NEXT checkpoint, so `not_verified` and `verified` both reached
+    the platform with the terminal report (32 of 33) — 22 seconds after the readings they
+    judged. A verdict now rides the same report as its own judge step.
+    """
+
+    def _verifying(self, run_state: RunState) -> RunState:
+        return _with(run_state, state=IncidentState.VERIFYING, remediation_plan=_PLAN)
+
+    def _live(self, client: Any, now: datetime) -> tuple[RunReporter, PlannerLog]:
+        """A reporter that has already reported once, so a mid-transition report can be sent."""
+        log = PlannerLog(clock=lambda: now)
+        reporter = _reporter(client, tool_log=ToolCallLog(), planner_log=log)
+        return reporter, log
+
+    def test_the_verdict_rides_the_same_report_as_its_own_judge_step(
+        self, run_state: RunState, now: datetime
+    ) -> None:
+        client = _RecordingClient()
+        reporter, log = self._live(client, now)
+        reporter.report(self._verifying(run_state))
+        client.calls.clear()
+
+        log.verdict(
+            hypotheses=(_hypothesis("worker-dispatcher is dead", 0.95),),
+            verdict="not_verified",
+            reasoning="lag still reads 28, and the reading is a cached one",
+            attempt=1,
+            of=4,
+        )
+
+        sent = client.arguments_for(REPORT_RUN_TOOL)
+        assert len(sent) == 1, "one report, carrying both the step and the verdict"
+        assert sent[0]["step"]["kind"] == "report"
+        assert sent[0]["step"]["tool"] == VERIFY_JUDGE_TOOL
+        assert sent[0]["verification"] == {
+            "verdict": "not_verified",
+            "reasoning_excerpt": "lag still reads 28, and the reading is a cached one",
+            "attempt": 1,
+            "of": 4,
+        }
+
+    def test_the_ledgers_copy_is_never_reported_a_second_time(
+        self, run_state: RunState, now: datetime
+    ) -> None:
+        """The verify loop writes the same verdict to the evidence ledger, and a report built
+        from that ledger would put the verdict on the platform twice under two reports."""
+        client = _RecordingClient()
+        reporter, log = self._live(client, now)
+        verifying = self._verifying(run_state)
+        reporter.report(verifying)
+        log.verdict(
+            hypotheses=(_hypothesis("worker-dispatcher is dead", 0.95),),
+            verdict="verified",
+            reasoning="lag reads 0",
+            attempt=2,
+            of=4,
+        )
+        client.calls.clear()
+
+        reporter.report(
+            _with(
+                verifying,
+                state=IncidentState.RESOLVED,
+                evidence=(
+                    _entry(VERIFY_JUDGE_MARKER, now, "verified: lag reads 0", attempt=2, of=4),
+                ),
+            )
+        )
+
+        assert all("verification" not in args for args in client.arguments_for(REPORT_RUN_TOOL)), (
+            "the verdict already left with its judge step"
+        )
+
+    def test_each_verdicts_report_leaves_within_one_call_of_its_judge_call(
+        self, run_state: RunState, now: datetime
+    ) -> None:
+        """A fake clock, stepping one second per observation: three verdicts, three reports,
+        each stamped with its own judge call's moment and none waiting for a transition."""
+        client = _RecordingClient()
+        log = PlannerLog(clock=_make_clock(now, step_seconds=1.0))
+        reporter = _reporter(client, tool_log=ToolCallLog(), planner_log=log)
+        reporter.report(self._verifying(run_state))
+        client.calls.clear()
+
+        for attempt, verdict in enumerate(("not_verified", "not_verified", "verified"), start=1):
+            log.verdict(
+                hypotheses=(_hypothesis("worker-dispatcher is dead", 0.95),),
+                verdict=verdict,
+                reasoning=f"poll {attempt}",
+                attempt=attempt,
+                of=3,
+            )
+            assert len(client.arguments_for(REPORT_RUN_TOOL)) == attempt, (
+                "each verdict must leave before the next judge call, not at the next transition"
+            )
+
+        sent = client.arguments_for(REPORT_RUN_TOOL)
+        assert [args["verification"]["verdict"] for args in sent] == [
+            "not_verified",
+            "not_verified",
+            "verified",
+        ]
+        assert [args["verification"]["attempt"] for args in sent] == [1, 2, 3]
+        # The step's own stamp is the judge call's moment, one second apart on this clock.
+        assert [args["step"]["at"] for args in sent] == [
+            (now + timedelta(seconds=i)).isoformat() for i in range(3)
+        ]
+
+    def test_a_verdict_nobody_could_send_live_still_reaches_the_terminal_report(
+        self, run_state: RunState, now: datetime
+    ) -> None:
+        """The safety net: a verdict observed before the run's first report has no state to be
+        stamped with, so it is held and carried by the report that closes the run."""
+        client = _RecordingClient()
+        reporter, log = self._live(client, now)
+
+        log.verdict(
+            hypotheses=(_hypothesis("worker-dispatcher is dead", 0.95),),
+            verdict="verified",
+            reasoning="lag reads 0",
+            attempt=1,
+            of=1,
+        )
+        assert client.calls == [], "nothing to stamp it with yet"
+
+        reporter.report(
+            _with(
+                self._verifying(run_state),
+                state=IncidentState.RESOLVED,
+                evidence=(
+                    _entry(VERIFY_JUDGE_MARKER, now, "verified: lag reads 0", attempt=1, of=1),
+                ),
+            )
+        )
+
+        last = client.arguments_for(REPORT_RUN_TOOL)[-1]
+        assert last["state"] == "resolved"
+        assert last["verification"]["verdict"] == "verified"
+
+    def test_a_reporter_with_no_planner_log_still_reports_verdicts_from_the_ledger(
+        self, run_state: RunState, now: datetime
+    ) -> None:
+        """The offline path has no thinking log at all, so the ledger stays the source there."""
+        client = _RecordingClient()
+        judged = _with(
+            run_state,
+            evidence=(_entry(VERIFY_JUDGE_MARKER, now, "verified: drained", attempt=1, of=1),),
+        )
+
+        _reporter(client, tool_log=ToolCallLog()).report(judged)
+
+        assert client.arguments_for(REPORT_RUN_TOOL)[0]["verification"]["verdict"] == "verified"
+
+
 class TestTheBudgetMeter:
     def test_every_report_carries_the_ledger_as_a_meter(self, run_state: RunState) -> None:
         client = _RecordingClient()

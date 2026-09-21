@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Drive the live demo: one fault, one agent, one console, six printed steps.
 
-``make demo-live MODE=consumer_outage|dlq_backlog [LIVE=1 YES_SPEND=1] [AUTO=1]``
+``make demo-live MODE=consumer_outage|dlq_backlog [LIVE=1 YES_SPEND=1] [AUTO=1] [HOLD=60]``
 
 The world has to break while somebody is watching, in an order they can narrate — which
 ``make eval-live`` cannot do, because it seeds and runs in one breath. So the fault is fired
@@ -18,8 +18,13 @@ it has paged (O-36, ADR 0076), and that row is what step 5 starts the run from �
 file's. The precondition in step 4 is a third claim and the gate: the world satisfies the
 premise the grader will assume. The prompt to start recording comes after the fault is visible
 (WO-R3-329); ``--record-from baseline`` asks for the old order. Since v0.6.18 the platform's
-measurement interval is a setting and ``demo/compose.yml`` runs it at 5 s (O-35), with the
-producer at 0.75 s during the fault, so the wait is seconds rather than a minute and a half.
+measurement interval is a setting and ``demo/compose.yml`` runs it at 5 s (O-35), so a reading
+moves every few seconds rather than once a minute.
+
+Step 6 HOLDS the world for ``HOLD`` seconds (default 60) before it resets. The fifth take's
+finished run left the screen eleven seconds after it resolved, because the wind-down's reset
+opens a new take and the page follows the newest one. Ctrl-C during the hold skips the rest of
+it; the world goes back either way.
 
 The default path is FREE — real platform and hooks under the runner's ``--mode rehearsal``
 (ADR 0069), rows ``degraded=True``, counted in no report. ``LIVE=1`` is the paid take and
@@ -59,18 +64,15 @@ MODES: Final[dict[str, dict[str, Any]]] = {
         # producer the backlog stays 0 however long you wait and the precondition
         # correctly refuses the run. This is the mode's whole operational difference.
         "needs_traffic": True,
-        # Seconds between jobs ONCE THE FAULT HAS FIRED. The baseline keeps
-        # `make traffic`'s own default of 3, and the producer is restarted at this rate in
-        # step 3 — which is not a refinement, it is the difference between a reliable number
-        # and a lucky one. `POST /jobs` is rate-limited per identity in a FIXED 60-second
-        # window of 30 creations, so a faster loop front-loads the window rather than raising
-        # the sustained rate; the front-load is exactly what makes the backlog cross the
-        # threshold of 20 in seconds. But every job the BASELINE spends is one the fault
-        # cannot: measured on 2026-09-21, ten seconds of 0.75 s countdown traffic left only 17
-        # of the 30 for the fault, the lag stalled at 17 for half a minute waiting for the
-        # window to roll, and fault→page read 56.1 s instead of 15.6 s. At 3 s the countdown
-        # spends about three, so the fault gets the rest.
-        "fault_traffic_rate": "0.75",
+        # Seconds between jobs, for the WHOLE take — one producer, one rate, never restarted.
+        # 2.0 s is the platform's own sustained ceiling: `POST /jobs` allows 30 creations per
+        # FIXED 60-second window per caller address, so there is no faster rate to switch to
+        # once the fault has fired, only a window to borrow from and repay. WO-R3-339 borrowed
+        # it at 0.75 s and the fifth take repaid it on camera — the backlog climbed to 28 in
+        # 25 s, then sat flat at 28 for another 25 while the producer collected 429s, which on
+        # the console's chart is a climb that stops being a climb (F4). At 2.0 s the backlog
+        # grows by one job every two seconds from the fault until the restart drains it.
+        "traffic_rate": "2.0",
         # Which platform reading tells the operator the page will show the fault. A closed
         # set for the same reason the modes are: this decides what is polled.
         "fault": "consumer_lag",
@@ -94,7 +96,7 @@ MODES: Final[dict[str, dict[str, Any]]] = {
         # The world is seeded at boot and the hook adds the backlog. Nothing arrives,
         # nothing drains, so no traffic is needed or wanted.
         "needs_traffic": False,
-        "fault_traffic_rate": None,
+        "traffic_rate": None,
         "fault": "dlq_depth",
         "story": (
             "a dead-letter queue that fills past its threshold with four replayable rows "
@@ -131,8 +133,23 @@ FAULT_SIGNALS: Final[frozenset[str]] = frozenset({"consumer_lag", "dlq_depth"})
 #: two hooks tolerates a re-run even if both facts above were somehow lost.
 REPEAT_SAFE_HOOKS: Final[frozenset[str]] = frozenset({"poison_message", "kill_consumer"})
 
+#: Why each read this script makes is the lab's own and not the agent's (platform ADR 0038).
+#: Unlabelled, these rows land as ``agent.tool_invoked`` under the read-only principal, and the
+#: demo page with no run selected drew them as the agent acting before the lab had injected
+#: anything — the fifth take's finding F5, 39 rows of it before the fault.
+BASELINE_PROBE_REASON: Final = "demo: baseline lag poll"
+FAULT_WATCH_PROBE_REASON: Final = "demo: fault watch read"
+
 #: Seconds of countdown before the fault, so the operator can get the console on screen.
 _FAULT_COUNTDOWN_SECONDS: Final = 10
+#: How long step 6 keeps the finished run on screen before the reset opens the next take.
+#: A minute, because the fifth take's run left the screen after eleven seconds and the owner
+#: reads the briefing card, the ledger and the chart off the page after it resolves.
+DEFAULT_HOLD_SECONDS: Final = 60
+#: How often the hold prints where it is. Every ten seconds, and every second near the end:
+#: sixty countdown lines say nothing the last five do not.
+_HOLD_TICK_SECONDS: Final = 10
+_HOLD_FINAL_TICKS: Final = 5
 #: How long to wait for a healthy baseline in `consumer_outage` before giving up.
 _BASELINE_TIMEOUT_SECONDS: Final = 120
 _BASELINE_POLL_SECONDS: Final = 5.0
@@ -201,23 +218,6 @@ _LAG_CLOCK: Final = (
 )
 
 
-def _end(process: subprocess.Popen[str]) -> None:
-    """Terminate one producer, escalating to a kill. Shared by ``stop`` and ``accelerate``.
-
-    A free function rather than a method, because ``accelerate`` ends a process the handle no
-    longer points at — it has already started the replacement — and a method reading
-    ``self.process`` would end the new one.
-    """
-    if process.poll() is not None:
-        return
-    process.terminate()
-    try:
-        process.wait(timeout=15)
-    except subprocess.TimeoutExpired:
-        process.kill()
-        process.wait(timeout=15)
-
-
 class TrafficHandle:
     """The producer subprocess, owned by ``main`` rather than returned from the walk.
 
@@ -230,15 +230,14 @@ class TrafficHandle:
     def __init__(self) -> None:
         self.process: subprocess.Popen[str] | None = None
 
-    def start(self, rate: str | None = None, *, append: bool = False) -> None:
+    def start(self, rate: str | None = None) -> None:
         """Start the producer, at ``rate`` seconds between jobs when one is given.
 
-        ``rate`` is handed to `make traffic` as `RATE=`; without one the script's own
-        sustainable default (3 s) applies, which is what every caller before WO-R3-339 got.
-        ``append`` keeps the previous phase's output in the log, for ``accelerate``.
+        ``rate`` is handed to `make traffic` as `RATE=`, and the loop treats it as a floor it
+        may only slow down from; without one the script's own default (3 s) applies.
         """
         log = _REPO_ROOT / "evals" / ".demo-traffic.log"
-        handle = log.open("a" if append else "w", encoding="utf-8")
+        handle = log.open("w", encoding="utf-8")
         self.process = subprocess.Popen(  # noqa: S603 - fixed argv, no shell
             ["make", "traffic", *([f"RATE={rate}"] if rate else [])],
             cwd=_REPO_ROOT,
@@ -252,42 +251,18 @@ class TrafficHandle:
         )
 
     def stop(self, console: Console) -> None:
+        """Terminate the producer, escalating to a kill if it will not go."""
         process = self.process
         if process is None or process.poll() is not None:
             return
         console.say("  stopping the traffic loop")
-        _end(process)
+        process.terminate()
+        try:
+            process.wait(timeout=15)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait(timeout=15)
         self.process = None
-
-    def accelerate(self, console: Console, rate: str | None) -> None:
-        """Re-start the producer at the FAULT's rate, once the fault has fired.
-
-        A restart rather than a signal, because the interval is the loop's own argument and
-        there is nothing to keep across it: each submission is independent, the jobs already
-        in the queue stay in the queue, and the log is appended to so the baseline's tally
-        survives. A no-op when the mode declares no fault rate or the producer is not running,
-        so the quiet modes and every failure path are unaffected.
-
-        Why it exists at all: `POST /jobs` is rate-limited per identity in a fixed 60-second
-        window of 30 creations, so running the BASELINE fast spends the allowance the fault
-        needs. Measured on 2026-09-21 — ten seconds of countdown at 0.75 s left 17 of the 30,
-        the lag stalled at 17 until the window rolled, and the page arrived 56.1 s after the
-        fault instead of 15.6 s.
-
-        **The new loop is started BEFORE the old one is stopped, and that ordering is worth
-        four seconds.** `make traffic` has to boot `uv`, import httpx and log in — two to three
-        seconds in which a stop-then-start producer submits nothing at all, which on the first
-        measurement of this path put fault→page at 19.9 s against a target of 20. Overlapping
-        them means the slow loop keeps arriving while the fast one boots, so the backlog never
-        stops climbing; the cost is a second or two at the sum of the two rates, which on a
-        backlog that is about to grow for fifteen seconds is not a number anybody can see.
-        """
-        if rate is None or self.process is None:
-            return
-        console.say(f"  producer to a job every {rate}s — the backlog is what climbs now")
-        previous = self.process
-        self.start(rate=rate, append=True)
-        _end(previous)
 
 
 class WindDown:
@@ -475,6 +450,15 @@ def main(argv: list[str] | None = None) -> int:
         help="do not wait for Enter between steps (for a rehearsal, not for a take).",
     )
     parser.add_argument(
+        "--hold",
+        type=int,
+        default=DEFAULT_HOLD_SECONDS,
+        help=(
+            "seconds to keep the finished run on screen before the world is reset "
+            f"(default {DEFAULT_HOLD_SECONDS}; 0 resets at once). Ctrl-C skips the rest of it."
+        ),
+    )
+    parser.add_argument(
         "--record-from",
         choices=RECORD_FROM,
         default=RECORD_FROM[0],
@@ -500,6 +484,16 @@ def main(argv: list[str] | None = None) -> int:
     if args.yes_spend and not args.live:
         # Not an error worth failing over, but worth saying: YES_SPEND alone buys nothing.
         print("note: YES_SPEND=1 without LIVE=1 changes nothing — this run is free.")
+    if args.hold < 0:
+        # Refused here rather than clamped, because a negative hold is a typo in a make
+        # variable and clamping it would silently give the operator the behaviour they
+        # already have a flag for (HOLD=0).
+        print(
+            f"REFUSING: --hold must be 0 or more seconds (got {args.hold}). "
+            "HOLD=0 resets as soon as the briefing has been walked through.",
+            file=sys.stderr,
+        )
+        return 2
 
     # 3. Build the console the steps print through, and the traffic and wind-down handles. They
     #    are held HERE rather than inside ``_walk``, so they still work if a step raises.
@@ -591,15 +585,16 @@ def _walk(
     #    producer first in the mode that needs one, and wait until the backlog reads healthy.
     step = console.begin(2, "baseline")
     if mode["needs_traffic"]:
+        rate = str(mode["traffic_rate"])
         console.note(
             step,
-            "starting `make traffic` in the background at the sustainable rate (a job every "
-            "3s) — the audience should see work arriving and being consumed. It speeds up "
-            "when the fault fires, and not before: the platform's per-identity job limit is a "
-            "fixed 60-second window, so every job the baseline spends is one the backlog "
-            "cannot have",
+            f"starting `make traffic` in the background at a job every {rate}s — the audience "
+            "should see work arriving and being consumed. This rate is the platform's own "
+            "sustained ceiling for creating jobs (30 per fixed 60-second window), so it runs "
+            "unchanged through the fault: there is no faster rate to switch to, and borrowing "
+            "from the window is what made the fifth take's backlog stall on camera",
         )
-        traffic.start()
+        traffic.start(rate=rate)
         _wait_for_healthy_baseline(console, step)
     else:
         console.note(step, "nothing to start — this world is seeded and quiet")
@@ -627,10 +622,9 @@ def _walk(
     fired = _seed(scenario)
     for line in fired:
         console.note(step, f"fired: {line}")
-    # The producer speeds up HERE and not in step 2, which is the whole reason it is a
-    # separate call: from now on nothing is consuming what arrives, so every job is backlog,
-    # and the fault needs the rate limit's window to itself (see ``accelerate``).
-    traffic.accelerate(console, mode.get("fault_traffic_rate"))
+    # The producer is not touched here. From now on nothing consumes what arrives, so the same
+    # arrival rate is pure backlog, and that is the whole change: one job every two seconds
+    # becomes one job of backlog every two seconds, monotonically, until the restart.
     console.note(step, "the console's phase strip should move to `fault injected` within 2s")
     console.note(
         step,
@@ -743,10 +737,39 @@ def _walk(
         console.note(step, f"CONSOLE (this run): {_console_url(args.mode, run_id)}")
     for line in _artifacts(scenario):
         console.note(step, line)
+    # The hold is BEFORE the wind-down and after everything the operator needs on screen: the
+    # reset opens a new take, and the page follows the newest one (F1).
+    _hold_the_world(console, step, args.hold)
     wind_down.run(console)
     console.say()
     console.say("  *** DONE — STOP RECORDING ***")
     console.end(step)
+
+
+def _hold_the_world(console: Console, step: Step, seconds: int) -> None:
+    """Keep the finished run on screen for ``seconds`` before the reset wipes its take.
+
+    The fifth take's run disappeared eleven seconds after it resolved: the wind-down's reset
+    writes a new ``lab.world_reset`` boundary, and the page's "current take" rule then jumped
+    to the empty take that boundary had just opened. Ctrl-C skips the rest of the hold; the
+    caller's ``finally`` resets the world either way.
+    """
+    if seconds <= 0:
+        console.note(step, "HOLD=0 — no transition period, so the world goes back now")
+        return
+    console.note(
+        step,
+        f"holding the world for {seconds} s so the run stays on screen (HOLD={seconds}) — "
+        "read the briefing card, the ledger and the chart; Ctrl-C skips the rest",
+    )
+    try:
+        for remaining in range(seconds, 0, -1):
+            if remaining % _HOLD_TICK_SECONDS == 0 or remaining <= _HOLD_FINAL_TICKS:
+                console.say(f"  reset in {remaining}s…")
+            time.sleep(1)
+    except KeyboardInterrupt:
+        console.say()
+        console.say("  (hold skipped — winding down now; the world still goes back)")
 
 
 def _wait_for_healthy_baseline(console: Console, step: Step) -> None:
@@ -772,42 +795,48 @@ def _wait_for_healthy_baseline(console: Console, step: Step) -> None:
     )
 
 
+def _smoke_credential() -> str:
+    """The read-only token every read in this script travels under (ADR 0074).
+
+    REFUSES when ``PLATFORM_SMOKE_TOKEN`` is unset rather than falling back to the agent's own
+    token (``Settings.require_smoke_token``). That fallback was F3 of the 2026-09-20 take: the
+    runner's polling landed in the audit log as `agent.tool_invoked` and the demo page could
+    not tell it from the four reads the agent actually made. Never printed.
+    """
+    from evals.runner import _settings_for_mode
+    from incident_commander.config import SmokeTokenNotConfigured
+
+    try:
+        return _settings_for_mode(live=True).require_smoke_token()
+    except SmokeTokenNotConfigured as err:
+        raise DemoFailed(str(err)) from err
+
+
 def _smoke_env() -> dict[str, str]:
     """``PLATFORM_SMOKE_TOKEN`` for a subprocess that reads the world.
 
-    A value, never printed: the caller merges it into the child's environment. Refuses for
-    ``_smoke_client``'s reason, and in the same words.
+    A value, never printed: the caller merges it into the child's environment.
     """
-    from evals.runner import _settings_for_mode
-    from incident_commander.config import SmokeTokenNotConfigured
-
-    settings = _settings_for_mode(live=True)
-    try:
-        return {"PLATFORM_SMOKE_TOKEN": settings.require_smoke_token()}
-    except SmokeTokenNotConfigured as err:
-        raise DemoFailed(str(err)) from err
+    return {"PLATFORM_SMOKE_TOKEN": _smoke_credential()}
 
 
-def _smoke_client() -> Any:
+def _smoke_client(*, lab_probe: str | None = None) -> Any:
     """The ONE client this script reads the world with, under the read-only principal.
 
-    REFUSES when ``PLATFORM_SMOKE_TOKEN`` is unset rather than falling back to the agent's own
-    token (``Settings.require_smoke_token``, ADR 0074). That fallback was F3 of the 2026-09-20
-    take: the runner's polling landed in the audit log as `agent.tool_invoked` and the demo
-    page could not tell it from the four reads the agent actually made.
+    ``lab_probe`` labels every call as the lab's own, which makes the platform file the row as
+    `lab.probe` rather than as a read the agent took (platform ADR 0038). Only the precondition
+    path leaves it out, because the runner labels those per probe with what each one proves.
     """
     from evals.runner import _settings_for_mode
-    from incident_commander.config import SmokeTokenNotConfigured
-    from incident_commander.tools.mcp_client import make_client
+    from incident_commander.tools.mcp_client import LabProbeClient, make_client
 
-    settings = _settings_for_mode(live=True)
-    try:
-        token = settings.require_smoke_token()
-    except SmokeTokenNotConfigured as err:
-        raise DemoFailed(str(err)) from err
+    token = _smoke_credential()
     # Never `make_client(settings)`: that selects `settings.platform_token`, the agent's own
     # principal. `tests/unit/test_demo_live.py` pins that no client this module builds does.
-    return make_client(settings, token=token)
+    client = make_client(_settings_for_mode(live=True), token=token)
+    if lab_probe is None:
+        return client
+    return LabProbeClient(client, reason=lab_probe, principal_token=token)
 
 
 def _lag_reading() -> LagReading:
@@ -821,7 +850,7 @@ def _lag_reading() -> LagReading:
     """
     from evals.world_audit import Probe, read
 
-    client = _smoke_client()
+    client = _smoke_client(lab_probe=BASELINE_PROBE_REASON)
     try:
         reading = read(
             client,
@@ -855,7 +884,7 @@ def _dlq_total() -> tuple[int | None, bool]:
     """
     from evals.world_audit import Probe, read
 
-    client = _smoke_client()
+    client = _smoke_client(lab_probe=FAULT_WATCH_PROBE_REASON)
     try:
         reading = read(
             client,
@@ -1052,10 +1081,11 @@ def _await_precondition(scenario: str) -> None:
         return
     # The read-only principal, like every other read this script makes (ADR 0074): the
     # precondition is the EVALUATOR's check on the world, not a step the agent took, and it
-    # used to be polled under the agent's own token — F3's third source.
+    # used to be polled under the agent's own token — F3's third source. The label is per
+    # probe rather than one reason for all of them, so each row says what it proves.
     client = _smoke_client()
     try:
-        _assert_preconditions(target, client, None)
+        _assert_preconditions(target, client, None, lab_principal_token=_smoke_credential())
     except Exception as err:
         raise DemoFailed(
             f"the fault never became visible: {err}. Nothing was run and nothing was "

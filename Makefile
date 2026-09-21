@@ -524,19 +524,19 @@ traffic: export PLATFORM_SMOKE_TOKEN := $(PLATFORM_SMOKE_TOKEN)
 # consumer builds no backlog and the scenario's precondition correctly
 # refuses to run it. `--until-lag N` stops once the backlog is deep enough.
 #
-# RATE is the seconds between submissions and defaults to the script's own 3.0,
-# which is the sustainable rate: `POST /jobs` is rate-limited per identity in a
-# FIXED 60-second window of 30 creations, so a faster rate does not raise the
-# sustained arrival rate — it front-loads the window and then collects 429s
-# until the window rolls. That is exactly what a demo wants and exactly what a
-# soak does not, so it is a parameter rather than a new default.
+# RATE is the seconds between submissions and defaults to the script's own 3.0.
+# It is a FLOOR, not a rate: `POST /jobs` allows 30 creations per FIXED 60-second
+# window per caller address (`rate_limiter(limit=30, window=60,
+# key_prefix="jobs:create")`), and the loop paces itself against that allowance
+# from the same clock, so asking for RATE=0.5 gets 30 a minute rather than a run
+# of 429s. `--max-per-window 0` switches the pacing off for anyone who wants to
+# meet the limit head-on.
 #
-# `scripts/demo_live.py` runs the BASELINE at this default and restarts the
-# producer at RATE=0.75 once the fault has fired (WO-R3-339), and the ordering is
-# not a nicety: every job the baseline spends is one the backlog cannot have.
-# Measured 2026-09-21 — running the whole walk at 0.75 left 17 of the 30 for the
-# fault, the lag stalled at 17 until the window rolled, and the platform's page
-# arrived 56.1 s after the fault instead of 15.6 s.
+# `scripts/demo_live.py` runs ONE producer at RATE=2.0 for the whole take —
+# 30 a minute, the platform's own sustained ceiling — and never restarts it.
+# WO-R3-339 restarted it at 0.75 s once the fault had fired; that borrowed the
+# window's allowance and the fifth take repaid it on camera, with the backlog
+# climbing to 28 in 25 s and then sitting flat at 28 for another 25.
 traffic:
 	uv run python scripts/traffic_loop.py $(if $(RATE),--interval $(RATE)) $(if $(UNTIL_LAG),--until-lag $(UNTIL_LAG)) $(if $(COUNT),--count $(COUNT))
 
@@ -732,7 +732,8 @@ else
 demo-live:
 	PYTHONPATH=. uv run python scripts/demo_live.py --mode $(MODE) \
 		$(if $(LIVE),--live) $(if $(YES_SPEND),--yes-spend) $(if $(AUTO),--auto) \
-		$(if $(RECORD_FROM),--record-from $(RECORD_FROM))
+		$(if $(RECORD_FROM),--record-from $(RECORD_FROM)) \
+		$(if $(HOLD),--hold $(HOLD))
 endif
 
 bootstrap-token:

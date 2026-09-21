@@ -1,6 +1,6 @@
 # Live demo: full platform footprint sufficient for remediation eval.
 #
-# Pinned to the incident-platform v0.6.18 release by digest so the agent's
+# Pinned to the incident-platform v0.6.19 release by digest so the agent's
 # contract expectations don't shift under us. Every platform-code service
 # below uses the SAME pinned digest. Bump the digest whenever the platform
 # ships a new release and rerun `make eval-live` to catch drift.
@@ -137,7 +137,7 @@ services:
     # One-shot schema migration, mirroring the dev compose's migrate
     # service: with two app-code services (mcp + api) neither should
     # race `alembic upgrade head` at boot.
-    image: ghcr.io/kudratsingh/incident-platform:v0.6.18@sha256:51635017ea4a495ed31c1b3245bcc62b2c758fad8044927696be5111e964460e
+    image: ghcr.io/kudratsingh/incident-platform:v0.6.19@sha256:1d1d6555dbb5159a7ba4618cf3e5bb9e798e7c47407d6edd4acda33d092c788a
     platform: linux/amd64
     environment:
       DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/incident_platform
@@ -149,7 +149,7 @@ services:
     restart: "no"
 
   platform:
-    # incident-platform v0.6.18 (INDEX digest published by the platform
+    # incident-platform v0.6.19 (INDEX digest published by the platform
     # release, confirmed with `docker buildx imagetools inspect` — the
     # top-level `Digest:`, not a per-platform child manifest).
     #
@@ -396,6 +396,16 @@ services:
     #     of two points. `lag_samples_cleared` stays in the reset JSON as a
     #     permanent 0.
     #
+    # What v0.6.19 changed (plat #236): the CONSOLE only — the /demo page's
+    # own fixes for the fifth take (WO-R3-341: a finished run stays up, the
+    # stations never move backwards, and an unattributed tool row is never
+    # drawn as the agent's). The BACKEND image is byte-identical in behaviour
+    # to v0.6.18: no tool, description, schema, scope or refusal code moves,
+    # so `make snapshot` shows NO diff and there is nothing to rebless. The
+    # backend services take the new tag anyway, because one release version
+    # across all four is what makes "which platform was this run against" a
+    # single answer.
+    #
     # What v0.6.18 changed (plat #233 console + plat #234 backend, platform
     # ADR 0039, owner decisions O-35/O-36; WO-R3-336/338/339): the platform
     # PAGES ITSELF, and its lag clock is a setting. This one DOES move
@@ -435,8 +445,8 @@ services:
     # Do not switch to `:latest` — the whole point of pinning by digest is
     # that a platform-side prompt or schema change can't shift agent
     # behavior without an explicit bump here.
-    image: ghcr.io/kudratsingh/incident-platform:v0.6.18@sha256:51635017ea4a495ed31c1b3245bcc62b2c758fad8044927696be5111e964460e
-    # v0.6.18 is an OCI index, but it still lists linux/amd64 ONLY (plus an
+    image: ghcr.io/kudratsingh/incident-platform:v0.6.19@sha256:1d1d6555dbb5159a7ba4618cf3e5bb9e798e7c47407d6edd4acda33d092c788a
+    # v0.6.19 is an OCI index, but it still lists linux/amd64 ONLY (plus an
     # attestation manifest) — being an index is not the same as being
     # multi-arch, and this one is not. On Apple Silicon this runs under
     # Rosetta (slower cold start, correct output) — REQUIRED there; without
@@ -559,7 +569,7 @@ services:
     # Env copied deliberately from the dev compose's `app` service
     # (drift between services is platform bug #69's class); minio/jaeger
     # endpoints omitted with the services (see header note).
-    image: ghcr.io/kudratsingh/incident-platform:v0.6.18@sha256:51635017ea4a495ed31c1b3245bcc62b2c758fad8044927696be5111e964460e
+    image: ghcr.io/kudratsingh/incident-platform:v0.6.19@sha256:1d1d6555dbb5159a7ba4618cf3e5bb9e798e7c47407d6edd4acda33d092c788a
     platform: linux/amd64
     ports:
       - "${DEMO_API_HOST_PORT:-8000}:8000"
@@ -648,7 +658,7 @@ services:
     # No `depends_on: service_healthy` on api, deliberately: nginx resolves
     # the upstream per request, so the console coming up first only means a
     # 502 until the backend is ready, and `make demo` waits on both anyway.
-    image: ghcr.io/kudratsingh/incident-platform-console:v0.6.18@sha256:0c8f73062bd0238c82ebbd0796d25b5bddd577b8da9ab7e3217937b8cc2501bb
+    image: ghcr.io/kudratsingh/incident-platform-console:v0.6.19@sha256:356e80701a6a2db702311519a191939024bfbe9e22092e1effd3b72b0c5224f0
     platform: linux/amd64
     environment:
       API_UPSTREAM: http://api:8000

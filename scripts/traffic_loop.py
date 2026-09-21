@@ -2,8 +2,11 @@
 
 With nothing arriving, `kill_consumer` leaves `get_consumer_lag` reading 0 and
 `remediate_consumer_lag_success` asserts a fault that cannot exist. Job creation needs a USER
-token; `jobs:create` allows 30 per 60s, which 1/2s sits exactly on, so the default is 3s; and
-backpressure rejects new jobs past lag 1000, so a 503 means the fault is manufactured.
+token; backpressure rejects new jobs past lag 1000, so a 503 means the fault is manufactured.
+
+The loop paces itself against the platform's own allowance rather than discovering it with
+429s — see ``WindowPacer`` — because a producer that front-loads a window and then waits it out
+draws a backlog that climbs and then sits flat, which is the fifth take's finding F4.
 """
 
 from __future__ import annotations
@@ -17,20 +20,45 @@ import signal
 import sys
 import time
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from types import FrameType
 from typing import Any, Final
 
 import httpx
 
+from incident_commander.tools.mcp_client import (
+    LabProbeClient,
+    MCPClient,
+    MCPClientProtocol,
+    MCPError,
+)
+
 DEFAULT_BASE_URL: Final = "http://localhost:8000/api/v1"
 DEFAULT_EMAIL: Final = "agent-demo@example.com"
 DEFAULT_PASSWORD: Final = "demo-agent-pass-123"  # noqa: S105 - dev-only placeholder
-# 20/min against a 30/min limit. See the module docstring for why not 1/2s.
+# The requested spacing between jobs, and only a FLOOR: `WindowPacer` slows the loop further
+# whenever the platform's allowance would not cover the rate asked for.
 DEFAULT_INTERVAL_SECONDS: Final = 3.0
 # A platform JobType value (backend/app/models/enums.py), and the one the eval fixture pack
 # uses, so the traffic blends with the seeded rows.
 DEFAULT_JOB_TYPE: Final = "bulk_api_sync"
+
+#: The platform's own allowance for creating jobs, which this loop paces itself against:
+#: `rate_limiter(limit=30, window=60, key_prefix="jobs:create")` on `POST /jobs`
+#: (`backend/app/api/jobs.py`), a FIXED window keyed on the caller's address. So 30 creations a
+#: minute is the sustained ceiling however fast the loop asks, and asking faster only front-loads
+#: the window. Pass `--max-per-window 0` to switch the pacing off and meet the limit head-on.
+DEFAULT_MAX_PER_WINDOW: Final = 30
+DEFAULT_WINDOW_SECONDS: Final = 60.0
+
+#: Why this loop's lag reads are the lab's own rather than the agent's (platform ADR 0038).
+#: Unlabelled they land as `agent.tool_invoked`, and the demo page with no run selected counts
+#: every such row as a step the agent made — the fifth take's finding F5.
+LAB_PROBE_REASON: Final = "traffic: lag read"
+
+#: The group whose backlog is the fault every consumer-lag scenario is about.
+_LAG_GROUP: Final = "worker-dispatcher"
 
 _BACKPRESSURE_STATUS: Final = 503
 _RATE_LIMITED_STATUS: Final = 429
@@ -99,45 +127,112 @@ def submit_one(client: httpx.Client, jwt: str, job_type: str, tally: Tally) -> N
     tally.created += 1
 
 
-class LagReader:
-    """Reads worker-dispatcher lag through `get_consumer_lag`, the tool the agent uses.
+class WindowPacer:
+    """How long to wait before the next submission so the platform never has to refuse one.
 
-    Read-scoped by construction: it takes PLATFORM_SMOKE_TOKEN, so a bug here cannot mutate
-    the world the traffic is building.
+    The platform's window is ``int(time.time()) // window``, so this reads the same clock and
+    spreads whatever allowance is left over the time that is left in the window. The effect is
+    a backlog that grows at every sample instead of jumping and then sitting flat (finding F4).
     """
 
-    def __init__(self, mcp_url: str | None, token: str | None, client: httpx.Client) -> None:
+    def __init__(
+        self,
+        *,
+        limit: int = DEFAULT_MAX_PER_WINDOW,
+        window: float = DEFAULT_WINDOW_SECONDS,
+        floor: float = 0.0,
+        clock: Callable[[], float] = time.time,
+    ) -> None:
+        self.limit = limit
+        self.window = window
+        #: The spacing the operator asked for. The pacer only ever slows the loop down.
+        self.floor = floor
+        self._clock = clock
+        self._window_start = -1
+        self._used = 0
+
+    def spend(self) -> None:
+        """Book one submission against the window it landed in."""
+        self._roll()
+        self._used += 1
+
+    def refused(self) -> None:
+        """Take a 429 as "this window is gone": another producer spent part of the allowance.
+
+        The baseline loop, a second terminal or the operator's own browser all share one
+        bucket, and none of them is visible from here — a refusal is how the loop finds out.
+        """
+        self._roll()
+        self._used = self.limit
+
+    def wait_seconds(self) -> float:
+        """Seconds to wait before the next submission."""
+        if self.limit <= 0:
+            return self.floor
+        now = self._roll()
+        left = (self._window_start + 1) * self.window - now
+        remaining = self.limit - self._used
+        # Nothing left to spend here, so the only honest wait is for the next window.
+        if remaining <= 0:
+            return max(self.floor, left)
+        return max(self.floor, left / remaining)
+
+    def _roll(self) -> float:
+        """Reset the count when the clock has moved into a new window. Returns the reading."""
+        now = self._clock()
+        window_start = int(now // self.window)
+        if window_start != self._window_start:
+            self._window_start, self._used = window_start, 0
+        return now
+
+
+class LagReader:
+    """Reads worker-dispatcher lag through `get_consumer_lag`, labelled as the lab's own.
+
+    Read-scoped by construction (it takes PLATFORM_SMOKE_TOKEN), and the read says who made it:
+    a `_lab_probe` reason plus the lab's credential make the platform file the row as
+    `lab.probe` instead of as a read the agent took (platform ADR 0038).
+    """
+
+    def __init__(
+        self,
+        mcp_url: str | None,
+        token: str | None,
+        *,
+        transport: httpx.BaseTransport | None = None,
+    ) -> None:
         self.enabled = bool(mcp_url and token and token.strip())
-        self._url = mcp_url or ""
-        self._token = token or ""
-        self._client = client
+        self._transport: MCPClient | None = None
+        self._client: MCPClientProtocol | None = None
+        if self.enabled:
+            self._transport = MCPClient(
+                base_url=str(mcp_url), token=str(token), transport=transport
+            )
+            self._client = LabProbeClient(
+                self._transport, reason=LAB_PROBE_REASON, principal_token=str(token)
+            )
 
     def read(self) -> int | None:
         """The current lag, or ``None`` when it is switched off or cannot be read."""
-        if not self.enabled:
+        if self._client is None:
             return None
         try:
-            response = self._client.post(
-                self._url,
-                json={
-                    "jsonrpc": "2.0",
-                    "id": 1,
-                    "method": "tools/call",
-                    "params": {
-                        "name": "get_consumer_lag",
-                        "arguments": {"consumer_group": "worker-dispatcher"},
-                    },
-                },
-                headers={"Authorization": f"Bearer {self._token}"},
-            )
-            payload = response.json()
-            for block in payload.get("result", {}).get("content", []):
-                if block.get("type") == "text":
-                    value = json.loads(block["text"]).get("lag")
-                    return value if isinstance(value, int) else None
-        except (httpx.HTTPError, ValueError, AttributeError):
+            result = self._client.call_tool("get_consumer_lag", {"consumer_group": _LAG_GROUP})
+        except MCPError:
             return None
+        for block in result.content:
+            if block.get("type") != "text":
+                continue
+            try:
+                value = json.loads(str(block.get("text"))).get("lag")
+            except (AttributeError, TypeError, ValueError):
+                return None
+            return value if isinstance(value, int) and not isinstance(value, bool) else None
         return None
+
+    def close(self) -> None:
+        if self._transport is not None:
+            self._transport.close()
 
 
 def run(
@@ -149,10 +244,15 @@ def run(
     max_submissions: int | None,
     until_lag: int | None,
     lag_reader: LagReader | None = None,
+    pacer: WindowPacer | None = None,
     sleep: Any = time.sleep,
     on_tick: Any = print,
 ) -> Tally:
-    """Submit until stopped, until the count is reached, or until lag is deep."""
+    """Submit until stopped, until the count is reached, or until lag is deep.
+
+    ``pacer`` decides the wait between submissions when one is given; ``interval`` is the wait
+    otherwise, and the pacer's floor either way.
+    """
     tally = Tally()
     stopping = False
 
@@ -170,9 +270,20 @@ def run(
             break
         if max_submissions is not None and tally.submitted >= max_submissions:
             break
+        # 1. Submit one job, and tell the pacer what it cost: one creation against this
+        #    window's allowance, or a refusal, which means the allowance is already gone.
+        refused_before = tally.rate_limited
         submit_one(client, jwt, job_type, tally)
-        lag = lag_reader.read() if lag_reader is not None else None
-        if n % 10 == 0 or tally.backpressured == 1:
+        if pacer is not None:
+            pacer.spend()
+            if tally.rate_limited > refused_before:
+                pacer.refused()
+        # 2. Read the lag only when something will use it — the stopping condition, or the
+        #    tick line. Each read is an audit row, and 119 unread ones filled take five's ledger.
+        reporting = n % 10 == 0 or tally.backpressured == 1
+        needed = lag_reader is not None and (until_lag is not None or reporting)
+        lag = lag_reader.read() if needed and lag_reader is not None else None
+        if reporting:
             suffix = f" · lag {lag}" if lag is not None else ""
             on_tick(f"  {tally.describe()}{suffix}")
         if until_lag is not None and lag is not None and lag >= until_lag:
@@ -180,7 +291,7 @@ def run(
             break
         if stopping:
             break
-        sleep(interval)
+        sleep(pacer.wait_seconds() if pacer is not None else interval)
     return tally
 
 
@@ -195,8 +306,21 @@ def main(argv: list[str] | None = None) -> int:
         "--interval",
         type=float,
         default=DEFAULT_INTERVAL_SECONDS,
-        help=f"seconds between submissions (default {DEFAULT_INTERVAL_SECONDS}; "
-        "the platform allows 30/60s and 1/2s sits exactly on that limit)",
+        help=f"seconds between submissions, as a FLOOR (default {DEFAULT_INTERVAL_SECONDS}); "
+        "the loop waits longer whenever the platform's own allowance would not cover it",
+    )
+    parser.add_argument(
+        "--max-per-window",
+        type=int,
+        default=DEFAULT_MAX_PER_WINDOW,
+        help=f"the platform's `POST /jobs` allowance this loop paces itself against "
+        f"(default {DEFAULT_MAX_PER_WINDOW} per window; 0 switches the pacing off)",
+    )
+    parser.add_argument(
+        "--window-seconds",
+        type=float,
+        default=DEFAULT_WINDOW_SECONDS,
+        help=f"the length of that fixed window (default {DEFAULT_WINDOW_SECONDS:.0f})",
     )
     parser.add_argument("--count", type=int, default=None, help="stop after N submissions")
     parser.add_argument(
@@ -237,16 +361,34 @@ def main(argv: list[str] | None = None) -> int:
                 file=sys.stderr,
             )
             return 2
-        print(f"submitting {args.job_type} every {args.interval}s as {args.email} (Ctrl-C to stop)")
-        tally = run(
-            client,
-            jwt,
-            job_type=args.job_type,
-            interval=args.interval,
-            max_submissions=args.count,
-            until_lag=args.until_lag,
-            lag_reader=LagReader(args.mcp_url, smoke_token, client) if can_read_lag else None,
+        allowance = (
+            f"{args.max_per_window} per {args.window_seconds:.0f}s"
+            if args.max_per_window > 0
+            else "unpaced"
         )
+        print(
+            f"submitting {args.job_type} every {args.interval}s at most, within the "
+            f"platform's allowance ({allowance}), as {args.email} (Ctrl-C to stop)"
+        )
+        reader = LagReader(args.mcp_url, smoke_token) if can_read_lag else None
+        try:
+            tally = run(
+                client,
+                jwt,
+                job_type=args.job_type,
+                interval=args.interval,
+                max_submissions=args.count,
+                until_lag=args.until_lag,
+                lag_reader=reader,
+                pacer=WindowPacer(
+                    limit=args.max_per_window,
+                    window=args.window_seconds,
+                    floor=args.interval,
+                ),
+            )
+        finally:
+            if reader is not None:
+                reader.close()
 
     print(f"traffic loop finished: {tally.describe()}")
     for failure in tally.errors[:5]:

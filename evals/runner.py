@@ -173,6 +173,15 @@ class ExecutionMode(StrEnum):
 #: Named once, because the archive field, the printed line and the grader must match on it.
 EXTERNAL_CHAOS_SEEDER: Final[str] = "demo_live"
 
+#: Who wrote the alert a run was paged with (owner decision O-36, platform ADR 0039).
+#: ``"scenario"`` is the default and is true of every row ever archived: the YAML's
+#: ``alert:`` block. ``"platform"`` says the run started from an alert row the platform
+#: raised on its own metric, matched by fingerprint and subject. Two named values rather
+#: than a boolean, because the question a reader asks of an old report is "where did this
+#: brief come from", and ``alert_from_platform: false`` answers it only by implication.
+SCENARIO_ALERT_SOURCE: Final[str] = "scenario"
+PLATFORM_ALERT_SOURCE: Final[str] = "platform"
+
 
 class RunProvenance(BaseModel):
     """Exactly what produced one run: code, world, models, role, budgets.
@@ -206,6 +215,15 @@ class RunProvenance(BaseModel):
     # Who manufactured the fault when it was NOT this runner (ADR 0075). ``"demo_live"`` says
     # the world's one ``chaos.tool_invoked`` row sits before this run rather than inside it.
     chaos_seeded_by: str | None = None
+    # Who wrote the brief this run was paged with (O-36). ``"scenario"`` is the YAML's
+    # ``alert:`` block — the default, and true of every row archived before this field
+    # existed; ``"platform"`` is an alert row the platform raised on its own metric and this
+    # runner took verbatim. Not nullable, unlike ``chaos_seeded_by``: every run has an alert
+    # from somewhere, so there is no "unknown" to represent.
+    alert_source: str = SCENARIO_ALERT_SOURCE
+    # Which alert row, when it was the platform's. Carried so a report can be joined to the
+    # ``alert.raised`` audit row that started it — the one thing a fingerprint cannot name.
+    alert_id: str | None = None
     # The run's OWN ledger: ``max_*`` are the budgets actually seeded (ADR 0019's per-scenario
     # cap, the protocol's .env-only ceilings), ``*_used`` are ADR 0015's four meters.
     budget: BudgetLedger
@@ -328,6 +346,7 @@ def build_provenance(
     strategy: InvestigationStrategy | None = None,
     rehearsal: bool = False,
     chaos_seeded_by: str | None = None,
+    platform_alert: PlatformAlert | None = None,
 ) -> RunProvenance:
     """Assemble one run's provenance record from the run's own inputs.
 
@@ -359,6 +378,11 @@ def build_provenance(
         rehearsal=rehearsal or execution_mode is ExecutionMode.REHEARSAL,
         # Taken on trust, unlike ``rehearsal``: nothing here can see whether a hook fired.
         chaos_seeded_by=chaos_seeded_by,
+        # Derived from the alert OBJECT rather than from a flag, so a run that asked for the
+        # platform's page and did not get one cannot claim it did: there is one alert here,
+        # and either it came from a row or it came from the file.
+        alert_source=SCENARIO_ALERT_SOURCE if platform_alert is None else PLATFORM_ALERT_SOURCE,
+        alert_id=None if platform_alert is None else platform_alert.id,
         budget=budget,
     )
 
@@ -766,6 +790,11 @@ class ScenarioCrash(Exception):
         # The ledger the spend was charged to, NOT ``final.budget``: the briefing writer bills
         # after the last checkpoint (WO-R3-260), which would read as a disagreement.
         self.ledger: BudgetLedger | None = None
+        # The alert row the PLATFORM paged this run with, when it did (O-36). Carried on the
+        # crash rather than re-derived from the caller's flag, and that is the point: a run
+        # that died during its seeding never took an alert, so its crash row says
+        # ``alert_source: scenario`` truthfully instead of claiming a page it never received.
+        self.platform_alert: PlatformAlert | None = None
 
     @property
     def final(self) -> RunState | None:
@@ -920,6 +949,230 @@ class ChaosSetupFailed(RuntimeError):
     died", this is "there was no world to run the agent in". Hence ``run_all`` records
     it as UNGRADED (plan 01 § 4: setup failure → world invalid, do not grade the agent).
     """
+
+
+# ---------------------------------------------------------------------------
+# The alert the PLATFORM raised (owner decision O-36, platform ADR 0039)
+# ---------------------------------------------------------------------------
+
+#: What the poll below says about itself in the platform's audit log. Labelled for
+#: ``evals/world_audit.py``'s reason: the read goes out on the SMOKE account, which is a
+#: service account like the agent's, so an unlabelled one lands as ``agent.tool_invoked``
+#: inside the take and the demo page counts it as a call the agent made and never reported
+#: (finding F4). It is the EVALUATOR asking whether the platform has paged yet.
+PLATFORM_ALERT_PROBE_REASON: Final[str] = "demo: has the platform raised this scenario's alert yet"
+
+#: The bound on the wait, deliberately expressed in seconds rather than in ticks. The rules
+#: are evaluated once per metrics pass, and the pass interval is a deployment setting since
+#: platform v0.6.18 — 5 s on the demo stack, 60 s by default — so a wait counted in ticks
+#: would be 30 seconds here and half an hour on a stack somebody misconfigured. 120 s is two
+#: passes at the DEFAULT interval: enough that a correct world is never declared quiet, short
+#: enough that a rule which is switched off is found out while somebody is still watching.
+_PLATFORM_ALERT_TIMEOUT_SECONDS: Final[float] = 120.0
+_PLATFORM_ALERT_POLL_SECONDS: Final[float] = 3.0
+
+
+@dataclass(frozen=True)
+class PlatformAlert:
+    """One alert the platform raised for itself, and the brief a run starts from.
+
+    ``payload`` is the alert row's own ``extra_data`` VERBATIM — not merged with the
+    scenario's YAML block, not augmented with the row's id, not re-keyed. The whole point
+    of O-36 is that the agent is paged by the platform rather than by the file that grades
+    it, and a payload this harness had a hand in assembling would be the old arrangement
+    with an extra step. The id and the time travel BESIDE it, for the record and for the
+    line the runner prints, and reach no prompt.
+    """
+
+    id: str
+    fired_at: str
+    payload: dict[str, Any]
+
+    @property
+    def said(self) -> str:
+        """The alert in the words the runner and the demo machine print."""
+        fingerprint = self.payload.get("fingerprint")
+        return f"{fingerprint} (alert {self.id}, raised {self.fired_at})"
+
+
+def _alert_fingerprint(alert: Mapping[str, Any]) -> str | None:
+    """The fingerprint of an alert, whether it is a scenario's block or a platform row.
+
+    The corpus writes it at the top level and a platform row nests it under
+    ``extra_data`` — the same two places ``investigation.alert_subject`` looks, and for the
+    same reason: reading only one of them leaves the match inert on exactly one of the two
+    shapes it has to compare.
+    """
+    for source in (alert, alert.get("extra_data")):
+        if not isinstance(source, Mapping):
+            continue
+        raw = source.get("fingerprint")
+        if isinstance(raw, str) and raw.strip():
+            return raw.strip()
+    return None
+
+
+def _matches_scenario_alert(candidate: Mapping[str, Any], declared: Mapping[str, Any]) -> bool:
+    """Whether one platform alert is the page this scenario is about.
+
+    FINGERPRINT plus SUBJECT, and **never** ``source``. The platform's rows read
+    ``kafka:consumer_lag`` and ``dlq:threshold`` where the corpus writes ``platform.kafka``
+    and ``platform.dlq``, so a match on source would find nothing and a run would wait out
+    its whole bound against an alert sitting in front of it (platform ADR 0039's own
+    divergence note, WO-R3-339's addendum).
+
+    The subject is read with ``investigation.alert_subject`` rather than by comparing a
+    hand-listed set of keys: that function is this repo's one declaration of what an alert
+    is ABOUT, the agent's own subject guard (ADR 0031/0032) routes off it, and a second
+    notion of "subject" here would be a second thing to keep true. A scenario whose alert
+    names no mappable subject (a whole-queue depth page) matches on the fingerprint alone,
+    which is the honest reading: there is nothing narrower to ask.
+
+    What is compared is the RESOURCE the subject names — the read that observes it, the
+    argument the value belongs in, and the value — and deliberately NOT which payload FIELD
+    spelled it. The platform's lag alert carries ``consumer_group`` *and* ``group`` holding the
+    same value, because the receiver reads whichever it finds, while the corpus writes one or
+    the other; both route to ``get_consumer_lag(consumer_group=…)``, so on a field comparison
+    the right alert sitting in front of the runner would never match and the wait would run
+    out. Comparing the resource also keeps the DLQ pair distinct, which is the thing a looser
+    comparison would break: ``remediation_hint: replay_safe`` and ``dlq_scope: unclassified``
+    both route to ``list_dlq_messages(remediation_hint=…)`` and are different incidents, and
+    they differ in the value and the match mode, which are both in the comparison.
+    """
+    from incident_commander.agent.investigation import alert_subject
+
+    if _alert_fingerprint(candidate) != _alert_fingerprint(declared):
+        return False
+    wanted = alert_subject(declared)
+    if wanted is None:
+        return True
+    found = alert_subject(candidate)
+    if found is None:
+        return False
+    return (found.tool_name, found.argument_field, found.value, found.match) == (
+        wanted.tool_name,
+        wanted.argument_field,
+        wanted.value,
+        wanted.match,
+    )
+
+
+def _platform_alerts(client: MCPClientProtocol) -> list[dict[str, Any]]:
+    """Every unresolved alert the caller's tenant can see, or an empty list.
+
+    A failed read is "no alert yet" rather than a raise: this is a polling loop, and a
+    single transport blip must not end a demo that is about to work. The bound is what
+    turns "not yet" into a failure, once.
+    """
+    try:
+        result = client.call_tool("list_active_alerts", {"limit": 50})
+    except MCPError:
+        return []
+    payload = _first_json_object(result) or {}
+    alerts = payload.get("alerts")
+    if not isinstance(alerts, list):
+        return []
+    return [dict(item) for item in alerts if isinstance(item, Mapping)]
+
+
+def _await_platform_alert(
+    scenario: Scenario,
+    settings: Settings,
+    *,
+    sleep: Callable[[float], None] = time.sleep,
+    monotonic: Callable[[], float] = time.monotonic,
+) -> PlatformAlert:
+    """Wait until the PLATFORM has raised this scenario's alert, then hand it over.
+
+    Read under the SMOKE principal and labelled as the lab's own, for the two reasons the
+    demo machine reads the world that way (ADR 0074, platform ADR 0038): the question is
+    the evaluator's, and the token that asks it cannot change the answer. Never the agent's
+    token — an agent that polled for its own page would put reads in the take that the
+    console then has to explain.
+
+    Raises ``ChaosSetupFailed`` on the bound, so the run is UNGRADED rather than crashed or
+    scored: an alert the platform never raised is a world that does not hold the premise,
+    which is the same class of event as a hook that did not fire, and grading the agent for
+    it would describe it with a pre-run failure.
+    """
+    from incident_commander.config import SmokeTokenNotConfigured
+
+    declared = scenario.alert.model_dump()
+    fingerprint = _alert_fingerprint(declared)
+    if fingerprint is None:
+        # Refused rather than matched loosely: with no fingerprint the first alert in the
+        # tenant would become this run's page, and the tenant is never empty (three seeded
+        # fixtures). A scenario that wants the platform's alert has to name which one.
+        raise ChaosSetupFailed(
+            f"scenario {scenario.name!r} declares no alert `fingerprint`, and "
+            f"{ALERT_FROM_PLATFORM_FLAG} matches the platform's alert stream on fingerprint "
+            "plus subject. Nothing ran: there is no way to tell this scenario's page from "
+            "the three the world is seeded with."
+        )
+    try:
+        credential = settings.require_smoke_token()
+    except SmokeTokenNotConfigured as err:
+        raise ChaosSetupFailed(
+            f"{ALERT_FROM_PLATFORM_FLAG} reads the platform's alert stream under the "
+            f"read-only principal and will not fall back to the agent's own token: {err}"
+        ) from err
+    client = make_client(settings, token=credential)
+    labelled = LabProbeClient(
+        cast("LabProbeCapableClient", client),
+        reason=PLATFORM_ALERT_PROBE_REASON,
+        principal_token=credential,
+    )
+    subject = alert_subject_note(declared)
+    try:
+        deadline = monotonic() + _PLATFORM_ALERT_TIMEOUT_SECONDS
+        seen = 0
+        while True:
+            candidates = _platform_alerts(labelled)
+            seen = len(candidates)
+            for candidate in candidates:
+                if not _matches_scenario_alert(candidate, declared):
+                    continue
+                extra = candidate.get("extra_data")
+                if not isinstance(extra, Mapping) or not extra:
+                    # The row matched on what the SUMMARY carries but has no payload, so
+                    # there is no brief to start a run from. Loud, because the alternative
+                    # is a run whose alert is three fields wide.
+                    raise ChaosSetupFailed(
+                        f"the platform's {fingerprint!r} alert carries no payload "
+                        "(`extra_data` absent or empty), so there is nothing for the run "
+                        "to be paged with. Nothing ran."
+                    )
+                return PlatformAlert(
+                    id=str(candidate.get("id", "")),
+                    fired_at=str(candidate.get("fired_at", "")),
+                    payload=dict(extra),
+                )
+            if monotonic() >= deadline:
+                break
+            print(
+                f"  waiting for the platform to raise {fingerprint!r}{subject} — "
+                f"{seen} active alert(s), none of them this one"
+            )
+            sleep(_PLATFORM_ALERT_POLL_SECONDS)
+    finally:
+        client.close()
+    raise ChaosSetupFailed(
+        f"the platform did not raise a {fingerprint!r} alert{subject} within "
+        f"{_PLATFORM_ALERT_TIMEOUT_SECONDS:.0f}s ({seen} active alert(s) at the last look). "
+        f"{ALERT_FROM_PLATFORM_FLAG} takes the run's page from the platform's own rule "
+        "instead of the scenario file, so with no alert there is no run — check that the "
+        "fault is really in the world, that `alert_rules_enabled` is on, and that the "
+        "breach is past the rule's threshold. Nothing ran and nothing was graded; this says "
+        "nothing about the agent."
+    )
+
+
+def alert_subject_note(alert: Mapping[str, Any]) -> str:
+    """`` on <field>=<value>`` for the waits' output, or ``""`` when the alert names none."""
+    from incident_commander.agent.investigation import alert_subject
+
+    subject = alert_subject(alert)
+    return "" if subject is None else f" on {subject.alert_field}={subject.value!r}"
 
 
 class ChaosHookRecord(BaseModel):
@@ -1403,12 +1656,17 @@ def run_scenario(
     recorded_world: Path | None = None,
     rehearsal: bool = False,
     world_already_faulted: bool = False,
+    alert_from_platform: bool = False,
 ) -> ScenarioResult:
     """Drive one scenario end-to-end and grade the result.
 
-    Three narrow modes: ``recorded_world`` replays a recorded world (no seeding, stops at the
+    Four narrow modes: ``recorded_world`` replays a recorded world (no seeding, stops at the
     PLANNING handoff), ``rehearsal`` keeps the platform live and scripts the model (ADR 0069),
-    ``world_already_faulted`` skips seeding the hooks fired elsewhere (ADR 0075).
+    ``world_already_faulted`` skips seeding the hooks fired elsewhere (ADR 0075), and
+    ``alert_from_platform`` takes the run's brief from the platform's own alert stream rather
+    than the scenario's ``alert:`` block (O-36, ADR 0076) — live-only, because a canned world
+    has no alert stream, and it moves no grade: the graders key on the terminal state, the
+    audit log and the readings, never on the brief.
     """
     tick = clock or (lambda: datetime.now(UTC))
     now = tick()
@@ -1437,6 +1695,16 @@ def run_scenario(
     if refusal is not None:
         raise ValueError(refusal)
 
+    # Refused HERE and not only at the CLI, like the pair above: the platform's alert stream
+    # is a live read, so a recording has nothing to poll, and a flag that quietly did nothing
+    # would let a row claim ``alert_source: platform`` over a brief the YAML wrote.
+    if alert_from_platform and recorded:
+        raise ValueError(
+            f"{ALERT_FROM_PLATFORM_FLAG} cannot be combined with "
+            f"{ExecutionMode.RECORDED.value} mode: a recording replays a world from a file "
+            "and reaches no platform, so there is no alert stream to be paged by."
+        )
+
     # WP-14.1 backstop to ``recordings_for``'s CLI refusal: a replayed temporal scenario
     # would claim a timeline the replay does not have.
     if recorded and (temporal := scenario.recorded_refusal) is not None:
@@ -1457,6 +1725,20 @@ def run_scenario(
         and scenario.use_live_llm
         and not _is_offline_api_key(settings.anthropic_api_key.get_secret_value())
     )
+
+    # The other half of that guard, and the one that catches the QUIET case: an offline
+    # ``PLATFORM_MCP_URL`` or a scenario with no live leg degrades to canned fixtures, where
+    # the flag would simply not happen while the row claimed the platform had paged. Raised
+    # before the tracer, the hooks and the first model call.
+    if alert_from_platform and not live_mcp_available:
+        raise ValueError(
+            f"{ALERT_FROM_PLATFORM_FLAG} needs a live platform to be paged BY, and scenario "
+            f"{scenario.name!r} would run against canned fixtures here "
+            f"(use_live_mcp={scenario.use_live_mcp}, PLATFORM_MCP_URL offline="
+            f"{_is_offline_placeholder(str(settings.platform_mcp_url))}). A canned world has "
+            "no alert stream, so the flag would change nothing while the row claimed the "
+            "platform had paged."
+        )
 
     # Opt-in tracing: EVAL_TRACE_DIR captures every LLM + MCP call to JSONL. The hooks wire
     # into the live clients only; the per-step ``StepRecord``s (WP-2.1) are written on both.
@@ -1492,6 +1774,11 @@ def run_scenario(
     chaos_plan = scenario.chaos
     chaos_records: tuple[ChaosHookRecord, ...] = ()
     teardown_error: str | None = None
+    # The alert row the platform raised, when the caller asked to be paged by the platform
+    # (O-36). Resolved inside the live branch below, after the premise is proved; ``None``
+    # everywhere else, and it is the OBJECT rather than the flag that decides both the brief
+    # the run starts from and what the provenance record says about it.
+    platform_alert: PlatformAlert | None = None
 
     def _tear_down() -> str | None:
         """Compensate the plan, latch the world dirty if that failed.
@@ -1603,6 +1890,14 @@ def run_scenario(
                     live_mcp_client.close()
                     live_mcp_client = None
                     raise
+            if alert_from_platform:
+                # AFTER the premise, deliberately, and the order is the claim. The
+                # precondition says the fault is in the world; this says the platform has
+                # NOTICED it. An alert without the fault is a stale page and an alert before
+                # the premise is a race, so the fault is established first and the page is
+                # then waited for — which is also the order the demo narrates it in.
+                platform_alert = _await_platform_alert(scenario, settings)
+                print(f"  paged by the PLATFORM: {platform_alert.said}")
         except BaseException:
             # The world was touched, so it goes back even though nothing is graded. The return
             # value is dropped: no row carries it, and the latch is already written.
@@ -1789,7 +2084,11 @@ def run_scenario(
         # The scenario's declared cap IS the run's ceiling (ADR 0019), not just the number it
         # is graded against: the tight-budget scenarios used to be told the fleet default.
         run = start_run(
-            agent_visible.alert,
+            # The scenario's own block, unless the PLATFORM paged this run — and then the
+            # alert row's payload verbatim (O-36). Resolved to one object above rather than
+            # branched on here, so there is exactly one alert in this function and the
+            # provenance record cannot disagree with the brief the agent read.
+            agent_visible.alert if platform_alert is None else platform_alert.payload,
             settings,
             now,
             max_tool_calls=agent_visible.max_tool_calls,
@@ -1902,6 +2201,9 @@ def run_scenario(
         crash.accounting = accounting
         # The ledger it was charged to; ``None`` falls back to the last checkpoint.
         crash.ledger = run_ledger
+        # And which alert it was paged with, when the platform's own rule raised one: the
+        # crash row names it or says nothing, never the flag's intention.
+        crash.platform_alert = platform_alert
         raise crash from exc
     finally:
         if live_mcp_client is not None:
@@ -1961,6 +2263,9 @@ def run_scenario(
             # Who fired the fault, when it was not this runner (ADR 0075): a grader counting
             # chaos rows needs this to read one row as "before the run", not "a hook missing".
             chaos_seeded_by=EXTERNAL_CHAOS_SEEDER if world_already_faulted else None,
+            # Where the brief came from (O-36). The OBJECT, so ``alert_source: platform``
+            # can only be written by a run that really was handed an alert row.
+            platform_alert=platform_alert,
         ),
         # Reconciled against the SAME ledger the provenance carries (WP-2.3): the charged
         # split includes ``briefing_writer``, so a pre-briefing ledger reads as unreconciled.
@@ -2171,6 +2476,13 @@ def _crashed_result(
                 # A crash cannot undo the fact that this process was handed a world it
                 # did not break.
                 chaos_seeded_by=EXTERNAL_CHAOS_SEEDER if world_already_faulted else None,
+                # NOT the caller's instruction, unlike the line above, and the asymmetry is
+                # deliberate: "a world somebody else broke" is true from the first line of
+                # the run, while "the platform paged this run" is only true once an alert row
+                # came back. So it is read off the crash, which carries the row when one
+                # arrived and nothing when the run died before it — a crash in the seeding
+                # says ``scenario``, which is what actually happened.
+                platform_alert=(exc.platform_alert if isinstance(exc, ScenarioCrash) else None),
             )
         ),
         accounting=accounting,
@@ -2205,13 +2517,15 @@ def run_all(
     recorded_worlds: Mapping[str, Path] | None = None,
     rehearsal: bool = False,
     world_already_faulted: bool = False,
+    alert_from_platform: bool = False,
 ) -> tuple[RunReport, tuple[Trajectory, ...], tuple[EscalationBriefing, ...]]:
     """Run every scenario and assemble the report.
 
-    ``rehearsal`` (ADR 0069) and ``world_already_faulted`` (ADR 0075) apply to the WHOLE
-    invocation, because both describe the process; ``recorded_worlds`` is per scenario and
-    maps a name to the recording to replay it against (WP-3.3), with ``main`` refusing a
-    recorded selection that has no recording before anything runs.
+    ``rehearsal`` (ADR 0069), ``world_already_faulted`` (ADR 0075) and
+    ``alert_from_platform`` (O-36) apply to the WHOLE invocation, because each describes the
+    process rather than one scenario's world; ``recorded_worlds`` is per scenario and maps a
+    name to the recording to replay it against (WP-3.3), with ``main`` refusing a recorded
+    selection that has no recording before anything runs.
     """
     # ``on_result`` fires once per scenario on both paths, before the next one starts, so
     # ``main``'s ``archive_scenario`` makes scenario N durable while N+1 runs. Called OUTSIDE
@@ -2244,6 +2558,7 @@ def run_all(
                 recorded_world=recorded_world,
                 rehearsal=rehearsal,
                 world_already_faulted=world_already_faulted,
+                alert_from_platform=alert_from_platform,
             )
         except ChaosSetupFailed as exc:
             # NOT a graded row (plan 01 § 4): the world was never built, so a
@@ -2740,6 +3055,11 @@ REHEARSAL_MODE: Final[str] = "rehearsal"
 #: The flag that says the fault is already in the world (ADR 0075). Named once, because
 #: ``scripts/demo_live.py`` passes it and ``tests/unit/test_demo_live.py`` asserts it does.
 WORLD_ALREADY_FAULTED_FLAG: Final[str] = "--world-already-faulted"
+#: The flag that takes the run's brief from the platform's own alert stream instead of the
+#: scenario's ``alert:`` block (owner decision O-36, platform ADR 0039). Named for
+#: ``WORLD_ALREADY_FAULTED_FLAG``'s reason: ``scripts/demo_live.py`` passes it and
+#: ``tests/unit/test_demo_live.py`` asserts that it does.
+ALERT_FROM_PLATFORM_FLAG: Final[str] = "--alert-from-platform"
 _MODES: Final[tuple[str, ...]] = (RECORDED_MODE, REHEARSAL_MODE)
 
 
@@ -2941,6 +3261,18 @@ def main() -> int:
         )
         print("no scenarios ran, nothing was spent")
         return 2
+    # O-36: the brief comes from the platform's own alert stream rather than from the
+    # scenario file. Parsed beside the other flags that describe the WORLD this invocation
+    # was handed, and refused against the one mode that has no platform to be paged by.
+    alert_from_platform = ALERT_FROM_PLATFORM_FLAG in sys.argv[1:]
+    if alert_from_platform and recorded:
+        print(
+            f"MODE FAIL: {ALERT_FROM_PLATFORM_FLAG} cannot be combined with --mode "
+            f"{RECORDED_MODE}. A recorded run replays a world from a file and reaches no "
+            "platform, so there is no alert stream to take the run's page from."
+        )
+        print("no scenarios ran, nothing was spent")
+        return 2
     world = _parse_world(sys.argv[1:])
     if world is not None and not recorded:
         print(
@@ -3022,6 +3354,19 @@ def main() -> int:
             "offline placeholder. A rehearsal's platform leg is the whole point of it: "
             "with no platform this is a canned run labelled as a rehearsal of one. "
             "Point PLATFORM_MCP_URL at the running stack (`make demo`)."
+        )
+        print("no scenarios ran, nothing was spent")
+        return 3
+    if alert_from_platform and _is_offline_placeholder(str(settings.platform_mcp_url)):
+        # The same refusal shape as the rehearsal check above, for the same reason: the
+        # platform's alert stream is the whole point of the flag, so an offline URL makes
+        # this a canned run whose row would claim a page nobody raised. Refused before any
+        # scenario is selected rather than per scenario, because one answer covers them all.
+        print(
+            f"PREFLIGHT FAIL (env): {ALERT_FROM_PLATFORM_FLAG} but PLATFORM_MCP_URL is the "
+            "offline placeholder. The flag takes the run's alert from the platform's own "
+            "rule, and there is no platform here to raise one. Point PLATFORM_MCP_URL at "
+            "the running stack (`make demo`)."
         )
         print("no scenarios ran, nothing was spent")
         return 3
@@ -3238,6 +3583,18 @@ def main() -> int:
             "degraded=True with a rehearsal provenance flag: this report measures the DEMO, "
             "never the agent, and no phase-close or research report will count it."
         )
+    if alert_from_platform:
+        # Its own banner, beside the mode's, and saying the same kind of thing: what is real
+        # and what a reader may therefore conclude. The point of O-36 is that this sentence
+        # is now true of the run, and a run that does not print it is one whose alert was
+        # written by the file that graded it.
+        print(
+            "alert: from the PLATFORM's own alert stream (O-36) — this run waits for an alert "
+            "row carrying the scenario's fingerprint and subject, and starts from that row's "
+            "payload verbatim. The scenario's own `alert:` block is not read, and the grade "
+            "is unchanged: the graders key on the terminal state, the audit log and the "
+            "readings, never on the brief."
+        )
     offline_mcp = _is_offline_placeholder(str(settings.platform_mcp_url))
     offline_llm = _is_offline_api_key(settings.anthropic_api_key.get_secret_value())
     degraded_to_canned = sum(
@@ -3428,6 +3785,7 @@ def main() -> int:
             recorded_worlds=recorded_worlds,
             rehearsal=rehearsal,
             world_already_faulted=world_already_faulted,
+            alert_from_platform=alert_from_platform,
         )
     finally:
         if scan_client is not None:

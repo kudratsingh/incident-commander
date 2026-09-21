@@ -167,9 +167,13 @@ _PER_SCENARIO: Final[frozenset[str]] = frozenset({"scenario", "budget", "recorde
 #: Provenance fields whose ABSENCE is itself the answer, so ``None`` is not a placeholder.
 #: ``chaos_seeded_by`` (ADR 0075) names the process that fired the scenario's setup hooks
 #: when it was not the runner; ``None`` means the runner seeded its own world, which is the
-#: case for every row of the offline suite and for every graded run. Still compared across
-#: rows above — one run cannot have seeded half its worlds externally.
-_ABSENCE_IS_AN_ANSWER: Final[frozenset[str]] = frozenset({"chaos_seeded_by"})
+#: case for every row of the offline suite and for every graded run. ``alert_id`` (O-36,
+#: ADR 0076) names the platform alert row a run was paged with; ``None`` means the run was
+#: paged by its scenario file, which ``alert_source`` says in words and which is again the
+#: case for every row of the offline suite — the platform's alert stream is a live read, and
+#: an offline suite has no platform. Still compared across rows above: one run cannot have
+#: seeded half its worlds externally, and it cannot have been paged two different ways.
+_ABSENCE_IS_AN_ANSWER: Final[frozenset[str]] = frozenset({"chaos_seeded_by", "alert_id"})
 
 
 def stamp_of(offline_path: Path) -> dict[str, Any]:

@@ -42,7 +42,20 @@ _CHAOS_PREFIX: Final = "[chaos:"
 # Chaos tools the platform registers and the commander deliberately does not use.
 # Excluding them HERE means no rebless can silently widen the closed set — v0.6.0 took
 # the snapshot from 27 tools to 29 without touching this, which is the mechanism working.
-_DEFERRED_CHAOS_TOOLS: Final = frozenset({"seed_dlq_messages"})
+#
+# EMPTY since WO-R3-339 (ADR 0076), and the mechanism stays because the next deferred hook
+# has to be excludable the same way. Its one member was `seed_dlq_messages`, held out with
+# the rest of ADR 0010's commander half: that packet flips the inter-scenario DLQ baseline
+# to empty, which is a change to every scenario, and nobody wanted the hook before the
+# baseline. The demo needs the hook and not the baseline. It is the ONLY hook whose
+# `remediation_hint` accepts `replay_safe` — `create_bad_data_job`'s enum is
+# `human_required`/`unclassified` by design, and `create_mislabeled_dlq_job` writes a row
+# whose `replay_safe` label CONTRADICTS its text on purpose — so a world where the platform
+# can honestly page for a replayable backlog is reachable through this hook and no other
+# (`evals/scenarios/demo_dlq_replay_safe_backlog.yaml`). Admitting it changes nothing about
+# the baseline: the seeded four rows stay, `make world-audit` still wants a DLQ total of 4,
+# and the hook's rows are DELETEd by the next reset (measured: `seeded_dlq_deleted: 3`).
+_DEFERRED_CHAOS_TOOLS: Final[frozenset[str]] = frozenset()
 
 
 def _chaos_schemas_from_snapshot(payload: object) -> dict[str, dict[str, Any]]:

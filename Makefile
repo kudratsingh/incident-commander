@@ -39,6 +39,8 @@ help:
 	@echo "                   ONLY=<name[,name...]> REQUIRED, full scenario names (e.g. ONLY=remediate_consumer_lag_success)."
 	@echo "                   WORLD_ALREADY_FAULTED=1 skips the seeding because somebody else"
 	@echo "                   fired the hook (the demo runner's step 3); the premise is still checked"
+	@echo "                   ALERT_FROM_PLATFORM=1 takes the run's alert from the platform's own"
+	@echo "                   rule instead of the scenario file (O-36); needs the live stack"
 	@echo "  eval-smoke       read-only smoke pass under the read-scoped smoke token"
 	@echo "  world-audit      FREE (zero-LLM, read-only) audit of the seeded world against"
 	@echo "                   the runbook baseline; exits non-zero on any FAIL."
@@ -246,7 +248,7 @@ eval-live:
 	$(error 'make eval-live' without ONLY= would select the whole suite for a live, paid run; name exactly one scenario: make eval-live ONLY=<scenario_name>)
 else
 eval-live:
-	@EVAL_TRACE_DIR=evals/traces uv run python -m evals.runner --model-role "$(MODEL_ROLE)" --live --only $(ONLY) $(if $(WORLD_ALREADY_FAULTED),--world-already-faulted,); \
+	@EVAL_TRACE_DIR=evals/traces uv run python -m evals.runner --model-role "$(MODEL_ROLE)" --live --only $(ONLY) $(if $(WORLD_ALREADY_FAULTED),--world-already-faulted,) $(if $(ALERT_FROM_PLATFORM),--alert-from-platform,); \
 	code=$$?; \
 	PYTHONPATH=. uv run python scripts/format_traces.py || true; \
 	echo "JSONL traces: evals/traces/*.jsonl"; \
@@ -521,8 +523,17 @@ traffic: export PLATFORM_SMOKE_TOKEN := $(PLATFORM_SMOKE_TOKEN)
 # for remediate_consumer_lag_success: with nothing arriving, a killed
 # consumer builds no backlog and the scenario's precondition correctly
 # refuses to run it. `--until-lag N` stops once the backlog is deep enough.
+#
+# RATE is the seconds between submissions and defaults to the script's own 3.0,
+# which is the sustainable rate: `POST /jobs` is rate-limited per identity in a
+# FIXED window, so a faster rate does not raise the sustained arrival rate — it
+# front-loads the window and then collects 429s until the window rolls. That is
+# exactly what a demo wants and exactly what a soak does not, so it is a
+# parameter rather than a new default: the demo runner passes RATE=0.75 during
+# the fault so the backlog crosses the platform's alert threshold in seconds
+# instead of in a minute (WO-R3-339), and everything else keeps 3.
 traffic:
-	uv run python scripts/traffic_loop.py $(if $(UNTIL_LAG),--until-lag $(UNTIL_LAG)) $(if $(COUNT),--count $(COUNT))
+	uv run python scripts/traffic_loop.py $(if $(RATE),--interval $(RATE)) $(if $(UNTIL_LAG),--until-lag $(UNTIL_LAG)) $(if $(COUNT),--count $(COUNT))
 
 chaos-help:
 	PYTHONPATH=. uv run python scripts/chaos_setup.py --help

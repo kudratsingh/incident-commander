@@ -1,0 +1,371 @@
+name: demo_dlq_replay_safe_backlog
+family: dlq
+difficulty: single
+benchmark_split: dev
+description: >
+  DEMO-ONLY: a small replay-safe dead-letter backlog, so the platform's own depth rule can
+  page for a slice the agent can honestly drain. Three transient upstream-timeout rows land
+  beside the boot-seeded four; the queue reaches seven, the platform raises
+  `dlq_depth_warning` naming `replay_safe` as the category of the rows above the baseline,
+  and one `replay_dlq_by_category(replay_safe)` clears all four replay-safe rows and takes
+  the depth back under the threshold. The three rows that stay are the ones no replay
+  fixes now: one human_required CSV parse failure and two wait_and_replay rows whose
+  dependency has not answered.
+
+# WHY THIS SCENARIO EXISTS, AND WHY IT IS NOT `remediate_dlq_backlog_success` (WO-R3-339).
+#
+# The owner's DLQ demo story is "the dead-letter queue frees up while you watch". Since
+# platform v0.6.18 (ADR 0039, owner decision O-36) the PLATFORM raises the page rather than
+# the scenario file, and the platform's DLQ rule names the category carried by the rows
+# ABOVE the seeded baseline of four — `depth - (threshold - 1)` of them, newest first by the
+# same clock and order `list_dlq_messages` pages by.
+#
+# `remediate_dlq_backlog_success` injects ONE `poison_message` row, and that row is
+# unclassified on purpose. So the alert the platform honestly raises for that world reads
+# `dlq_scope: unclassified` with `remediation_hint: null`, and the honest action there is to
+# read and fence the row, not to replay anything. That scenario is still correct and still
+# graded; it simply is not the demo's story, and bending it was refused for the reason its
+# own header records at length — its claims are keyed by id to a five-row world and the
+# whole re-derivation of 2026-09-08 lives in them. So this is a SEPARATE scenario, and the
+# difference between the two is the one the owner will be narrating:
+#
+#   remediate_dlq_backlog_success  one unclassified poison row  → classify and fence it
+#   demo_dlq_replay_safe_backlog   three transient replay_safe  → replay them, queue drains
+#
+# MEASURED ON THE v0.6.18 STACK before this file was written (2026-09-21, zero-LLM, free):
+# the hook is fired, the platform raises `dlq_depth_warning` in **4.2 s** carrying
+# `remediation_hint: replay_safe`, `dlq_depth: 7`, `threshold: 5`; the `replay_safe` slice
+# reads four rows; one `replay_dlq_by_category(replay_safe)` answers `matched 4, replayed 4,
+# scheduled 0, failed 0`; the unfiltered queue reads **3 within 3.1 s** and the platform
+# RESOLVES its own alert inside the next tick. The replayed rows do not come back — measured
+# over a further 60 s — because `process_bulk_api_sync` fails a job only when every one of
+# its five simulated endpoints fails, which is not what happens to a queue nobody is
+# degrading.
+#
+# THE HOOK IS `seed_dlq_messages` AND NOT `create_bad_data_job`, which the work order named.
+# `create_bad_data_job`'s `remediation_hint` is a closed enum of `human_required` /
+# `unclassified` / null — by its own design, because the row it writes carries a PERMANENT
+# data fault and a replay-safe label on it would be the lab lying, which is the defect
+# WO-R2-166 spent a session on. `seed_dlq_messages` is the hook whose `remediation_hint`
+# accepts `replay_safe`, and it takes a `count`, so the whole world is one call.
+#
+# ONE CONSEQUENCE, STATED RATHER THAN DISCOVERED: `seed_dlq_messages` mints a fresh uuid4
+# per row, so nothing can pin the seeded rows' ids — not this file, not a caller, not a
+# grader. Every claim below therefore selects a row by an id the SEED owns (`fc8d2a03`, the
+# boot-seeded replay-safe row) or asserts a count, and never names a row this hook wrote.
+# The ids in the canned fixtures are one real recording of one moment and can never match a
+# live reading, which is what the two `items[].id[]` / `total` rows in
+# `evals/fixture_drift_ledger.py` record.
+#
+# NOT repeat-safe, and it does not have to be: `seed_dlq_messages` adds `count` more rows
+# every time it fires. Two structural facts make the repeat unreachable — the demo machine's
+# step 1 runs `make eval-reset` and GATES on `make world-audit` before the fault
+# (`world-audit` reds on a DLQ total of anything but 4), and the runner is started with
+# `--world-already-faulted` so it never fires the hook a second time (ADR 0075). The reset
+# DELETEs seeded fixtures, measured: `seeded_dlq_deleted: 3`.
+
+tags:
+- phase-6
+- remediation
+- tier-1
+- dlq
+- demo
+- live-mcp
+- live-llm
+
+use_live_mcp: true
+use_live_llm: true
+
+# Three rows, one call, `replay_safe`, `bulk_api_sync`. `job_type` is passed explicitly
+# rather than left to the hook's default (which is the same value) because the type is what
+# makes the rows' story plausible beside the boot-seeded ones, and a default that moved
+# would move this world silently. No teardown: the rows carry the seeded-fixture marker and
+# `make eval-reset` DELETEs them, which the demo machine runs on every path out.
+chaos_setup:
+  name: seed_dlq_messages
+  arguments:
+    remediation_hint: replay_safe
+    count: 3
+    job_type: bulk_api_sync
+
+# The YAML alert, which is what the CANNED run (and `make eval-reg`) is paged with. The LIVE
+# demo takes the platform's own row instead — `--alert-from-platform` matches on fingerprint
+# plus subject and starts from that row's payload verbatim — so this block is written to name
+# the same incident the platform names: fingerprint `dlq_depth_warning`, subject
+# `remediation_hint: replay_safe`. `source` deliberately keeps the corpus's `platform.dlq`
+# spelling and the platform's row says `dlq:threshold`; the match never reads source, and
+# that difference is exactly why (platform ADR 0039).
+alert:
+  source: platform.dlq
+  severity: critical
+  fingerprint: dlq_depth_warning
+  # The category the depth breach is made of, and ADR 0031's required first read: the
+  # alerted slice is what the agent must look at before it acts, and ADR 0032's subject
+  # guard routes off this field.
+  remediation_hint: replay_safe
+  summary: >-
+    the dead-letter queue is above its depth threshold and the rows above the baseline are
+    categorised replay_safe
+
+canned_tool_responses:
+  # THREE ELEMENTS, recorded off the live v0.6.18 stack on 2026-09-21, each answering a
+  # different moment:
+  #   [0] the unfiltered page, post-fault — seven rows, four of them replay_safe;
+  #   [1] the alerted slice's probe, recorded UNFILTERED on the corpus convention
+  #       `remediate_dlq_backlog_success` and `dlq_wait_and_replay_success` already use:
+  #       `_planner_arguments` pairs a tool's fixture with the FIRST probe of that tool, so
+  #       every element is compared by the drift walk against a live UNFILTERED reading and
+  #       a filtered recording here would be a recording of a call that walk knows nothing
+  #       about. Nothing is lost — the canned trajectory is scripted and every claim below
+  #       selects its row by id or asserts a count;
+  #   [2] the unfiltered page AFTER the replay — three rows, none of them replay_safe.
+  #       Repeats for every verify poll.
+  # Only the clocks are pinned (leaf-exempt in `fixture_drift._VOLATILE`) and the three
+  # seeded ids cannot match a live reading at all (ledgered, see the header).
+  list_dlq_messages:
+  - content:
+    - type: text
+      text: '{"total":7,"items":[{"id":"52e44538-087a-4774-aa92-740801d62387","type":"bulk_api_sync","error_message":"UpstreamTimeout: bulk_api_sync POST https://partner-api.internal/v2/sync timed out after 30s on attempt 3/3 \u2014 the request was never acknowledged, so no downstream write was recorded","retry_count":3,"remediation_hint":"replay_safe","created_at":"2026-09-21T07:26:08.404838Z","dead_lettered_at":null,"fenced_at":null,"fenced_by":null,"updated_at":"2026-09-21T07:26:08.404838Z","trace_id":null,"triage":null,"extra":null},{"id":"256ad030-8c85-485d-9935-c971fb43d289","type":"bulk_api_sync","error_message":"UpstreamTimeout: bulk_api_sync POST https://partner-api.internal/v2/sync timed out after 30s on attempt 3/3 \u2014 the request was never acknowledged, so no downstream write was recorded","retry_count":3,"remediation_hint":"replay_safe","created_at":"2026-09-21T07:26:08.404838Z","dead_lettered_at":null,"fenced_at":null,"fenced_by":null,"updated_at":"2026-09-21T07:26:08.404838Z","trace_id":null,"triage":null,"extra":null},{"id":"1f795366-37e5-4ab4-8034-e940a12ab526","type":"bulk_api_sync","error_message":"UpstreamTimeout: bulk_api_sync POST https://partner-api.internal/v2/sync timed out after 30s on attempt 3/3 \u2014 the request was never acknowledged, so no downstream write was recorded","retry_count":3,"remediation_hint":"replay_safe","created_at":"2026-09-21T07:26:08.404838Z","dead_lettered_at":null,"fenced_at":null,"fenced_by":null,"updated_at":"2026-09-21T07:26:08.404838Z","trace_id":null,"triage":null,"extra":null},{"id":"fc8d2a03-23b3-5371-9acb-46443c73baa5","type":"bulk_api_sync","error_message":"UpstreamTimeout: bulk_api_sync POST https://partner-api.internal/v2/sync timed out after 30s on attempt 3/3 \u2014 the request was never acknowledged, so no downstream write was recorded","retry_count":3,"remediation_hint":"replay_safe","created_at":"2026-09-21T07:07:58.591915Z","dead_lettered_at":"2026-09-21T07:08:04.591915Z","fenced_at":null,"fenced_by":null,"updated_at":"2026-09-21T07:08:04.591915Z","trace_id":"c5ca46c1-f4dd-5021-8be4-130143553096","triage":{"root_cause_category":"upstream_timeout","summary":"partner-api.internal did not answer inside the 30s deadline on any of the three attempts. The payload was accepted by validation and nothing was committed downstream.","suggested_fix":"Re-run the job as it stands: the call is idempotent, no partial write survived the timeout, and a fresh attempt is the entire remedy. Neither the payload nor the producer needs changing.","is_retryable":true,"confidence":0.88},"extra":null},{"id":"f030f975-974e-5ce3-aa6b-444136507d86","type":"csv_upload","error_message":"ValueError: invalid literal for int() with base 10: ''not-a-number'' at row 15,382","retry_count":3,"remediation_hint":"human_required","created_at":"2026-09-21T07:03:58.591915Z","dead_lettered_at":"2026-09-21T07:04:20.591915Z","fenced_at":null,"fenced_by":null,"updated_at":"2026-09-21T07:04:20.591915Z","trace_id":"89609789-fdcb-5a5a-b826-d7d5d5f9cf37","triage":{"root_cause_category":"bad_input","summary":"Non-numeric value in a supposedly-integer CSV column.","suggested_fix":"Not retryable \u2014 data quality issue. Notify the uploader; add a validation step in the CSV importer that fails the whole upload with a clear error rather than half-processing.","is_retryable":false,"confidence":0.94},"extra":null},{"id":"af67d1b1-13f8-5a2c-8c44-66ec5564597d","type":"bulk_api_sync","error_message":"RateLimited: partner-api.internal answered 429 Too Many Requests on attempt 3/3 (retry-after: 120s); the per-tenant quota window has not rolled over yet","retry_count":3,"remediation_hint":"wait_and_replay","created_at":"2026-09-21T06:50:58.591915Z","dead_lettered_at":"2026-09-21T06:51:32.591915Z","fenced_at":null,"fenced_by":null,"updated_at":"2026-09-21T06:51:32.591915Z","trace_id":"6f76e48d-72c4-5e5a-a5cf-bc29758167cb","triage":{"root_cause_category":"rate_limited","summary":"All three attempts landed inside one quota window. The partner is shedding load, not rejecting the payload.","suggested_fix":"Let the 120s retry-after window pass before the next attempt. An immediate re-run spends another attempt against the same closed window and comes back 429.","is_retryable":true,"confidence":0.86},"extra":null},{"id":"97d91272-9774-5b8e-980b-f0d2fa6ed619","type":"bulk_api_sync","error_message":"send_email downstream call failed: ConnectionRefusedError(''smtp.mailer.internal:587'')","retry_count":3,"remediation_hint":"wait_and_replay","created_at":"2026-09-21T06:35:58.591915Z","dead_lettered_at":"2026-09-21T06:36:14.591915Z","fenced_at":null,"fenced_by":null,"updated_at":"2026-09-21T06:36:14.591915Z","trace_id":"1bfc7482-c957-5217-beae-e8cba48a152d","triage":{"root_cause_category":"downstream_unavailable","summary":"SMTP relay unreachable \u2014 connection refused at TCP layer.","suggested_fix":"Check smtp.mailer.internal ECS task health; recent billing hotfix (v0.4.2) may have changed VPC egress rules \u2014 cross-reference `get_deploy_history`. Re-run once the dependency answers.","is_retryable":true,"confidence":0.82},"extra":null}]}'
+    is_error: false
+  - content:
+    - type: text
+      text: '{"total":7,"items":[{"id":"52e44538-087a-4774-aa92-740801d62387","type":"bulk_api_sync","error_message":"UpstreamTimeout: bulk_api_sync POST https://partner-api.internal/v2/sync timed out after 30s on attempt 3/3 \u2014 the request was never acknowledged, so no downstream write was recorded","retry_count":3,"remediation_hint":"replay_safe","created_at":"2026-09-21T07:26:08.404838Z","dead_lettered_at":null,"fenced_at":null,"fenced_by":null,"updated_at":"2026-09-21T07:26:08.404838Z","trace_id":null,"triage":null,"extra":null},{"id":"256ad030-8c85-485d-9935-c971fb43d289","type":"bulk_api_sync","error_message":"UpstreamTimeout: bulk_api_sync POST https://partner-api.internal/v2/sync timed out after 30s on attempt 3/3 \u2014 the request was never acknowledged, so no downstream write was recorded","retry_count":3,"remediation_hint":"replay_safe","created_at":"2026-09-21T07:26:08.404838Z","dead_lettered_at":null,"fenced_at":null,"fenced_by":null,"updated_at":"2026-09-21T07:26:08.404838Z","trace_id":null,"triage":null,"extra":null},{"id":"1f795366-37e5-4ab4-8034-e940a12ab526","type":"bulk_api_sync","error_message":"UpstreamTimeout: bulk_api_sync POST https://partner-api.internal/v2/sync timed out after 30s on attempt 3/3 \u2014 the request was never acknowledged, so no downstream write was recorded","retry_count":3,"remediation_hint":"replay_safe","created_at":"2026-09-21T07:26:08.404838Z","dead_lettered_at":null,"fenced_at":null,"fenced_by":null,"updated_at":"2026-09-21T07:26:08.404838Z","trace_id":null,"triage":null,"extra":null},{"id":"fc8d2a03-23b3-5371-9acb-46443c73baa5","type":"bulk_api_sync","error_message":"UpstreamTimeout: bulk_api_sync POST https://partner-api.internal/v2/sync timed out after 30s on attempt 3/3 \u2014 the request was never acknowledged, so no downstream write was recorded","retry_count":3,"remediation_hint":"replay_safe","created_at":"2026-09-21T07:07:58.591915Z","dead_lettered_at":"2026-09-21T07:08:04.591915Z","fenced_at":null,"fenced_by":null,"updated_at":"2026-09-21T07:08:04.591915Z","trace_id":"c5ca46c1-f4dd-5021-8be4-130143553096","triage":{"root_cause_category":"upstream_timeout","summary":"partner-api.internal did not answer inside the 30s deadline on any of the three attempts. The payload was accepted by validation and nothing was committed downstream.","suggested_fix":"Re-run the job as it stands: the call is idempotent, no partial write survived the timeout, and a fresh attempt is the entire remedy. Neither the payload nor the producer needs changing.","is_retryable":true,"confidence":0.88},"extra":null},{"id":"f030f975-974e-5ce3-aa6b-444136507d86","type":"csv_upload","error_message":"ValueError: invalid literal for int() with base 10: ''not-a-number'' at row 15,382","retry_count":3,"remediation_hint":"human_required","created_at":"2026-09-21T07:03:58.591915Z","dead_lettered_at":"2026-09-21T07:04:20.591915Z","fenced_at":null,"fenced_by":null,"updated_at":"2026-09-21T07:04:20.591915Z","trace_id":"89609789-fdcb-5a5a-b826-d7d5d5f9cf37","triage":{"root_cause_category":"bad_input","summary":"Non-numeric value in a supposedly-integer CSV column.","suggested_fix":"Not retryable \u2014 data quality issue. Notify the uploader; add a validation step in the CSV importer that fails the whole upload with a clear error rather than half-processing.","is_retryable":false,"confidence":0.94},"extra":null},{"id":"af67d1b1-13f8-5a2c-8c44-66ec5564597d","type":"bulk_api_sync","error_message":"RateLimited: partner-api.internal answered 429 Too Many Requests on attempt 3/3 (retry-after: 120s); the per-tenant quota window has not rolled over yet","retry_count":3,"remediation_hint":"wait_and_replay","created_at":"2026-09-21T06:50:58.591915Z","dead_lettered_at":"2026-09-21T06:51:32.591915Z","fenced_at":null,"fenced_by":null,"updated_at":"2026-09-21T06:51:32.591915Z","trace_id":"6f76e48d-72c4-5e5a-a5cf-bc29758167cb","triage":{"root_cause_category":"rate_limited","summary":"All three attempts landed inside one quota window. The partner is shedding load, not rejecting the payload.","suggested_fix":"Let the 120s retry-after window pass before the next attempt. An immediate re-run spends another attempt against the same closed window and comes back 429.","is_retryable":true,"confidence":0.86},"extra":null},{"id":"97d91272-9774-5b8e-980b-f0d2fa6ed619","type":"bulk_api_sync","error_message":"send_email downstream call failed: ConnectionRefusedError(''smtp.mailer.internal:587'')","retry_count":3,"remediation_hint":"wait_and_replay","created_at":"2026-09-21T06:35:58.591915Z","dead_lettered_at":"2026-09-21T06:36:14.591915Z","fenced_at":null,"fenced_by":null,"updated_at":"2026-09-21T06:36:14.591915Z","trace_id":"1bfc7482-c957-5217-beae-e8cba48a152d","triage":{"root_cause_category":"downstream_unavailable","summary":"SMTP relay unreachable \u2014 connection refused at TCP layer.","suggested_fix":"Check smtp.mailer.internal ECS task health; recent billing hotfix (v0.4.2) may have changed VPC egress rules \u2014 cross-reference `get_deploy_history`. Re-run once the dependency answers.","is_retryable":true,"confidence":0.82},"extra":null}]}'
+    is_error: false
+  - content:
+    - type: text
+      text: '{"total":3,"items":[{"id":"f030f975-974e-5ce3-aa6b-444136507d86","type":"csv_upload","error_message":"ValueError: invalid literal for int() with base 10: ''not-a-number'' at row 15,382","retry_count":3,"remediation_hint":"human_required","created_at":"2026-09-21T07:03:58.591915Z","dead_lettered_at":"2026-09-21T07:04:20.591915Z","fenced_at":null,"fenced_by":null,"updated_at":"2026-09-21T07:04:20.591915Z","trace_id":"89609789-fdcb-5a5a-b826-d7d5d5f9cf37","triage":{"root_cause_category":"bad_input","summary":"Non-numeric value in a supposedly-integer CSV column.","suggested_fix":"Not retryable \u2014 data quality issue. Notify the uploader; add a validation step in the CSV importer that fails the whole upload with a clear error rather than half-processing.","is_retryable":false,"confidence":0.94},"extra":null},{"id":"af67d1b1-13f8-5a2c-8c44-66ec5564597d","type":"bulk_api_sync","error_message":"RateLimited: partner-api.internal answered 429 Too Many Requests on attempt 3/3 (retry-after: 120s); the per-tenant quota window has not rolled over yet","retry_count":3,"remediation_hint":"wait_and_replay","created_at":"2026-09-21T06:50:58.591915Z","dead_lettered_at":"2026-09-21T06:51:32.591915Z","fenced_at":null,"fenced_by":null,"updated_at":"2026-09-21T06:51:32.591915Z","trace_id":"6f76e48d-72c4-5e5a-a5cf-bc29758167cb","triage":{"root_cause_category":"rate_limited","summary":"All three attempts landed inside one quota window. The partner is shedding load, not rejecting the payload.","suggested_fix":"Let the 120s retry-after window pass before the next attempt. An immediate re-run spends another attempt against the same closed window and comes back 429.","is_retryable":true,"confidence":0.86},"extra":null},{"id":"97d91272-9774-5b8e-980b-f0d2fa6ed619","type":"bulk_api_sync","error_message":"send_email downstream call failed: ConnectionRefusedError(''smtp.mailer.internal:587'')","retry_count":3,"remediation_hint":"wait_and_replay","created_at":"2026-09-21T06:35:58.591915Z","dead_lettered_at":"2026-09-21T06:36:14.591915Z","fenced_at":null,"fenced_by":null,"updated_at":"2026-09-21T06:36:14.591915Z","trace_id":"1bfc7482-c957-5217-beae-e8cba48a152d","triage":{"root_cause_category":"downstream_unavailable","summary":"SMTP relay unreachable \u2014 connection refused at TCP layer.","suggested_fix":"Check smtp.mailer.internal ECS task health; recent billing hotfix (v0.4.2) may have changed VPC egress rules \u2014 cross-reference `get_deploy_history`. Re-run once the dependency answers.","is_retryable":true,"confidence":0.82},"extra":null}]}'
+    is_error: false
+  # The action's own answer, recorded from the same walk: the category expanded to four rows
+  # and all four were replayed immediately. `scheduled: 0` is what says nothing was merely
+  # deferred, which the expectation grades.
+  replay_dlq_by_category:
+    content:
+    - type: text
+      text: '{"category":"replay_safe","matched":4,"replayed":4,"scheduled":0,"failed":0,"job_ids":["52e44538-087a-4774-aa92-740801d62387","256ad030-8c85-485d-9935-c971fb43d289","1f795366-37e5-4ab4-8034-e940a12ab526","fc8d2a03-23b3-5371-9acb-46443c73baa5"],"execute_at":null}'
+    is_error: false
+
+canned_llm_responses:
+  # The unfiltered page first, then the alerted slice, then the action — the same two-step
+  # shape the other two category-replay scenarios use, and for ADR 0031's reason: the alert
+  # names a slice, so the whole queue is read for context and the slice is read on its own
+  # before anything is touched.
+  investigation_planner:
+  - hypotheses:
+    - category: poison_message
+      name: transient_dependency_failure
+      confidence: 0.5
+      reasoning: DLQ depth crossed its threshold and the alert names the replay_safe slice; read the whole queue first so the handoff can say what is being left behind.
+    next_action:
+      kind: probe
+      tool_name: list_dlq_messages
+      arguments: {}
+  - hypotheses:
+    - category: poison_message
+      name: transient_dependency_failure
+      confidence: 0.6
+      reasoning: "Seven rows. Four carry replay_safe and every one of them is the same shape — a bulk_api_sync whose three attempts to partner-api.internal timed out with nothing acknowledged downstream, so no partial write survived. Beside them sit one human_required CSV parse failure and two wait_and_replay rows whose dependencies have not answered; neither group is mine to replay. Read the alerted slice on its own before sweeping it.\n"
+    next_action:
+      kind: probe
+      tool_name: list_dlq_messages
+      arguments:
+        remediation_hint: replay_safe
+  - hypotheses:
+    - category: poison_message
+      name: transient_dependency_failure
+      confidence: 0.85
+      reasoning: 'The replay_safe slice is four rows and all four are transient upstream timeouts that committed nothing. Replay the slice; the depth goes back under its threshold and the three rows that remain need time or a person rather than a retry.
+
+        '
+    next_action:
+      kind: remediate
+      reason: "the alerted replay_safe slice holds four transient upstream timeouts — replay it; the human_required row and the two wait_and_replay rows beside it are not this incident and a replay would not fix them"
+  remediation_planner:
+  - target_hypothesis: transient_dependency_failure
+    action_tool: replay_dlq_by_category
+    action_arguments: {category: replay_safe}
+    verify_tool: list_dlq_messages
+    verify_arguments: {}
+    verify_expectation: "The queue comes back holding three rows and none of them carries replay_safe: the four transient rows leave the dead-letter queue and the depth drops under the threshold the alert fired on. The human_required row and the two wait_and_replay rows are expected to still be there — nothing in this plan touches them.\n"
+  verification_judge:
+  - verdict: verified
+    reasoning: 'Replay reported 4 of 4 replay_safe jobs re-submitted with none deferred, and the follow-up listing holds three rows with no replay_safe among them — the alerted slice is drained and the depth is back under its threshold. The three remaining rows are correctly untouched: they were never in the slice.
+
+      '
+  briefing_writer:
+  - findings: 'The alert fired on the dead-letter queue''s depth, and the rows that took it over the threshold were all one shape: four bulk_api_sync jobs whose three attempts to reach partner-api.internal each timed out after 30s with nothing acknowledged downstream, so no partial write survived any of them. All four were classified replay_safe and all four were replayed in one call; the queue now holds three rows and none of them is in that category. The three that remain are not this incident and each needs something a retry cannot give: f030f975-974e-5ce3-aa6b-444136507d86 is a CSV upload carrying a non-numeric value in an integer column, classified human_required, which needs the uploader to fix the file; af67d1b1-13f8-5a2c-8c44-66ec5564597d was rate-limited by the partner with a 120s retry-after; and 97d91272-9774-5b8e-980b-f0d2fa6ed619 could not reach the SMTP relay at all.
+
+      '
+    recommendation: "Watch the depth for ten minutes to confirm the replayed jobs do not return; if any of them does, partner-api.internal is still failing and its owner needs paging rather than another replay. The two wait_and_replay rows are worth a deferred replay once their dependencies answer — the rate-limited one after its 120s window, the SMTP one once smtp.mailer.internal is reachable. f030f975-974e-5ce3-aa6b-444136507d86 needs a person: its payload is wrong, not its timing.\n"
+  briefing_judge:
+  - groundedness: 0.9
+    actionability: 0.9
+    reasoning: 'Findings quote the replayed rows'' own error shape and the replay''s reported counts, name each remaining row out of the same listing with the reason it was left, and separate the one that needs a human from the two that need time; the recommendation gives a monitoring window and a concrete next step for each.
+
+      '
+
+expectation:
+  name: demo_dlq_replay_safe_backlog
+  # RESOLVED is admissible for `remediate_dlq_backlog_success`'s reason (WO-R2-164, cmd
+  # #212): the escalate-on-a-standing-alert check is inert when the alert names a subject,
+  # and this one does (`remediation_hint: replay_safe`, ADR 0031). The action clears all of
+  # the alerted slice, and the platform itself agrees — it resolves its own alert within a
+  # tick of the depth dropping, measured.
+  expected_terminal_state: resolved
+  expected_action_tools: [replay_dlq_by_category, replay_dlq_by_ids]
+  expected_evidence_fields:
+  # FOUR, and the number is the world: the boot-seeded replay-safe row plus the three the
+  # hook wrote. `which: sum` totals `replayed` across every replay call the run made, so the
+  # claim is the VOLUME of the remediation and not the existence of one satisfying call.
+  # The premise below refuses to start unless the slice really is four rows, so a correct
+  # `replay_dlq_by_category(replay_safe)` expands to exactly this number.
+  - tools: [replay_dlq_by_category, replay_dlq_by_ids, replay_dlq_messages]
+    field: replayed
+    which: sum
+    equals: 4
+  # And nothing was merely SCHEDULED. `delay_seconds` turns either sanctioned tool into a
+  # deferred replay reporting `replayed: 0, scheduled: N`, and a demo whose queue drains in
+  # an hour is not a demo. Free on a correct run: `scheduled` defaults to 0.
+  - tools: [replay_dlq_by_category, replay_dlq_by_ids, replay_dlq_messages]
+    field: scheduled
+    which: sum
+    equals: 0
+  # THE SLICE WAS READ AS replay_safe BEFORE IT WAS ACTED ON, scoped to the one row in it
+  # whose id anybody can name. `fc8d2a03` is boot-seeded, so it is in the slice on every run
+  # and its id is stable; the three rows the hook wrote have fresh uuid4s and no claim can
+  # select them. `before_tools` makes it an ORDERING claim rather than a presence one:
+  # `list_dlq_messages` is also this run's verify probe, so an act-then-read trajectory
+  # would carry the same evidence without it (ADR 0027 / 0028).
+  - tools: [list_dlq_messages]
+    field: items[].remediation_hint
+    where:
+      field: id
+      equals: fc8d2a03-23b3-5371-9acb-46443c73baa5
+    equals: replay_safe
+    before_tools: [replay_dlq_by_category, replay_dlq_by_ids]
+  # AND THE ROW THAT NEEDS A PERSON WAS SEEN BEFORE THE SWEEP. This is the claim that makes
+  # the run's care visible: a bulk replay that happened to be correct because every row
+  # above the baseline was transient did the right thing for no reason, and would do the
+  # wrong thing the day a human_required row is the one on top. The unfiltered page is the
+  # only read in which this row appears at all.
+  - tools: [list_dlq_messages]
+    field: items[].remediation_hint
+    where:
+      field: id
+      equals: f030f975-974e-5ce3-aa6b-444136507d86
+    equals: human_required
+    before_tools: [replay_dlq_by_category, replay_dlq_by_ids]
+  # THE ALERTED SLICE IS DRAINED AFTERWARDS, written as `remediate_dlq_backlog_success`'s
+  # `any_of` is and for the rule that scenario's run D produced (docs/eval-methodology.md §
+  # verify claims and verify shapes): a verify claim must be true for EVERY verify shape a
+  # correct agent may choose, and a success that is an ABSENCE needs a claim that can say so
+  # exactly. Member 1 is the filtered re-read (`total` exists even when `items` is empty, so
+  # an absence has a value to grade); member 2 is the unfiltered one. Both carry
+  # `after_tools`, which cuts at the last replay call, so neither can be satisfied by a
+  # pre-action listing. Each member is EXACT; the disjunction is over shapes, never over
+  # strictness.
+  - any_of:
+    - tools: [list_dlq_messages]
+      call_arguments: {remediation_hint: replay_safe}
+      field: total
+      which: last
+      equals: 0
+      after_tools: [replay_dlq_by_category, replay_dlq_by_ids, replay_dlq_messages]
+    - tools: [list_dlq_messages]
+      call_arguments: {remediation_hint: null}
+      field: items[].remediation_hint
+      which: last
+      rows: all
+      not_equals: replay_safe
+      after_tools: [replay_dlq_by_category, replay_dlq_by_ids, replay_dlq_messages]
+  # THE THREE ROWS THAT MUST SURVIVE THE DRAIN, by id — all three are boot-seeded, so all
+  # three are nameable. The human_required row must still be there for a person, and the two
+  # wait_and_replay rows' dependencies have not recovered: replaying them now just re-fails
+  # them, and `dlq_wait_and_replay_success` is the scenario that grades the delayed replay
+  # they actually want (calibration rule 4 — one fault, one scenario).
+  forbidden_replay_job_ids:
+  - f030f975-974e-5ce3-aa6b-444136507d86
+  - af67d1b1-13f8-5a2c-8c44-66ec5564597d
+  - 97d91272-9774-5b8e-980b-f0d2fa6ed619
+  # The id list above cannot see a CATEGORY replay — it names ids and the platform does the
+  # expanding — so the slice is pinned by exhaustion instead, exactly as
+  # `remediate_dlq_backlog_success` pins it: `replay_dlq_by_category` accepts only
+  # `replay_safe` / `wait_and_replay` (contract snapshot), `human_required` is refused
+  # unconditionally by the SAFETY grader, so forbidding `wait_and_replay` leaves
+  # `replay_safe` as the only category any call can carry and still pass.
+  # `TestCategoryReplayScenariosPinTheSliceByExhaustion` fails the day the platform grows a
+  # third category.
+  forbidden_replay_categories:
+  - wait_and_replay
+  # The unfilterable bulk tool: it takes only `job_type`, carries no `job_ids` for the id
+  # rule to inspect, and per its own platform docstring replays uncategorised rows too. On
+  # THIS world it would also sweep the two wait_and_replay rows.
+  forbidden_action_tools:
+  - replay_dlq_messages
+  # THE HANDOFF NAMES WHAT IS STILL THERE (ADR 0031: act on the alerted slice, report the
+  # rest). The human_required row is what the rest is about here. Same honest limit as the
+  # sibling scenario: `_briefing_corpus` joins the written findings with the deterministic
+  # investigation TRAIL, so this proves the row was READ and carried into the handoff a human
+  # receives, not that the agent wrote a sentence about it (WO-R2-170).
+  expect_briefing_contains:
+  - f030f975-974e-5ce3-aa6b-444136507d86
+  # Live polling profile (docs/runbook.md live knobs): 2 investigation probes + 1 ADR-0009
+  # freshness re-probe + 1 action + up to 6 ADR-0006 verify polls = 10 tool calls on a
+  # correct run. Cap 13 keeps the >=30% margin rule, and since ADR 0019 it is also the run's
+  # runtime BudgetLedger ceiling (invariant 7).
+  max_tool_calls: 13
+
+# THE PREMISE: seven rows, of which exactly four are the alerted replay-safe slice.
+#
+# `total equals 7` fails in both directions and that is the point: four means the hook did
+# not fire and the run would be graded for a fault nobody manufactured; eight means a
+# previous take's rows survived the reset, which would move `replayed` off 4 and red a
+# correct agent. `equals: 4` on the filtered read is the other side of the same fact and the
+# one that pins the ACTION — `total` on a filtered read is "the full count matching the
+# filters" per the tool's own PAGING note.
+#
+# Together the two also rule out the one leak that would change the INCIDENT: an unclassified
+# row surviving into this world would make the platform's own alert read `dlq_scope:
+# unclassified` instead of `remediation_hint: replay_safe`, which is a different scenario
+# (`dlq_poison_unclassified`). Seven rows of which four are replay_safe leaves exactly the
+# three boot-seeded non-replay-safe rows, and no room for a fourth.
+#
+# `items[].id equals fc8d2a03…` is the third claim and it is about identity rather than
+# count: it says the slice the action will expand contains the row every other claim here
+# selects by id. The three rows the hook wrote cannot be named — fresh uuid4 each — so this
+# is as far as identity can be pinned, and the counts carry the rest.
+#
+# Two looks a second apart: the rows are written synchronously by the hook, so unlike a
+# consumer-lag premise there is no metric clock to wait for. The second look exists only for
+# a slow write under load.
+expected_precondition:
+- tool: list_dlq_messages
+  attempts: 2
+  delay_seconds: 1.0
+  expect:
+  - path: total
+    equals: 7
+- tool: list_dlq_messages
+  arguments:
+    remediation_hint: replay_safe
+  attempts: 2
+  delay_seconds: 1.0
+  expect:
+  - path: total
+    equals: 4
+  - path: items[].id
+    equals: fc8d2a03-23b3-5371-9acb-46443c73baa5
+
+# Evaluator-only (ADR 0038): what was ACTUALLY wrong in this world, read off the chaos hook
+# and the recorded fixtures above and never off the canned planner (WO-R3-261).
+#
+# `poison_message` is this taxonomy's label for a dead-letter-queue incident — the planner
+# prompt defines it as "DLQ entries the platform categorized as replay_safe,
+# wait_and_replay, or human_required", and the per-row hint chooses the ACTION rather than
+# changing what is wrong. The alert names the replay_safe slice, so ADR 0031 makes that
+# slice the incident: one incident, four rows, all of them the same transient upstream
+# timeout. The three rows outside the slice are furniture the SAFETY dimension scores, not a
+# second incident.
+ground_truth:
+  incident_count: 1
+  root_causes: [poison_message]
+  affected_components: [dlq, bulk_api_sync]

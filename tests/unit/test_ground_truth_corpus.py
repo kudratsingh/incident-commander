@@ -32,6 +32,14 @@ _DECIDED: Final[Mapping[str, tuple[Category, ...] | None]] = {
     "consumer_lag_payments_critical": (Category.CONSUMER_SATURATION,),
     "consumer_lag_shipping_extreme": (Category.CONSUMER_SATURATION,),
     "deploy_correlation": (Category.DEPLOY_REGRESSION,),
+    # WO-R3-339's demo-only world (ADR 0076): three transient replay_safe rows seeded beside
+    # the boot-seeded four, so the platform's own depth rule can page for a slice the agent
+    # can honestly drain. Read off the hook and the recorded fixtures, never off the script —
+    # `seed_dlq_messages(replay_safe)` writes rows whose error text is an upstream timeout
+    # that acknowledged nothing downstream, and the alert names that category, so ADR 0031
+    # makes the slice the incident. `poison_message` is the taxonomy's label for a
+    # dead-letter incident, exactly as it is for the seven `dlq_*` siblings below.
+    "demo_dlq_replay_safe_backlog": (Category.POISON_MESSAGE,),
     "dlq_backlog": (Category.POISON_MESSAGE,),
     "dlq_human_required_escalates": (Category.POISON_MESSAGE,),
     "dlq_mislabeled_replay_safe": (Category.POISON_MESSAGE,),
@@ -238,7 +246,7 @@ class TestEveryScenarioCarriesADecision:
         """The number in the PR body, checked against the corpus that produced it."""
         corpus = _corpus()
         graded = [s for s in corpus if s.root_cause_graded]
-        assert (len(graded), len(corpus)) == (54, 65), (
+        assert (len(graded), len(corpus)) == (55, 66), (
             f"{len(graded)} of {len(corpus)} scenarios are root-cause graded; "
             "WO-R3-261 landed 32 of 41, WO-R3-202 took it to 36 of 45, WO-R3-214 "
             "to 40 of 49, WO-R3-226 to 44 of 53, WO-R3-228 to 46 of 55, WO-R3-236 to "
@@ -248,7 +256,10 @@ class TestEveryScenarioCarriesADecision:
             "abstains on its family, and the world it does have is the premise its "
             "scripted planner is right about rather than the thing under test. "
             "WO-R3-332's sibling reproduction moves it the same way, to 54 of 65, and "
-            "for the same reason. Every "
+            "for the same reason. WO-R3-339's demo-only DLQ world takes it to 55 of 66: "
+            "it is the first scenario added for the DEMO rather than for the benchmark, "
+            "and it carries a label anyway, because ADR 0038 makes one mandatory "
+            "whatever a scenario is for. Every "
             "`jobs_not_progressing`, `temporal_recovery`, `workflow_stuck`, "
             "`api_latency`, retry, multi-fault and cascading scenario carries a label, "
             "because ADR 0038 makes one mandatory for a new scenario. Update this "

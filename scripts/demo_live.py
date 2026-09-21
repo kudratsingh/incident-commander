@@ -10,9 +10,22 @@ Firing the hooks twice was safe for the WORLD (both are repeat-safe, pinned by
 ``test_demo_live.py``) and wrong for the RECORD: the fourth take's console anchored its whole
 timeline on the second injection, 1 m 43 s late.
 
-Step 3 waits for the PLATFORM's own reading of the fault, not just the scenario's
-precondition, because the console draws from that source. The prompt to start recording comes
-after the fault is visible (WO-R3-329); ``--record-from baseline`` asks for the old order.
+Step 5 passes ``--world-already-faulted``, so the runner does not fire the same hooks a second
+time (ADR 0075): the fourth take's second injection landed 1 m 43 s after the real one, and
+every reader that anchors on the take's newest ``chaos.*`` row measured the demo from the
+re-arm. One fault, fired once, in step 3 — safe for the world either way, and wrong for the
+RECORD.
+
+Step 3 waits TWICE, and they are different claims. The PLATFORM's own READING of the fault
+says the source the console draws from is showing a breach; the PLATFORM's own ALERT ROW says
+it has paged (O-36, ADR 0076), and that row is what step 5 starts the run from —
+``--alert-from-platform``, so the agent's brief is the platform's rather than the scenario
+file's. The precondition in step 4 is a third claim and the gate: the world satisfies the
+premise the grader will assume. The prompt to start recording comes after the fault is visible
+(WO-R3-329); ``--record-from baseline`` asks for the old order. Since v0.6.18 the platform's
+measurement interval is a setting and ``demo/compose.yml`` runs it at 5 s (O-35), with the
+producer at 0.75 s during the fault, so the wait is seconds rather than a minute and a half.
+
 The default path is FREE — real platform and hooks under the runner's ``--mode rehearsal``
 (ADR 0069), rows ``degraded=True``, counted in no report. ``LIVE=1`` is the paid take and
 REFUSES without ``YES_SPEND=1`` (PROTOCOL step 0).
@@ -37,7 +50,7 @@ from typing import Any, Final, NamedTuple
 # import here is inside the function that needs it, and that is why the first rehearsal died
 # at step 3 with a ModuleNotFoundError — after the ten-second countdown had run. A missing
 # PYTHONPATH now fails before the first line of output instead of on camera.
-from evals.runner import REHEARSAL_MODE, WORLD_ALREADY_FAULTED_FLAG
+from evals.runner import ALERT_FROM_PLATFORM_FLAG, REHEARSAL_MODE, WORLD_ALREADY_FAULTED_FLAG
 
 _REPO_ROOT: Final = Path(__file__).resolve().parents[1]
 
@@ -51,23 +64,43 @@ MODES: Final[dict[str, dict[str, Any]]] = {
         # producer the backlog stays 0 however long you wait and the precondition
         # correctly refuses the run. This is the mode's whole operational difference.
         "needs_traffic": True,
+        # Seconds between jobs while the fault is on screen. `make traffic`'s own default
+        # is 3, which is the SUSTAINABLE rate; 0.75 is the DEMO rate and it works because
+        # `POST /jobs` is rate-limited in a fixed window, so a faster loop front-loads the
+        # window instead of raising the sustained rate. That front-load is the point: the
+        # backlog crosses the platform's alert threshold of 20 in seconds rather than in a
+        # minute, which is what makes the page arrive while somebody is watching
+        # (WO-R3-339). Declared per mode because it is a fact about the mode's world.
+        "traffic_rate": "0.75",
         # Which platform reading tells the operator the page will show the fault. A closed
         # set for the same reason the modes are: this decides what is polled.
         "fault": "consumer_lag",
         "story": (
             "worker-dispatcher stops consuming while jobs keep arriving, so the backlog "
-            "climbs. The agent restarts the group and watches the backlog drain."
+            "climbs. The platform pages on its own lag rule, and the agent restarts the "
+            "group and watches the backlog drain."
         ),
     },
     "dlq_backlog": {
-        "scenario": "remediate_dlq_backlog_success",
-        # The world is seeded at boot and the hook adds the poison row. Nothing arrives,
+        # DEMO-ONLY, and not `remediate_dlq_backlog_success` — the change WO-R3-339 made and
+        # the one worth knowing about before a take. Since platform v0.6.18 the PLATFORM
+        # raises the page (O-36), and its DLQ rule names the category carried by the rows
+        # ABOVE the seeded baseline. `remediate_dlq_backlog_success` injects one row and that
+        # row is UNCLASSIFIED on purpose, so the alert the platform honestly raises for that
+        # world reads `dlq_scope: unclassified` and the honest action is to classify and fence
+        # it — the opposite of "the queue frees up". This world is three transient
+        # `replay_safe` rows instead, so the platform's own alert names `replay_safe` and one
+        # replay drains four rows on camera. Measured on the stack, not assumed: ADR 0076.
+        "scenario": "demo_dlq_replay_safe_backlog",
+        # The world is seeded at boot and the hook adds the backlog. Nothing arrives,
         # nothing drains, so no traffic is needed or wanted.
         "needs_traffic": False,
+        "traffic_rate": None,
         "fault": "dlq_depth",
         "story": (
-            "a dead-letter queue holding one replayable row and one poisoned row that no "
-            "replay can fix. The agent replays exactly the safe one and names the other."
+            "a dead-letter queue that fills past its threshold with four replayable rows "
+            "and three that no replay can fix. The platform pages on its own depth rule, "
+            "and the agent replays exactly the safe slice and names what is left."
         ),
     },
 }
@@ -79,9 +112,24 @@ RECORD_FROM: Final[tuple[str, ...]] = ("fault", "baseline")
 #: Every fault signal a mode may declare, and what each one polls.
 FAULT_SIGNALS: Final[frozenset[str]] = frozenset({"consumer_lag", "dlq_depth"})
 
-#: Hooks whose repeat firing is safe, measured on platform v0.6.13 (see the module
-#: docstring). A mode may only use these, because this script fires the plan and the
-#: runner fires it again.
+#: Hooks whose repeat firing is measured safe (platform v0.6.13, see the module docstring):
+#: ``poison_message`` answers a repeat with ``created: false`` and the same deterministic row
+#: id, and ``kill_consumer`` re-arms its flag with a fresh expiry.
+#:
+#: It is no longer a CONSTRAINT on what a mode may seed, and the change is WO-R3-339's. The
+#: constraint existed because "this script fires the plan and the runner fires it again" —
+#: which stopped being true with ``--world-already-faulted`` (ADR 0075): the fault fires
+#: exactly once per take now, and the thing that made a repeat reachable is closed
+#: structurally rather than by choosing idempotent hooks. ``demo_dlq_replay_safe_backlog``
+#: needs ``seed_dlq_messages``, which adds ``count`` more rows every time it fires, because it
+#: is the only hook that can write a ``replay_safe`` dead-letter row at all (ADR 0076).
+#:
+#: What replaces the constraint is two structural facts, both pinned in
+#: ``tests/unit/test_demo_live.py``: step 1 runs ``make eval-reset`` and GATES on ``make
+#: world-audit`` before the fault, so a world still carrying the last take's rows cannot
+#: reach step 3; and every mode's step-5 command carries ``--world-already-faulted``. The set
+#: stays because the measurement is worth keeping written down — a mode built on one of these
+#: two hooks tolerates a re-run even if both facts above were somehow lost.
 REPEAT_SAFE_HOOKS: Final[frozenset[str]] = frozenset({"poison_message", "kill_consumer"})
 
 #: Seconds of countdown before the fault, so the operator can get the console on screen.
@@ -92,16 +140,21 @@ _BASELINE_POLL_SECONDS: Final = 5.0
 #: A baseline lag at or under this reads as healthy. Not 0: the producer is already
 #: running by the time this is asked, so a job or two in flight is the normal case.
 _BASELINE_MAX_LAG: Final = 5
-#: How long to wait for the backlog to read a fresh 0 after a traffic mode's reset. Longer
-#: than the platform's 60-second measurement interval, because the wait is for the METRIC to
-#: refresh and the drain itself takes seconds (see ``_wait_for_a_drained_backlog``).
+#: How long to wait for the backlog to read a fresh 0 after a traffic mode's reset. Many
+#: times the platform's measurement interval, because the wait is for the METRIC to refresh
+#: and the drain itself takes seconds (see ``_wait_for_a_drained_backlog``). Unchanged at 150
+#: by WO-R3-339 even though this stack now measures every 5 s rather than every 60: the number
+#: is a ceiling on an operator's patience, a faster clock only makes it generous, and a stack
+#: running the default interval still needs it.
 _DRAIN_TIMEOUT_SECONDS: Final = 150
 #: A backlog at or above this reads as the fault, in the platform's own measurement. It is
 #: the scenario's premise (``lag >= 20``) on purpose: a smaller number is a breach nobody
 #: watching a chart would see, and the console's threshold band is drawn at the same place.
 _FAULT_MIN_LAG: Final = 20
-#: How long to wait for that reading. Three minutes: the metric is recomputed on a
-#: 60-second interval and the first post-fault sample can be a whole interval away.
+#: How long to wait for that reading. Three minutes, and kept at three by WO-R3-339 for
+#: ``_DRAIN_TIMEOUT_SECONDS``'s reason: the first post-fault sample is a whole measurement
+#: interval away, which is 5 s on this stack and 60 s on a default one, and the bound has to
+#: hold for both. On this stack the reading normally shows the fault within a few polls.
 _FAULT_VISIBLE_TIMEOUT_SECONDS: Final = 180
 
 
@@ -113,9 +166,11 @@ class LagReading(NamedTuple):
     """One reading of the alerted group's backlog, with the age of the measurement.
 
     The age travels WITH the number because every wait in this script is a wait on the
-    platform's 60-second lag clock rather than on the world: a reading of 10 that was measured
-    58 seconds ago says nothing about now, and an operator watching a spinner cannot tell the
-    two apart (F7, the third live take's 106-second step 3).
+    platform's lag clock rather than on the world: a reading of 10 that was measured a whole
+    interval ago says nothing about now, and an operator watching a spinner cannot tell the two
+    apart (F7, the third live take's 106-second step 3). The interval is a deployment setting
+    since platform v0.6.18 and this stack runs it at 5 s, which shortens every wait below and
+    changes none of them — the age is still the only honest answer.
     """
 
     lag: int | None
@@ -133,8 +188,18 @@ class LagReading(NamedTuple):
 
 #: What every wait on the platform's own measurement prints. One string, because the thing an
 #: operator needs to know is the same in step 3 and step 6: nothing is stuck, the number on
-#: screen is a sample, and the next one is up to a minute away.
-_LAG_CLOCK: Final = "waiting on the platform's 60-s lag clock"
+#: screen is a sample, and the next one is one measurement interval away.
+#:
+#: It named "the platform's 60-s lag clock" until WO-R3-339, and 60 is no longer a fact about
+#: anything: since platform v0.6.18 the interval is a SETTING, and `demo/compose.yml` sets it
+#: to 5 s on this stack (`METRICS_LOOP_INTERVAL_SECONDS`, owner decision O-35) precisely so
+#: nobody watching a demo waits a minute for a number to move. The line names the setting
+#: rather than a number, because a number here would go stale the way the last one did — and
+#: every reading this script prints carries its own `age_seconds` beside it, which is the
+#: honest answer to "how old is that".
+_LAG_CLOCK: Final = (
+    "waiting on the platform's lag clock (5 s on this stack — METRICS_LOOP_INTERVAL_SECONDS)"
+)
 
 
 class TrafficHandle:
@@ -149,11 +214,17 @@ class TrafficHandle:
     def __init__(self) -> None:
         self.process: subprocess.Popen[str] | None = None
 
-    def start(self) -> None:
+    def start(self, rate: str | None = None) -> None:
+        """Start the producer, at the MODE's rate when it declares one.
+
+        ``rate`` is seconds between submissions, handed to `make traffic` as `RATE=`. A mode
+        that declares none gets the script's own sustainable default, which is what every
+        caller before WO-R3-339 got.
+        """
         log = _REPO_ROOT / "evals" / ".demo-traffic.log"
         handle = log.open("w", encoding="utf-8")
         self.process = subprocess.Popen(  # noqa: S603 - fixed argv, no shell
-            ["make", "traffic"],
+            ["make", "traffic", *([f"RATE={rate}"] if rate else [])],
             cwd=_REPO_ROOT,
             stdout=handle,
             stderr=subprocess.STDOUT,
@@ -473,8 +544,14 @@ def _walk(
     # ---- STEP 2: the baseline the audience should see before anything breaks ----------
     step = console.begin(2, "baseline")
     if mode["needs_traffic"]:
-        console.note(step, "starting `make traffic` in the background (jobs every 3s)")
-        traffic.start()
+        rate = mode.get("traffic_rate")
+        console.note(
+            step,
+            "starting `make traffic` in the background (a job every "
+            f"{rate or '3'}s — fast enough that the backlog crosses the platform's "
+            "alert threshold in seconds once the consumer dies)",
+        )
+        traffic.start(rate=rate)
         _wait_for_healthy_baseline(console, step)
     else:
         console.note(step, "nothing to start — this world is seeded and quiet")
@@ -510,6 +587,14 @@ def _walk(
     # The page shows a MEASUREMENT, and the measurement trails the fault. Waiting for it
     # here is what makes "start recording" in step 4 a promise rather than a hope.
     _wait_until_the_fault_shows(console, step, args.mode)
+    # And then the page itself. This is the step's second half since WO-R3-339 (O-36): the
+    # measurement crossing a threshold is the platform NOTICING, and the alert row is the
+    # platform PAGING — the middle clause of "jobs pile up, the platform pages, the agent
+    # responds", which until v0.6.18 was written by the scenario file that graded the run.
+    # The alert is what step 5 starts the agent from, so a take where it never arrives is a
+    # take with nothing to narrate, and the operator should know that here rather than in
+    # step 5's output.
+    _wait_until_the_platform_pages(console, step, scenario)
     console.end(step)
 
     # ---- STEP 4: prove the fault is real before spending anything on it ---------------
@@ -541,6 +626,11 @@ def _walk(
                 f"ONLY={scenario}",
                 "MODEL_ROLE=benchmark",
                 "WORLD_ALREADY_FAULTED=1",
+                # `ALERT_FROM_PLATFORM=1` forwards `--alert-from-platform`: the run is paged
+                # by the alert row step 3 waited for, not by the scenario's `alert:` block
+                # (O-36). The grade does not move — the graders key on the terminal state,
+                # the audit log and the readings — and the demo's middle clause becomes true.
+                "ALERT_FROM_PLATFORM=1",
             ],
             "paid agent run",
             env={"AGENT_RUN_REPORTING": "true"},
@@ -565,6 +655,9 @@ def _walk(
                 "--only",
                 scenario,
                 WORLD_ALREADY_FAULTED_FLAG,
+                # The rehearsal is paged the same way the take is (O-36), because the point of
+                # a rehearsal is that nothing about the walk differs except the planner.
+                ALERT_FROM_PLATFORM_FLAG,
             ],
             "rehearsal agent run",
             env={
@@ -668,8 +761,9 @@ def _lag_reading() -> LagReading:
 
     Under the SMOKE principal, and any failure reads as "not known", which keeps the baseline
     wait a wait rather than a crash. The AGE travels with the number (v0.6.7's
-    ``age_seconds``) because the lag is recomputed on a 60-second interval, so "lag 10" can
-    mean "10 a minute ago" — which made step 3 of the third take look stuck (F7).
+    ``age_seconds``) because the lag is recomputed once per measurement interval — 5 s on this
+    stack, 60 s by default — so "lag 10" can mean "10 an interval ago", which made step 3 of
+    the third take look stuck (F7).
     """
     from evals.world_audit import Probe, read
 
@@ -768,10 +862,52 @@ def _wait_until_the_fault_shows(console: Console, step: Step, mode: str) -> bool
     console.say(
         f"  WARNING: the platform's own reading has not shown the fault within "
         f"{_FAULT_VISIBLE_TIMEOUT_SECONDS}s. The console's chart may still read healthy — "
-        "the precondition below is the gate, and the metric is recomputed on a 60-second "
-        "interval, so read the next line before concluding anything."
+        "the precondition below is the gate, and the metric is only recomputed once per "
+        "measurement interval, so read the next line before concluding anything."
     )
     return False
+
+
+def _wait_until_the_platform_pages(console: Console, step: Step, scenario: str) -> bool:
+    """Hold until the PLATFORM has raised this scenario's alert, and print the row.
+
+    Through the runner's own wait, not a copy of it: the run in step 5 starts from whichever
+    alert row that function matches, and a second implementation here could narrate an alert
+    the run did not take. Its read is the read-only principal's and is labelled as the lab's
+    (platform ADR 0038), like every other read this script makes.
+
+    A WARNING rather than a failure, for ``_wait_until_the_fault_shows``'s reason: the gate
+    that decides whether the agent runs is step 5's own wait, which refuses loudly with the
+    alert stream's contents in the message. What this wait is for is the OPERATOR — "the
+    platform has paged, and here is the row it paged with" — so a timeout is information.
+    """
+    from evals.runner import ChaosSetupFailed, _await_platform_alert, _settings_for_mode
+    from evals.scenarios.loader import load_scenarios
+
+    scenarios = {s.name: s for s in load_scenarios(_REPO_ROOT / "evals" / "scenarios")}
+    target = scenarios[scenario]
+    try:
+        alert = _await_platform_alert(target, _settings_for_mode(live=True))
+    except ChaosSetupFailed as err:
+        console.say(
+            f"  WARNING: the platform has not paged for this fault — {err} The agent run in "
+            "step 5 takes its alert from that row, so it will refuse for the same reason; "
+            "check `alert_rules_enabled` on the stack before concluding anything about the "
+            "world."
+        )
+        return False
+    console.note(step, f"the PLATFORM raised the alert: {alert.said}")
+    console.note(
+        step,
+        "that row is the agent's whole brief — the scenario file's own `alert:` block is not "
+        f"read on this path (O-36): {alert.payload.get('summary', '(no summary)')}",
+    )
+    console.note(
+        step,
+        "the console's PLATFORM strip should show a `paged` station between `fault injected` "
+        "and `agent acting`, drawn from the take's first `alert.raised` audit row",
+    )
+    return True
 
 
 def _run_id_of(scenario: str) -> str | None:
@@ -896,8 +1032,8 @@ def _wait_for_a_drained_backlog(console: Console) -> None:
     """Hold until `worker-dispatcher` reads a FRESH zero, before the audit asks.
 
     The first `consumer_outage` rehearsal audited `[FAIL] lag: 33 (want 0)` over an already
-    clean world: the metric is recomputed on a 60-second interval and the reset clears the
-    sample history, so the audit was served the last value taken while the consumer was dead.
+    clean world: the metric is recomputed once per measurement interval and the reset clears
+    the VALUE key, so the audit was served the last value taken while the consumer was dead.
     So the wait is for a READING: only a `0` proceeds, and a timeout warns and audits anyway.
     """
     deadline = time.monotonic() + _DRAIN_TIMEOUT_SECONDS

@@ -31,9 +31,8 @@ class StrategyKnobs:
     #: live in ``agent/search.py``, which refuses anything larger, and these match them.
     search_depth: int = 2
     search_branch: int = 3
-    #: One optional override per uncertainty threshold the adaptive ladder compares against;
-    #: ``None`` takes the declared default from ``policy.py``. A field each, not a mapping, so a
-    #: misspelled name is a type error rather than a setting that is silently ignored.
+    #: One optional override per uncertainty threshold the ladder compares against; ``None`` takes
+    #: the declared default. A field each, not a mapping, so a misspelling cannot pass unnoticed.
     uncertainty_top1_confidence_floor: float | None = None
     uncertainty_top1_top2_margin_floor: float | None = None
     uncertainty_selector_uncertainty_ceiling: float | None = None

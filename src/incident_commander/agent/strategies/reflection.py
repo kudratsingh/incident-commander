@@ -1,22 +1,8 @@
-"""``reflection`` — ``baseline``'s planner call, one critique of it, at most one revision (WP-9.1).
+"""``reflection`` — ``baseline``'s planner call, one critique, at most one revision (WP-9.1).
 
-Plan 02 § 13. The first call is ``investigation._plan_next_step`` **verbatim**, so this arm is the
-control group plus a pass rather than a re-implementation; then one ``reflection_critic`` call over
-the step it produced; then, only if the critique named a finding, ONE more planner call carrying
-that critique. **The cap is structural** — a ``RevisionPass`` token spent once, and no loop over
-the critic — because a bound stated in the critic's instructions is a bound that fails open.
-
-Both steps reach the ``StepRecord`` (``RevisionRecord.initial_step`` beside ``emitted_step``),
-which is what lets the report attribute a fix or a HARM to the pass. The revised step is an
-ordinary ``InvestigationStep``, so the ``FIX_MAP`` gate, the 0.7 threshold, ADR 0041's whole-queue
-refusal, the ADR-0009 re-probe and ``_execute_probe``'s tier re-check all run on it unchanged in
-``investigation.py``: **revision is not authorization** (plan 02 § 18). The critic may name only a
-``ReadToolName`` and never an action, and both planner turns get ``baseline``'s context bytes, so
-the planner's view differs from the control group's by the appended critique alone.
-
-Cost is declared, not discovered: up to two planner calls and one critic call per step, metered
-apart by role (WP-2.3), with the ledger seeded by ``TOKEN_BUDGET_MULTIPLIER`` in
-``agent/factory.py`` and nowhere else.
+The first call is ``investigation._plan_next_step`` VERBATIM, so this arm is the control group
+plus a pass. The cap is structural — one ``RevisionPass`` token, no loop over the critic — because
+a bound in the critic's instructions fails open. Revision is not authorization: every gate runs.
 """
 
 from __future__ import annotations
@@ -54,8 +40,8 @@ from incident_commander.agent.strategies.records import (
 from incident_commander.llm.client import LLMError, LLMUsage
 from incident_commander.llm.repair import RepairedCall, sum_usage, usage_of
 
-#: Same role string, and so the same trace label, as ``baseline``'s planner call — for BOTH of
-#: this arm's planner calls. A split by call index would stop the token total being comparable.
+#: Same role, and so the same trace label, as ``baseline``'s planner call — for BOTH of this
+#: arm's planner calls. A split by call index would stop the token total being comparable.
 _PLANNER_ROLE: Final[str] = "investigation_planner"
 
 #: Named so a test asserts the guard's own marker rather than that something raised (F-007).
@@ -69,9 +55,8 @@ REVISION_STAGE: Final[str] = "revision"
 class ReflectionFailed(LLMError):
     """A call after the first one failed, and the step's whole bill comes with it.
 
-    An ``LLMError`` subclass so the loop's existing ``except`` arm escalates as for
-    ``baseline``. ``usage`` sums every billed leg — same shape and reason as
-    ``best_of_n_sampled.SampledPlannerFailed`` and ``candidate_selector.SelectorFailed``.
+    An ``LLMError`` so the loop's existing ``except`` arm escalates as for ``baseline``;
+    ``usage`` sums every billed leg.
     """
 
     def __init__(self, stage: str, cause: BaseException, usage: LLMUsage | None) -> None:
@@ -90,19 +75,16 @@ class ReflectionStrategy:
     name: str = StrategyName.REFLECTION.value
 
     def __init__(self, knobs: StrategyKnobs | None = None) -> None:
-        """Takes the inference block every registry factory is handed, and reads nothing.
-
-        There is no knob: the pass count is the safety property, and a cap an operator can
-        raise is not a cap. What ran is stamped instead, so a report row carries the bound.
-        """
+        """Takes the inference block every registry factory is handed, and reads nothing: the
+        pass count is the safety property, and a cap an operator can raise is not a cap."""
         self.config: Mapping[str, Any] = MappingProxyType(
             {
                 "passes": MAX_REVISION_PASSES,
                 # How the bound is held, so no row has to trust the number above.
                 "cap": "structural",
                 "critic": CRITIC_ROLE,
-                # ADR 0044, of the PLANNER's view: both planner turns get ``baseline``'s
-                # context. The critic does see ids, which is why that is stated separately.
+                # Of the PLANNER's view (ADR 0044): both turns get ``baseline``'s context. The
+                # critic does see ids, which is why that is a separate key.
                 "evidence_ids_rendered": False,
                 "critic_sees_evidence_ids": True,
             }
@@ -113,8 +95,8 @@ class ReflectionStrategy:
     ) -> tuple[RunState, InvestigationStep, StepRecord]:
         """Plan, critique, and revise once if the critique found something.
 
-        Straight-line: no loop over the critic, and the single pass is taken through a
-        ``RevisionPass`` so a later edit that added one would raise instead of billing again.
+        Straight-line: the single pass is taken through a ``RevisionPass``, so a later edit that
+        added a loop would raise instead of billing again.
         """
         if ctx.critic_llm_client is None:
             raise ValueError(
@@ -139,8 +121,8 @@ class ReflectionStrategy:
         critique = critic.result.output
         after_critic = planned.model_copy(
             update={
-                # Charged through the same function every other call is charged through, so a
-                # repaired critique bills both legs (ADR 0015).
+                # The same function every other call is charged through, so a repaired
+                # critique bills both legs (ADR 0015).
                 "budget": accrue_structured_call(planned.budget, critic, ctx.model),
                 "updated_at": at,
             }
@@ -164,16 +146,15 @@ class ReflectionStrategy:
                 ctx.record_step(record)
             return after_critic, initial_step, record
         budget.spend()
-        # A local, not inline: the record measures the string that was sent, and a second
-        # render could differ from the string the model saw.
+        # A local, not inline: the record measures the string that was SENT.
         revision_context = format_revision_context(run_state, initial_step, critique)
         try:
             revision = revise_step(
                 ctx.llm_client,
                 user_message=revision_context,
                 model=ctx.model,
-                # The revision is the same step under the same schema: a narrowing the
-                # first call was held to cannot lapse because a critic spoke (ADR 0074).
+                # Same schema as the first call: a narrowing cannot lapse because a critic
+                # spoke (ADR 0074).
                 output_model=step_model,
             )
         except Exception as err:
@@ -227,8 +208,7 @@ class ReflectionStrategy:
         """One record per step, carrying both steps and every call the step billed.
 
         ``candidate_set`` is the EMITTED step's top hypothesis, so this arm's ``pass@1`` means
-        what it means for ``baseline``; the step that was replaced is under ``revision``. Each
-        call's ledger figures are that call's own delta, so three calls in one step stay apart.
+        what it means for ``baseline``; the replaced step is under ``revision``.
         """
         critique = critic.result.output
         top = emitted.hypotheses[0]
@@ -311,8 +291,8 @@ class ReflectionStrategy:
             hypothesis_state_before=before.hypotheses,
             hypothesis_state_after=after.hypotheses,
             llm_calls=calls,
-            # BOTH planner turns, summed: the field is the context this step fed the planner,
-            # and a revised step fed it twice. The per-turn split is in ``llm_calls``.
+            # BOTH planner turns, summed: a revised step fed the planner twice. The per-turn
+            # split is in ``llm_calls``.
             planner_input_tokens=(
                 planner.context_tokens
                 + (

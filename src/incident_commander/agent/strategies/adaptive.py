@@ -1,10 +1,8 @@
 """``adaptive`` — the ladder: more inference only where a step's own numbers ask for it (WP-13.2).
 
-Plan 02 § 15: ``baseline → best_of_n_enumerated(4) → candidate_selector → search or escalate``,
-each rung entered only because WP-13.1's thresholds fired on the rung below (ADR 0061, ADR 0064).
-An easy step costs one planner call — ``baseline``'s — and the record names the rung it terminated
-on, so "easy cases stay cheap" is counted. Every rung emits an ordinary ``InvestigationStep``, so
-``investigation.py``'s gates run on it unchanged: a rung buys thinking, never privilege.
+``baseline → best_of_n_enumerated(4) → candidate_selector → search or escalate``, each rung entered
+only because WP-13.1's thresholds fired below it (ADR 0061, ADR 0064). Every rung emits an ordinary
+step, so ``investigation.py``'s gates run unchanged: a rung buys thinking, never privilege.
 """
 
 from __future__ import annotations
@@ -60,9 +58,8 @@ from incident_commander.llm.repair import RepairedCall, sum_usage, usage_of
 #: rung's planner call. A split by rung would stop the token total being comparable.
 _PLANNER_ROLE: Final[str] = "investigation_planner"
 
-#: N the enumerated rung generates (plan 02 § 265: ``best_of_n_enumerated(4)``). In code and not
-#: in ``StrategyKnobs``: the ladder IS the claim, and an environment that could set this to 1
-#: would report an adaptive number for a run whose second rung was a second baseline call.
+#: N the enumerated rung generates. In code, not in ``StrategyKnobs``: an environment that could
+#: set this to 1 would report an adaptive number for a run whose second rung was a baseline call.
 LADDER_N: Final[int] = 4
 
 #: Named so a test asserts the guard's own marker rather than that something raised (F-007).
@@ -97,15 +94,13 @@ class Rung(StrEnum):
     ESCALATE = "escalate"
 
 
-#: The rungs every climb shares, in order. The tail (``search`` or ``escalate``) is resolved per
-#: step from the context, because whether a branch may read is a property of the MODE.
+#: The rungs every climb shares. The tail (``search`` or ``escalate``) is resolved per step,
+#: because whether a branch may read is a property of the MODE.
 CLIMB: Final[tuple[Rung, ...]] = (Rung.BASELINE, Rung.ENUMERATED, Rung.SELECTOR)
 
-#: Signals about the RUN rather than about this step, so no rung can clear them: the attempt
-#: record stays on the ledger for the rest of the run (ADR 0056). They buy the climb — that is
-#: plan 02 § 15's intent — and they do NOT decide the tail, because a tail decided by a signal
-#: nothing can clear is taken unconditionally, which would cut ADR 0056's reinvestigation short
-#: on the step it was granted for.
+#: Signals about the RUN rather than this step, so no rung clears them (ADR 0056). They buy the
+#: climb but do NOT decide the tail: a tail decided by an unclearable signal is taken
+#: unconditionally, which would cut ADR 0056's reinvestigation short.
 UNCLEARABLE: Final[frozenset[EscalationSignal]] = frozenset(
     {EscalationSignal.REMEDIATION_ATTEMPT_FAILED}
 )
@@ -114,8 +109,8 @@ UNCLEARABLE: Final[frozenset[EscalationSignal]] = frozenset(
 class AdaptiveFailed(LLMError):
     """A call above the baseline rung failed, and the step's whole bill comes with it.
 
-    An ``LLMError`` subclass so the loop's existing ``except`` arm escalates as for
-    ``baseline``; ``usage`` sums every billed leg of every rung so far (ADR 0045).
+    An ``LLMError`` so the loop's existing ``except`` arm escalates as for ``baseline``;
+    ``usage`` sums every billed leg of every rung so far (ADR 0045).
     """
 
     def __init__(self, stage: str, cause: BaseException, usage: LLMUsage | None) -> None:
@@ -142,9 +137,8 @@ class AdaptiveStrategy:
     def __init__(self, knobs: StrategyKnobs | None = None) -> None:
         """Build the arm: the thresholds it compares against, and the rungs above the first.
 
-        Both higher arms are resolved through the registry, so this ladder runs the same
-        objects the fixed arms do rather than a second implementation of them. The import is
-        inside the constructor because the registry imports every strategy, this one included.
+        The higher arms come from the registry, so the ladder runs the same objects the fixed
+        arms do. The import is local because the registry imports this module.
         """
         from incident_commander.agent.strategies.registry import STRATEGIES
 
@@ -165,8 +159,8 @@ class AdaptiveStrategy:
         )
         self.config: Mapping[str, Any] = MappingProxyType(
             {
-                # The ladder as configured, tail included as the pair it can be. Which one a
-                # given step ran is in that step's ``LadderRecord``.
+                # The ladder as configured, tail included as the pair it can be; which one a
+                # step ran is in its ``LadderRecord``.
                 "ladder": [rung.value for rung in CLIMB]
                 + [f"{Rung.SEARCH.value}_or_{Rung.ESCALATE.value}"],
                 "n": LADDER_N,
@@ -174,9 +168,8 @@ class AdaptiveStrategy:
                 "selector": SELECTOR_ROLE,
                 # How the ladder is held: a sequence in code, not a number an operator sets.
                 "cap": "structural",
-                # ADR 0044, which is per RUNG here: the baseline rung gets ``baseline``'s
-                # context bytes and every rung above it renders evidence ids, so a table must
-                # read ``ladder.terminated_on`` before it puts this arm beside another.
+                # Per RUNG here (ADR 0044), so a table must read ``ladder.terminated_on`` before
+                # it puts this arm beside another.
                 "evidence_ids_rendered": "baseline rung no, every rung above it yes",
                 "search_rung_requires": "recorded mode (ADR 0060)",
                 "depth": resolved.search_depth,
@@ -209,9 +202,8 @@ class AdaptiveStrategy:
     ) -> tuple[RunState, InvestigationStep, StepRecord]:
         """Climb until nothing fires, then hand the loop the rung's step.
 
-        Refuses before any call when no selector client is on the context: two of the four
-        rungs need it, and a ladder that silently stopped at the second would report an
-        adaptive number for a best-of-N run.
+        Refuses before any call when no selector client is on the context: a ladder that
+        silently stopped at the second rung would report an adaptive number for a best-of-N run.
         """
         if ctx.selector_llm_client is None:
             raise ValueError(
@@ -446,8 +438,8 @@ class _Climb:
     ) -> tuple[RunState, InvestigationStep, StepRecord]:
         """Rung 3, recorded mode: one bounded walk, its record folded into this step's.
 
-        The walk runs with the sink taken off its context, because one planner step produces
-        exactly one ``StepRecord`` and this one is the ladder's.
+        The walk runs with the sink taken off its context: one planner step produces exactly one
+        ``StepRecord``, and this one is the ladder's.
         """
         spent = run_state.budget
         try:
@@ -498,9 +490,8 @@ class _Climb:
     ) -> tuple[RunState, InvestigationStep, StepRecord]:
         """The tail where ``search`` cannot run: stop, and say which signals were still firing.
 
-        A ``StopAction``, so the loop escalates with a briefing (``_finalize``) and no rung has
-        acted. The ranking is the one the rung below produced: the diagnosis stands, the
-        decision does not.
+        A ``StopAction``, so the loop escalates with a briefing and no rung has acted. The
+        ranking is the rung below's: the diagnosis stands, the decision does not.
         """
         self._note(
             Rung.ESCALATE,

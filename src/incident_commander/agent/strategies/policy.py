@@ -1,10 +1,8 @@
 """The uncertainty policy: the thresholds that decide when to buy more inference (WP-13.1).
 
-Plan 02 § 15's escalation signals, each a named threshold with a declared default and the
-benchmark split that default was set on; a default declared on the holdout is refused here
-rather than reviewed (plan 03 § 4, ADR 0061). These are a NEW set — the loop's remediate bar
-is untouched and reported rather than tuned (plan 02 § 16) — and every number in this module
-lives in a ``ThresholdDefault`` row, so a threshold cannot be written without its provenance.
+Plan 02 § 15's escalation signals. Every number lives in a ``ThresholdDefault`` row, so a
+threshold cannot be written without its provenance, and a default declared on the holdout is
+REFUSED here rather than reviewed (plan 03 § 4, ADR 0061). The loop's remediate bar is untouched.
 """
 
 from __future__ import annotations
@@ -52,10 +50,9 @@ class ThresholdName(StrEnum):
 class ThresholdSplit(StrEnum):
     """Which split a default was set on.
 
-    ``dev``/``validation``/``holdout`` are ``evals.scenarios.schema.BenchmarkSplit``'s members,
-    pinned to it by a test rather than imported — nothing under ``agent/`` imports the harness.
-    ``untuned`` is the fourth and, today, the honest one: a declared starting point no run has
-    moved. It is a real provenance value, not a missing one, and the report prints it.
+    The first three mirror ``BenchmarkSplit``, pinned by a test rather than imported (nothing
+    under ``agent/`` imports the harness). ``untuned`` is a real provenance value, not a missing
+    one: a declared starting point no run has moved.
     """
 
     DEV = "dev"
@@ -70,7 +67,7 @@ TUNABLE_SPLITS: Final[frozenset[ThresholdSplit]] = frozenset(
 )
 
 #: Prefix every threshold's environment variable carries, so the ``Settings`` field names and
-#: these names are ONE derivation instead of two lists that drift.
+#: these are ONE derivation instead of two lists that drift.
 ENV_PREFIX: Final[str] = "UNCERTAINTY_"
 
 
@@ -123,10 +120,9 @@ class ThresholdDefault:
         return env_var_for(self.name)
 
 
-# The ONE place a number in this packet is written. Every row names the split its value came
-# from, and `__post_init__` refuses `holdout`, so "never tuned on the holdout" is a property of
-# the declaration rather than of anyone's memory. Nothing here has been tuned yet: the sweep
-# that would move these is WP-13.2's, and until it runs `untuned` is the true provenance.
+# The ONE place a number in this packet is written. Every row names its split and
+# `__post_init__` refuses `holdout`, so that rule is a property of the declaration. Nothing here
+# has been tuned yet, so `untuned` is the true provenance until WP-13.2's sweep runs.
 _DECLARED: Final[tuple[ThresholdDefault, ...]] = (
     ThresholdDefault(
         name=ThresholdName.TOP1_CONFIDENCE_FLOOR,
@@ -246,9 +242,8 @@ def _declared_count(name: ThresholdName) -> int:
 class UncertaintyThresholds:
     """The operating point the policy compares against, defaulting to the declared table.
 
-    Built at the edge from ``Settings`` like ``StrategyKnobs`` is, so nothing under ``agent/``
-    reads configuration. An unset override means the declared default, which is the only value
-    with a split behind it.
+    Built at the edge from ``Settings``, so nothing under ``agent/`` reads configuration. An
+    unset override means the declared default, the only value with a split behind it.
     """
 
     top1_confidence_floor: float = declared_default(ThresholdName.TOP1_CONFIDENCE_FLOOR)
@@ -283,8 +278,8 @@ class UncertaintyThresholds:
     ) -> UncertaintyThresholds:
         """Build a policy from optional overrides; ``None`` means the declared default.
 
-        Spelled out rather than taking a mapping: the edge hands over eight ``Settings``
-        fields, and a mapping would let a typo become a silently ignored knob.
+        Spelled out rather than taking a mapping, where a typo would become a silently ignored
+        knob.
         """
         declared = cls()
         return cls(
@@ -317,11 +312,8 @@ class UncertaintyThresholds:
         return float(getattr(self, name.value))
 
     def as_strategy_config(self) -> Mapping[str, Mapping[str, object]]:
-        """The provenance block a run's report stamps: value, default and the default's split.
-
-        One entry per threshold, so a reported number cannot be read apart from where it came
-        from. ``adaptive`` (WP-13.2) is what puts this into ``strategy_config``.
-        """
+        """The provenance block a run's report stamps: value, default and the default's split —
+        one entry per threshold, so a number cannot be read apart from where it came from."""
         return MappingProxyType({row.name.value: row.as_config() for row in provenance_rows(self)})
 
 
@@ -359,9 +351,8 @@ class FiredSignals:
 def failed_attempts(run_state: RunState) -> int:
     """Tier-1 attempts this run has made that did not end the incident (ADR 0056).
 
-    Counted from the attempt records ``agent/remediation.py`` appends under
-    ``planner_context.ATTEMPT_FAILED_MARKER`` — imported, never re-spelled, because a second
-    spelling of that name is how one reader of it stops matching.
+    Counted off ``planner_context.ATTEMPT_FAILED_MARKER`` — imported, never re-spelled, because
+    a second spelling is how one reader of it stops matching.
     """
     return sum(entry.tool_name == ATTEMPT_FAILED_MARKER for entry in run_state.evidence)
 
@@ -411,9 +402,8 @@ def evaluate(
 ) -> FiredSignals:
     """Which escalation signals this step fires, and which nothing measured.
 
-    Four of the seven are read off the run alone, so ``baseline``'s state answers them; the
-    three that need a candidate set or a selector's number come in through ``reading``, and a
-    signal with no measurement is reported UNMEASURED rather than quietly not fired.
+    Four of the seven read the run alone; the three needing a candidate set or a selector's
+    number come in through ``reading``. No measurement is reported UNMEASURED, never "not fired".
     """
     bars = thresholds if thresholds is not None else UncertaintyThresholds()
     seen = reading if reading is not None else UncertaintyReading()
@@ -522,9 +512,8 @@ class ThresholdRow:
     def live_value_split(self) -> ThresholdSplit | None:
         """The split behind the LIVE value: ``None`` once an operator has overridden it.
 
-        A split describes where a number came from, and nobody can say that of a value typed
-        into an environment. Reporting ``None`` is the honest answer, and it is not the same
-        claim as ``untuned``.
+        Nobody can name the split of a value typed into an environment, and ``None`` is not the
+        same claim as ``untuned``.
         """
         return self.declared_split if self.is_declared_default else None
 
@@ -546,8 +535,7 @@ class ThresholdRow:
 def provenance_rows(thresholds: UncertaintyThresholds | None = None) -> tuple[ThresholdRow, ...]:
     """Every threshold with its live value and the split its default was set on.
 
-    In ``ThresholdName`` order, so two reports of the same policy render the same table. This is
-    what makes "which split did this number come from" a printed answer rather than a promise.
+    In ``ThresholdName`` order, so two reports of the same policy render the same table.
     """
     live = thresholds if thresholds is not None else UncertaintyThresholds()
     return tuple(

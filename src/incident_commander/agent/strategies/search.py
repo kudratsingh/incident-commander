@@ -1,10 +1,8 @@
-"""``search`` — a bounded shallow walk over evidence-gathering decisions (WP-12.1).
+"""``search`` — a bounded shallow walk over evidence-gathering decisions (plan 02 § 14, WP-12.1).
 
-Plan 02 § 14: depth ≤ 2, branch ≤ 3, both structural; a node is
-``(hypothesis set, evidence snapshot ref, proposed probe, score, accumulated cost)``; a branch is
-a different READ, taken through the loop's own prober so no branch can act; and the token and
-tool-call ceilings are the run's own, shared by every branch and the chosen path (ADR 0060).
-Recorded mode only — ``ctx.branch_prober`` is ``None`` everywhere else, and that is the refusal.
+Depth ≤ 2, branch ≤ 3, both structural. A branch is a different READ, taken through the loop's
+own prober so no branch can act, and the ceilings are the run's own, shared by every branch and
+the chosen path. Recorded mode only: ``ctx.branch_prober`` is ``None`` elsewhere (ADR 0060).
 """
 
 from __future__ import annotations
@@ -73,8 +71,8 @@ SELECTOR_STAGE: Final[str] = "selector"
 class SearchFailed(LLMError):
     """A call inside the walk failed, and everything the step billed comes with it.
 
-    An ``LLMError`` subclass so the loop's existing ``except`` arm escalates as for
-    ``baseline``; ``usage`` sums every billed leg of the whole walk (ADR 0045).
+    An ``LLMError`` so the loop's existing ``except`` arm escalates as for ``baseline``;
+    ``usage`` sums every billed leg of the whole walk (ADR 0045).
     """
 
     def __init__(self, stage: str, cause: BaseException, usage: LLMUsage | None) -> None:
@@ -89,11 +87,8 @@ class SearchFailed(LLMError):
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class _Path:
-    """One node of the walk, with the live objects the walk goes on from.
-
-    ``node`` is the plan-shaped record; the rest is what a next level needs — this node's
-    evidence snapshot, the set it decided over, its decision and the step it would emit.
-    """
+    """One node of the walk, with the live objects the walk goes on from: ``node`` is the record,
+    the rest is what the next level needs — evidence, set, decision, the step it would emit."""
 
     node: SearchNode
     run_state: RunState
@@ -116,21 +111,17 @@ class SearchStrategy:
     name: str = StrategyName.SEARCH.value
 
     def __init__(self, knobs: StrategyKnobs | None = None) -> None:
-        """Build the arm, refusing a depth or branch above the structural maximum.
-
-        Refused HERE, at construction, so a walk nobody could run costs nothing; the generator
-        is resolved through the registry with N bound to the branch factor.
-        """
+        """Build the arm, refusing a depth or branch above the structural maximum — at
+        construction, so a walk nobody could run costs nothing."""
         from incident_commander.agent.strategies.registry import STRATEGIES
 
         resolved = knobs if knobs is not None else StrategyKnobs()
-        # Raises ``SearchCapExceeded`` above depth 2 or branch 3. Built and dropped: each step
-        # gets its own walk, and this one is the configuration check.
+        # Built and dropped: it raises ``SearchCapExceeded`` above the maximums, and each step
+        # gets its own walk.
         SearchWalk(depth_allowed=resolved.search_depth, branch_allowed=resolved.search_branch)
         self._depth: Final[int] = resolved.search_depth
         self._branch: Final[int] = resolved.search_branch
-        # N is the branch factor: one candidate's proposed read is one branch, so a set of
-        # three is three evidence-gathering decisions to choose between.
+        # N is the branch factor: one candidate's proposed read is one branch.
         built = STRATEGIES.create(
             resolved.selector_generator, replace(resolved, n=resolved.search_branch)
         )
@@ -150,7 +141,7 @@ class SearchStrategy:
                 "branch": resolved.search_branch,
                 # How the bounds are held, so no row has to trust the two numbers above.
                 "cap": "structural",
-                # Both ceilings are the run's own, shared by every branch (plan 02 § 8).
+                # Both ceilings are the run's own, shared by every branch.
                 "caps_shared_across_branches": True,
                 "mode": "recorded",
             }
@@ -166,9 +157,8 @@ class SearchStrategy:
     ) -> tuple[RunState, InvestigationStep, StepRecord]:
         """Walk, then hand the loop the chosen path's step.
 
-        Refuses before any call when the context carries no prober: that is the recorded-mode
-        bound, and degrading to a walk that cannot read would report a search number for a
-        strategy that never searched.
+        Refuses before any call when the context carries no prober: degrading to a walk that
+        cannot read would report a search number for a strategy that never searched.
         """
         if ctx.branch_prober is None:
             raise ValueError(f"{NO_BRANCH_PROBER}. {SEARCH_IS_RECORDED_MODE_ONLY}")
@@ -187,8 +177,8 @@ class SearchStrategy:
 class _Walk:
     """One planner step's walk: the shared ledger, the nodes, and the bill.
 
-    Mutable and per-step. It exists so the ledger has ONE carrier — every branch's cost lands
-    in ``ledger`` before the next branch is considered, which is what a shared cap means.
+    Mutable and per-step, so the ledger has ONE carrier: every branch's cost lands in ``ledger``
+    before the next branch is considered, which is what a shared cap means.
     """
 
     ctx: StrategyContext
@@ -249,8 +239,8 @@ class _Walk:
     def _branch_out(self, parent: _Path) -> tuple[_Path, ...]:
         """Every branch this node can afford: one read each, scored and recorded.
 
-        Stops on the node's branch allowance, on a duplicate read, or on the shared ledger —
-        each with its own recorded reason, so a short walk is never read as a full one.
+        Stops on the branch allowance, a duplicate read, or the shared ledger — each with its
+        own recorded reason, so a short walk is never read as a full one.
         """
         allowance = self.walk.branches()
         children: list[_Path] = []
@@ -290,8 +280,8 @@ class _Walk:
             raise ValueError(f"{NO_BRANCH_PROBER}. {SEARCH_IS_RECORDED_MODE_ONLY}")
         before = self._budget()
         outcome = prober(_with_ledger(parent.run_state, before), probe)
-        # The ledger moves forward whatever the outcome: a refusal costs nothing, and saying so
-        # is the ledger's business rather than this walk's.
+        # The ledger moves forward whatever the outcome; whether a refusal cost anything is
+        # the ledger's business, not this walk's.
         self.ledger = outcome.run_state.budget
         if outcome.refused is not None:
             self._refused(parent, probe, candidate, outcome.refused)
@@ -408,7 +398,7 @@ class _Walk:
         """Score one node: one selector call, then plan 02 § 257's four terms.
 
         ``cost_from`` is the ledger before this node's first charge, so a branch's own cost
-        includes the read; the score reads the PATH's cost, which is what paths differ by.
+        includes its read; the score reads the PATH's cost, which is what paths differ by.
         """
         selection, after, selector_call_id = self._select(run_state, candidates)
         chosen = chosen_candidate(selection, candidates)
@@ -484,7 +474,7 @@ class _Walk:
         """The chosen path, as the loop takes any other step.
 
         The state carries the chosen path's evidence and the WHOLE walk's ledger: a branch not
-        taken leaves its cost behind, and its reading behind with it.
+        taken leaves its cost behind, and its reading with it.
         """
         updated = best.run_state.model_copy(
             update={
@@ -507,8 +497,8 @@ class _Walk:
             iteration=self.ctx.iteration,
             strategy=self.strategy.name,
             model=self.ctx.model,
-            # The CHOSEN path's set, so pass@k means for this arm what it means elsewhere;
-            # every other node is under ``search``.
+            # The CHOSEN path's set, so pass@k means what it means elsewhere; every other node
+            # is under ``search``.
             candidate_set=tuple(
                 candidate_record_of(candidate, generation_call_id=best.generation_call_id)
                 for candidate in best.candidates
@@ -561,8 +551,8 @@ def _best_of(paths: Sequence[_Path]) -> _Path:
 def _confidence(selection: SelectionResult) -> float:
     """The selector's own score for the candidate it points at, or 0.0 when it points at none.
 
-    Its ``uncertainty`` is NOT folded in — that is the ``safety_risk`` term, and a confidence
-    built from two numbers multiplied together could not say which one decided a path.
+    ``uncertainty`` is NOT folded in — that is the ``safety_risk`` term, and a confidence built
+    from two numbers could not say which one decided a path.
     """
     chosen_id = selection.chosen_candidate_id
     if chosen_id is None:

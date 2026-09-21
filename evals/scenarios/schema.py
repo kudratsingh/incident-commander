@@ -1,8 +1,7 @@
 """Scenario schema. A scenario is a triggering alert plus a scored expectation.
 
 The runner starts a run from the alert, drives the state machine to a terminal state and
-calls the grader with the scenario's ``expectation``. Canned tool responses exercise the
-agent offline against a fake platform, one response (or ordered list) per tool name.
+calls the grader with ``expectation``. ``canned_tool_responses`` is the offline fake platform.
 """
 
 from __future__ import annotations
@@ -35,35 +34,20 @@ from incident_commander.tools.registry import TOOL_REGISTRY
 _SNAPSHOT_PATH: Final = (
     Path(__file__).resolve().parents[2] / "contracts" / "platform-tools.snapshot.json"
 )
-# The platform stamps every chaos tool's description with its blast radius, and selecting
-# on that prefix is the structural filter ``test_registry.py`` already uses — hand-lists
-# of chaos tools have drifted three times here, so nothing is hand-listed.
+# The platform stamps every chaos tool's description with its blast radius, so the set is
+# selected on that prefix rather than hand-listed — hand-lists have drifted three times here.
 _CHAOS_PREFIX: Final = "[chaos:"
-# Chaos tools the platform registers and the commander deliberately does not use.
-# Excluding them HERE means no rebless can silently widen the closed set — v0.6.0 took
-# the snapshot from 27 tools to 29 without touching this, which is the mechanism working.
-#
-# EMPTY since WO-R3-339 (ADR 0076), and the mechanism stays because the next deferred hook
-# has to be excludable the same way. Its one member was `seed_dlq_messages`, held out with
-# the rest of ADR 0010's commander half: that packet flips the inter-scenario DLQ baseline
-# to empty, which is a change to every scenario, and nobody wanted the hook before the
-# baseline. The demo needs the hook and not the baseline. It is the ONLY hook whose
-# `remediation_hint` accepts `replay_safe` — `create_bad_data_job`'s enum is
-# `human_required`/`unclassified` by design, and `create_mislabeled_dlq_job` writes a row
-# whose `replay_safe` label CONTRADICTS its text on purpose — so a world where the platform
-# can honestly page for a replayable backlog is reachable through this hook and no other
-# (`evals/scenarios/demo_dlq_replay_safe_backlog.yaml`). Admitting it changes nothing about
-# the baseline: the seeded four rows stay, `make world-audit` still wants a DLQ total of 4,
-# and the hook's rows are DELETEd by the next reset (measured: `seeded_dlq_deleted: 3`).
+# Chaos tools the platform registers but the commander deliberately never calls. Excluding them
+# here means a snapshot rebless cannot silently widen the closed set. Empty since WO-R3-339:
+# `seed_dlq_messages` was admitted because it is the only hook that writes a `replay_safe` row.
 _DEFERRED_CHAOS_TOOLS: Final[frozenset[str]] = frozenset()
 
 
 def _chaos_schemas_from_snapshot(payload: object) -> dict[str, dict[str, Any]]:
     """Chaos tools in a parsed ``tools/list`` snapshot: name → ``inputSchema``.
 
-    The same structural ``[chaos:`` prefix as the name closure, minus deferrals. A tool
-    with no ``inputSchema`` maps to an empty one, which admits anything — the walk's own
-    "nothing to check against" posture rather than a spurious load failure.
+    A tool with no ``inputSchema`` maps to an empty one, which admits anything — the walk's
+    own "nothing to check against" posture rather than a spurious load failure.
     """
     if not isinstance(payload, dict):
         return {}
@@ -91,11 +75,10 @@ def _chaos_names_from_snapshot(payload: object) -> frozenset[str]:
 
 @lru_cache(maxsize=1)
 def chaos_tool_schemas() -> Mapping[str, dict[str, Any]]:
-    """The declarable chaos hooks and their ``inputSchema``s.
+    """The declarable chaos hooks and their ``inputSchema``s, from the contract snapshot.
 
-    From the committed contract snapshot, read lazily and cached, because ``evals`` is
-    imported at collection time. A missing snapshot is a broken checkout, and the
-    ``FileNotFoundError`` says so more usefully than a silent empty set.
+    Read lazily and cached, because ``evals`` is imported at collection time. A missing
+    snapshot is a broken checkout, which the ``FileNotFoundError`` says better than an empty set.
     """
     return MappingProxyType(_chaos_schemas_from_snapshot(json.loads(_SNAPSHOT_PATH.read_text())))
 
@@ -106,14 +89,11 @@ def chaos_tool_names() -> frozenset[str]:
 
 
 def resolve_schema_ref(prop: object, schema: Mapping[str, Any]) -> object:
-    """One property with its local ``$ref`` followed into the schema's ``$defs``.
+    """One property with its local ``$ref`` followed into the schema's ``$defs``, one hop.
 
-    A closed enum reaches the snapshot as a ``$ref`` with its ``type`` and ``enum`` one
-    level down, so a checker reading the property alone sees a schema declaring nothing:
-    without the hop, ``chaos_argument_errors`` accepted both ``loop_name=1`` and
-    ``loop_name="not_a_loop"`` (platform v0.6.9's ``pause_control_loop``). Local refs
-    only, one hop; the property's own keys win, and anything unresolvable comes back
-    unchanged.
+    A closed enum reaches the snapshot as a ``$ref`` with its ``type`` and ``enum`` one level
+    down, so without the hop ``chaos_argument_errors`` accepted ``loop_name="not_a_loop"``
+    (platform v0.6.9's ``pause_control_loop``). Anything unresolvable comes back unchanged.
     """
     if not isinstance(prop, dict):
         return prop
@@ -154,12 +134,11 @@ def json_types_for(prop: object) -> frozenset[str]:
 
 
 def enum_values_for(prop: object) -> tuple[Any, ...] | None:
-    """The closed set of values a resolved property admits, or ``None``.
+    """The closed set of values a resolved property admits, or ``None`` when not closed.
 
-    ``None`` means not closed, which is also the answer for an unresolved ``$ref``. An
-    ``anyOf`` branch with no ``enum`` returns ``None`` rather than the union of the
-    others, since the union is a NARROWER claim than the schema makes and rejecting a
-    legal value is worse than passing an illegal one. A plain null branch is the exception.
+    An ``anyOf`` branch with no ``enum`` returns ``None`` rather than the union of the others:
+    the union is a NARROWER claim than the schema makes, and rejecting a legal value is worse
+    than passing an illegal one. A plain null branch is the exception.
     """
     if not isinstance(prop, dict):
         return None
@@ -209,8 +188,7 @@ def chaos_argument_errors(name: str, arguments: Mapping[str, Any]) -> list[str]:
     """Ways one chaos invocation disagrees with the snapshot's ``inputSchema``.
 
     Unknown names, missing required ones, primitive types and closed-set membership: a
-    name-and-required-only check would miss a ``ttl_seconds`` integer→string flip, the
-    S-18 probe's shape. Each property is resolved through ``resolve_schema_ref`` first.
+    name-and-required-only check would miss a ``ttl_seconds`` integer→string flip (S-18).
     """
     schema = chaos_tool_schemas().get(name)
     if schema is None:
@@ -220,6 +198,7 @@ def chaos_argument_errors(name: str, arguments: Mapping[str, Any]) -> list[str]:
     if not properties:
         return []  # schema declares no properties — nothing to check against
     errors: list[str] = []
+    # 1. Names the schema does not declare.
     unknown = sorted(set(arguments) - set(properties))
     if unknown:
         errors.append(
@@ -227,11 +206,13 @@ def chaos_argument_errors(name: str, arguments: Mapping[str, Any]) -> list[str]:
             "The platform declares additionalProperties=false, so live seeding "
             "would fail on this."
         )
+    # 2. Required names the invocation omits.
     raw_required = schema.get("required")
     required = raw_required if isinstance(raw_required, list) else []
     missing = sorted({str(field) for field in required} - set(arguments))
     if missing:
         errors.append(f"missing required argument(s) {missing} for {name}")
+    # 3. Each value against its resolved JSON type and closed set.
     for argument, value in sorted(arguments.items()):
         if argument not in properties:
             continue  # already reported as unknown
@@ -257,12 +238,11 @@ TTL_ARGUMENT: Final[str] = "ttl_seconds"
 
 
 def _ttl_bound_errors(name: str, resolved: int) -> list[str]:
-    """Ways a resolved TTL falls outside the snapshot's own bounds for that hook.
+    """Ways a resolved TTL falls outside the snapshot's own ``minimum``/``maximum`` for a hook.
 
-    ``chaos_argument_errors`` checks names, types and closed sets — not ``minimum`` and
-    ``maximum``, which no hand-written argument had ever needed. A DERIVED one does: the
-    knobs decide the number, the platform caps ``ttl_seconds`` at 3600, and a refusal
-    mid-seeding would arrive after the world had been touched.
+    ``chaos_argument_errors`` checks names, types and closed sets, which is all a hand-written
+    argument needed. A DERIVED one needs bounds too: the knobs decide the number, the platform
+    caps ``ttl_seconds`` at 3600, and a refusal mid-seeding arrives after the world was touched.
     """
     schema = chaos_tool_schemas().get(name) or {}
     raw = schema.get("properties")
@@ -286,30 +266,25 @@ def _ttl_bound_errors(name: str, resolved: int) -> list[str]:
 
 
 class TtlFromWindows(BaseModel):
-    """A self-recovering fault's TTL, as a multiple of the agent's own timing knobs.
+    """A self-recovering fault's TTL, as a multiple of the agent's own timing knobs (WP-14.1).
 
-    WP-14.1. A bare ``ttl_seconds: 45`` reads as a fact and is really a bet on
-    ``INVESTIGATE_REPROBE_DELAY_SECONDS`` still being 75 — change the knob and the
-    template silently becomes a different experiment (the fault outlives the run, or
-    expires before the agent's first probe). So the TTL is DERIVED: what the
-    precondition spends proving the fault is there, plus a declared multiple of the
-    window each knob pair gives the investigation and the verify poll.
+    A bare ``ttl_seconds: 45`` reads as a fact and is really a bet on
+    ``INVESTIGATE_REPROBE_DELAY_SECONDS`` still being 75 — change the knob and the template
+    silently becomes a different experiment.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    #: Multiple of the ADR 0009 investigation re-probe window. 0.6 puts the expiry
-    #: inside the investigation (the fault is gone before the agent can act); 1.0 or
-    #: more carries it past the action.
+    #: Multiple of the ADR 0009 investigation re-probe window. 0.6 puts the expiry inside the
+    #: investigation (gone before the agent can act); 1.0 or more carries it past the action.
     investigation_multiple: float = Field(default=0.0, ge=0.0, le=10.0)
     #: Multiple of the ADR 0006 verify polling window, added on top.
     verify_multiple: float = Field(default=0.0, ge=0.0, le=10.0)
-    #: The smallest TTL that still leaves the fault observable at run start, in the
-    #: units the world imposes (a metric's refresh interval, a heartbeat's staleness
-    #: bar). Load-bearing at the OFFLINE knob defaults, where both windows are 0.
+    #: The smallest TTL that still leaves the fault observable at run start, in the units the
+    #: world imposes. Load-bearing at the OFFLINE knob defaults, where both windows are 0.
     floor_seconds: float = Field(default=30.0, ge=1.0, le=3600.0)
-    #: Why this floor, in the scenario author's own words. Required, because a floor
-    #: is the one number in the derivation that is not derived.
+    #: Why this floor, in the scenario author's own words. Required, because a floor is the
+    #: one number in the derivation that is not derived.
     floor_reason: str = Field(min_length=20)
 
     def seconds(
@@ -335,12 +310,9 @@ class TtlFromWindows(BaseModel):
 class ChaosHook(BaseModel):
     """Declarative chaos-hook invocation the runner fires before a live run.
 
-    Puts "which hook seeds this scenario" in the scenario file rather than operator
-    memory. Live runs only; canned tool responses already encode the broken state.
     ``name`` is a CLOSED SET, because ``ChaosClient.call`` forwards it verbatim as a
-    ``tools/call`` and a free string would let a YAML execute any tool the chaos
-    principal can reach (S-03). ``arguments`` is closed against the same snapshot entry,
-    so a typo'd name or flipped type fails at LOAD rather than mid-campaign (G1-07).
+    ``tools/call`` and a free string would let a YAML execute any tool the chaos principal can
+    reach (S-03). ``arguments`` is closed against the same snapshot entry (G1-07).
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -381,12 +353,10 @@ class ChaosHook(BaseModel):
 
     @model_validator(mode="after")
     def _a_derived_ttl_replaces_a_written_one(self) -> ChaosHook:
-        """A derivation is the hook's only TTL, and only where the hook has one.
+        """A derivation is the hook's only TTL, and only where the hook's schema has one.
 
-        Two spellings of one fact is how ``FIX_MAP`` drifted (divergence C5): a written
-        ``ttl_seconds`` beside a derivation would seed one value and document another.
-        And a derivation on a hook whose schema has no TTL is fiction — the argument
-        would be rejected live, after the world was touched.
+        Two spellings of one fact is how ``FIX_MAP`` drifted (divergence C5), and a derivation
+        on a hook with no TTL would be rejected live, after the world was touched.
         """
         if self.ttl_from_windows is None:
             return self
@@ -441,30 +411,19 @@ class ChaosHook(BaseModel):
 
 
 class ChaosPlan(BaseModel):
-    """The whole fault a scenario manufactures, and how it is put back.
+    """The whole fault a scenario manufactures, and how it is put back (plan 01 § 4).
 
-    Multi-fault and cascading worlds need more than one hook in a DECLARED order, and
-    every one has to say how the world is restored (plan 01 § 4). ``setup`` fires in
-    order under the chaos principal, and a failure means the BENCHMARK WORLD IS INVALID —
-    the scenario is abandoned ungraded rather than scored against a premise nobody
-    established. ``teardown`` fires in a ``finally``, and its failure is a different event
-    from an agent failure: the grade may stand while the SHARED world is contaminated, so
-    it blocks further live runs until ``make eval-reset``. ``settle_seconds`` is the
-    plan-level wait before preconditions look, not a replacement for their polling.
-
-    Teardown is NOT mandatory, deliberately: the accepted model is compensators where
-    practical plus a bounded TTL plus the authoritative reset (plan 05 § A) — several
-    hooks have no compensator at all, and a schema demanding one would be satisfied by
-    fiction. Both halves are ``ChaosHook``, so neither gets a weaker validator.
+    ``setup`` fires in declared order under the chaos principal, and a failure means the
+    BENCHMARK WORLD IS INVALID — the scenario is abandoned ungraded. A ``teardown`` failure is a
+    different event: the grade stands, the SHARED world does not, and live runs are blocked.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     setup: tuple[ChaosHook, ...] = ()
     teardown: tuple[ChaosHook, ...] = ()
-    # Bounded so a typo cannot park a paid run for an hour; generous next to
-    # ``PreconditionProbe.delay_seconds`` because this is ONE wait for the whole plan,
-    # and a cascade's second-order effect can take minutes of loop ticks.
+    # The plan-level wait before the preconditions look, not a replacement for their polling.
+    # Bounded so a typo cannot park a paid run for an hour; ONE wait for the whole plan.
     settle_seconds: float = Field(default=0.0, ge=0.0, le=300.0)
 
     @property
@@ -490,14 +449,9 @@ class ChaosPlan(BaseModel):
 class PreconditionField(FieldComparator):
     """One assertion about the world, before the agent is allowed to start.
 
-    ``path`` reads the probe's parsed response, descending into lists at ``[]``, and
-    holds when ANY observed value satisfies it — the only useful reading where row order
-    is not guaranteed. ``where`` narrows to ONE row first, as on
-    ``EvidenceFieldExpectation``, because the any-row reading is cross-satisfiable: two
-    assertions over a five-row queue can be met by two DIFFERENT rows, so "the injected
-    fault landed unclassified" was really two weaker premises side by side. A selector
-    matching no row fails closed and says the ROW was never seen, because "the hook did
-    not fire" and "it wrote the wrong thing" send a reader to different places.
+    ``path`` reads the probe's parsed response, descending into lists at ``[]``, and holds when
+    ANY observed value satisfies it. ``where`` narrows to ONE row first, because the any-row
+    reading is cross-satisfiable: two assertions can be met by two DIFFERENT rows.
     """
 
     path: str = Field(min_length=1)
@@ -545,8 +499,7 @@ class PreconditionProbe(BaseModel):
     arguments: dict[str, Any] = Field(default_factory=dict)
     expect: tuple[PreconditionField, ...] = Field(min_length=1)
     # Chaos is not instantaneous — a killed consumer's lag climbs over the platform's 60s
-    # metrics interval — so a slow fault declares how long to wait. One look by default,
-    # since most preconditions are about seeded state that is there or is not.
+    # metrics interval — so a slow fault declares how long to wait. One look by default.
     attempts: int = Field(default=1, ge=1, le=30)
     delay_seconds: float = Field(default=0.0, ge=0.0, le=60.0)
 
@@ -559,15 +512,9 @@ class PreconditionProbe(BaseModel):
 class GroundTruth(BaseModel):
     """What was actually wrong with the world — the evaluator's copy, never the agent's.
 
-    The fault written down once, in the enum the agent itself classifies into, so the
-    root-cause grader (WP-2.2) reads a label instead of a human reading a trajectory.
-    Evaluator-only STRUCTURALLY: ``Scenario.agent_visible`` is an allow-list this field
-    is not on (``tests/unit/test_ground_truth_never_leaks.py``). No action fields, because
-    ``expected_action_tools`` already carries that fact and is cross-checked against
-    ``FIX_MAP`` — two sources of truth is how ``FIX_MAP`` drifted for weeks (plan 01 § 5,
-    divergence C5). ``incident_count`` is a fact about the WORLD, not about
-    ``root_causes``: a cascade is one incident with several causes. The level-0 control is
-    the one pairing that is not a judgement call, and it is enforced below.
+    Evaluator-only STRUCTURALLY: ``Scenario.agent_visible`` is an allow-list this field is not
+    on (``tests/unit/test_ground_truth_never_leaks.py``). No action fields — two sources of
+    truth is how ``FIX_MAP`` drifted (divergence C5). ``incident_count`` is about the WORLD.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -605,9 +552,9 @@ class GroundTruth(BaseModel):
     def _no_fault_is_the_whole_answer(self) -> GroundTruth:
         """``no_fault`` means nothing is wrong, so it cannot sit beside a fault.
 
-        Both directions are refused because both are SILENTLY wrong: ``[no_fault,
-        outbox_stall]`` grades an agent correct for two opposite answers, and
-        ``incident_count: 1`` with ``[no_fault]`` claims an incident nobody can name.
+        Both directions are SILENTLY wrong: ``[no_fault, outbox_stall]`` grades an agent
+        correct for two opposite answers, and ``incident_count: 1`` with ``[no_fault]`` claims
+        an incident nobody can name.
         """
         has_no_fault = HypothesisCategory.NO_FAULT in self.root_causes
         if has_no_fault and len(self.root_causes) > 1:
@@ -634,13 +581,9 @@ class GroundTruth(BaseModel):
 class DiscriminatingProbe(BaseModel):
     """One read that separates this scenario's true cause from its neighbours.
 
-    Evaluator-only, like ``GroundTruth``: this is the read a correct investigation WOULD
-    make, so handing the agent the list would hand it the answer. It exists so a strategy
-    comparison can say which run found the distinguishing evidence and which guessed.
-    ``argument_pattern`` maps an argument to a regex, because the discriminating fact is
-    usually the SHAPE of the call; unconstrained arguments are simply absent, and patterns
-    compile at load so a broken one is a load error. ``tool`` must be a registered READ
-    tool — a probe that wrote would change the world it distinguishes.
+    Evaluator-only like ``GroundTruth``: this is the read a correct investigation WOULD make, so
+    handing the agent the list would hand it the answer. It says which run found the
+    distinguishing evidence and which guessed. Patterns match the call's SHAPE, not just its name.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -687,19 +630,13 @@ class DiscriminatingProbe(BaseModel):
 class ScenarioFamily(StrEnum):
     """The observable symptom a scenario's world presents, shared across root causes.
 
-    Plan 03 § 2's benchmark unit, and the first grouping key every report slices on — a
-    closed enum rather than a free string, because a report grouped on typo-adjacent
-    strings reports two families where there is one and a passing suite says nothing.
-    The members are what the corpus honestly IS (promoted from WO-R3-179's provisional
-    substring rule). ``api_latency`` was the one member this docstring named as
-    deliberately absent, on the rule that a member lands in the same change as the
-    scenarios that fill it; WO-R3-221 (WP-8.5, ADR 0066) is that change.
+    Plan 03 § 2's benchmark unit, and the first grouping key every report slices on. A closed
+    enum rather than a free string, because a report grouped on typo-adjacent strings reports
+    two families where there is one. A member lands with the scenarios that fill it.
     """
 
-    # Plan 01 § 7.3's Family A, "the page says latency and the platform disagrees": one
-    # scenario-authored objective alert over four worlds, three of which hold a real
-    # fault the paged objective does not show (evals/scenarios/README-api-latency.md
-    # holds the matrix).
+    # Plan 01 § 7.3's Family A, "the page says latency and the platform disagrees": one alert
+    # over four worlds (evals/scenarios/README-api-latency.md holds the matrix).
     API_LATENCY = "api_latency"
     CACHE_REDIS = "cache_redis"
     CONSUMER_LAG = "consumer_lag"
@@ -714,25 +651,22 @@ class ScenarioFamily(StrEnum):
     JOBS_NOT_PROGRESSING = "jobs_not_progressing"
     NOISE_CONTROL = "noise_control"
     POSTGRES = "postgres"
-    # Plan 00 § 113's capability level 7 (WO-R3-236, WP-14.1): the symptom is a fault
-    # that is there and then is not, on its own clock. Its own family because what the
-    # world PRESENTS is the recovery, not the fault underneath it.
+    # Plan 00 § 113's capability level 7 (WO-R3-236, WP-14.1): a fault that is there and then
+    # is not, on its own clock. What the world PRESENTS is the recovery, not the fault.
     TEMPORAL_RECOVERY = "temporal_recovery"
     TOOL_FAULT = "tool_fault"
     TRACES = "traces"
     WORKFLOW = "workflow"
     # Plan 01 § 7.2's Family C, "the child never ran" (WO-R3-214, WP-7.2). Distinct from
-    # ``workflow``, which groups the chain scenarios written before families existed
-    # (evals/scenarios/README-workflow-stuck.md holds the matrix).
+    # ``workflow``, which groups the chain scenarios written before families existed.
     WORKFLOW_STUCK = "workflow_stuck"
 
 
 class ScenarioDifficulty(StrEnum):
-    """How hard the diagnosis is, on plan 03 § 3's closed vocabulary.
+    """How hard the diagnosis is, on plan 03 § 3's closed vocabulary of nine.
 
-    Closed BY THE PLAN, not by this repo: 03:22 names exactly these nine, so widening it
-    is a plan change. ``control`` is the level-0 rung, and the one member a reader must
-    not guess at: counted as ``single`` it inflates every "solved a real fault" number.
+    Closed BY THE PLAN, not by this repo, so widening it is a plan change. ``control`` is the
+    level-0 rung: counted as ``single`` it inflates every "solved a real fault" number.
     """
 
     CONTROL = "control"
@@ -747,12 +681,10 @@ class ScenarioDifficulty(StrEnum):
 
 
 class BenchmarkSplit(StrEnum):
-    """Which pool a template belongs to (plan 03 § 4).
+    """Which pool a template belongs to (plan 03 § 4). ``holdout`` is NEVER tuned against.
 
-    ``dev`` is visible and tunable, ``validation`` is for version comparisons, and
-    ``holdout`` is NEVER tuned against. The split is a property of the TEMPLATE, enforced
-    at load by ``loader.load_scenarios``: an instance-level holdout lets a later SFT stage
-    memorise the template through its siblings (plan 06 D7).
+    A property of the TEMPLATE, enforced at load by ``loader.load_scenarios``: an
+    instance-level holdout lets a later SFT stage memorise the template through its siblings.
     """
 
     DEV = "dev"
@@ -763,14 +695,9 @@ class BenchmarkSplit(StrEnum):
 class AgentVisibleScenario(BaseModel):
     """Everything about a scenario that reaches the agent under test. The whole list.
 
-    Plan 00 § 3.1's trust boundary written as a type. The runner used to read whatever it
-    needed straight off a ``Scenario``, so the agent-visible set was whatever those call
-    sites happened to touch. An allow-list inverts that: a new field is invisible by
-    construction, and this model is ``extra="forbid"``, so making it visible takes an edit
-    here and a reviewer. The alternative — dump and delete a hand-listed set — fails by
-    OMISSION, which is silent. ``max_tool_calls`` crosses because the agent is TOLD its
-    budget (ADR 0019); ``canned_llm_responses`` does not, because scripted replies are an
-    output of the agent rather than an observation it reads.
+    Plan 00 § 3.1's trust boundary written as a type, and an ALLOW-LIST: a new field is
+    invisible by construction, and ``extra="forbid"`` means making one visible takes an edit
+    here and a reviewer. ``max_tool_calls`` crosses because the agent is TOLD its budget (ADR 0019).
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -791,26 +718,19 @@ class Scenario(BaseModel):
     description: str = ""
     tags: tuple[str, ...] = ()
     # Stable across every instance of one template (plan 03 § 2). ``name`` identifies the
-    # INSTANCE and keys the archive, the report, the baseline and the drift ledger, so it
-    # cannot double as the template key. Defaults to the name via
-    # ``_template_id_defaults_to_name``, not a property, so the inventory, the report and
-    # the loader's split check compare ONE concrete value.
+    # INSTANCE and keys the archive, the report, the baseline and the drift ledger.
     template_id: str = ""
     # Which instance of the template this is. 0 for every legacy scenario, none of which
     # is generated; instance generation (WP-3.x) is what makes it move.
     seed: int = Field(default=0, ge=0)
-    # The observable symptom, and the first key every report groups on. Optional on the
-    # MODEL and mandatory in the CORPUS: required here, every inline test fixture would
-    # carry a family it has no opinion about, so
-    # ``test_scenario_metadata.py::TestEveryScenarioIsClassified`` walks the directory
-    # instead and ``evals/inventory.py`` flags an undeclared row ``provisional``.
+    # The observable symptom, and the first key every report groups on. Optional on the MODEL and
+    # mandatory in the CORPUS, which ``test_scenario_metadata.py`` asserts over the directory.
     family: ScenarioFamily | None = None
-    # How hard the diagnosis is, on plan 03 § 3's closed nine. Optional and mandatory
-    # for ``family``'s reasons, by the same test.
+    # How hard the diagnosis is, on plan 03 § 3's closed nine. Optional and mandatory for
+    # ``family``'s reasons, by the same test.
     difficulty: ScenarioDifficulty | None = None
-    # Which pool this scenario's TEMPLATE belongs to. ``dev`` everywhere and nothing in
-    # ``holdout`` yet: a holdout is a promise never to tune against a template, which is
-    # the user's decision (``TestNothingIsHeldOutWithoutADecision``).
+    # Which pool this scenario's TEMPLATE belongs to. Nothing is in ``holdout`` yet: that is a
+    # promise never to tune against a template, and it is the user's decision.
     benchmark_split: BenchmarkSplit = BenchmarkSplit.DEV
     alert: AlertPayload
     expectation: ScenarioExpectation
@@ -823,42 +743,31 @@ class Scenario(BaseModel):
     # When True the runner ignores ``canned_tool_responses`` and builds a real
     # ``MCPClient``. Such scenarios are skipped while the URL is the offline placeholder.
     use_live_mcp: bool = False
-    # When True the runner ignores ``canned_llm_responses`` and builds real clients for
-    # every role. Skipped under a placeholder key, and non-deterministic, so the
-    # regression gate does not apply.
+    # When True the runner ignores ``canned_llm_responses`` and builds real clients for every
+    # role. Skipped under a placeholder key, and non-deterministic, so no regression gate.
     use_live_llm: bool = False
-    # Optional chaos hook fired before a live run. LEGACY and deliberately kept: every
-    # shipped scenario spells its single fault this way and ``Scenario`` is
-    # ``extra="forbid"``, so a rename is a 40-YAML migration for no gain. ``chaos`` below
-    # normalizes it into a one-hook plan, which is what the runner and the gates read.
+    # Optional single hook fired before a live run. LEGACY and deliberately kept: every shipped
+    # scenario spells its one fault this way, and ``chaos`` below normalizes it to a plan.
     chaos_setup: ChaosHook | None = None
-    # The composable form: many hooks in a declared order, their teardown, and a settle
-    # wait. Declare ONE of the two — the validator refuses both, because two spellings of
-    # one world would compose into a third.
+    # The composable form: hooks in a declared order, their teardown, and a settle wait.
+    # Declare ONE of the two — two spellings of one world would compose into a third.
     chaos_plan: ChaosPlan | None = None
-    # What must be true of the world before the agent starts. Live-only: a canned run
-    # serves the broken state by construction. An unmet precondition abandons the run
-    # BEFORE any model call rather than grading the agent on a false premise.
+    # What must be true of the world before the agent starts. Live-only, and an unmet
+    # precondition abandons the run BEFORE any model call rather than on a false premise.
     expected_precondition: tuple[PreconditionProbe, ...] = ()
-    # Why an eligible scenario is held out of the smoke pass (WO-R2-123); the value IS
-    # the reason, and ``None`` means "in the pass". Membership is otherwise DERIVED
-    # (``smoke_eligible``), so the only thing a human declares is a hold-back, on the
-    # scenario itself: the Makefile pattern lists this replaced could rot three ways that
-    # a scenario-local field cannot. Substantive by construction — write what would have
-    # to be true to lift it, because "skip" is not a reason.
+    # Why an eligible scenario is held out of the smoke pass (WO-R2-123); the value IS the
+    # reason and ``None`` means "in the pass". Membership itself is DERIVED (``smoke_eligible``),
+    # so a hold-back is the only thing a human declares — and it says what would lift it.
     smoke_exclusion: str | None = Field(default=None, min_length=20)
-    # What was actually wrong, for the evaluator only. Optional: a scenario without one
-    # is simply not root-cause-graded, and WP-2.2 reports that coverage rather than
-    # back-filling a guess. ``GroundTruth`` says why no action fields live here.
+    # What was actually wrong, for the evaluator only. Optional: a scenario without one is
+    # simply not root-cause-graded, and WP-2.2 reports that coverage rather than guessing.
     ground_truth: GroundTruth | None = None
     # The reads that tell this fault apart from the ones it looks like. Evaluator-only:
     # the answer key to the investigation, not a hint the agent is entitled to.
     discriminating_probes: tuple[DiscriminatingProbe, ...] = ()
 
-    # Every field above is on exactly one side of plan 00 § 3.1's trust boundary,
-    # DECLARED here rather than inferred from whichever call sites read what. Checked
-    # against ``model_fields`` at import, so a field with no side cannot be imported —
-    # never agent-visible by accident, and never evaluator-only by accident either.
+    # Every field above is on exactly one side of plan 00 § 3.1's trust boundary, DECLARED here
+    # and checked against ``model_fields`` at import, so a field with no side cannot be imported.
     AGENT_VISIBLE_FIELDS: ClassVar[frozenset[str]] = frozenset(
         {
             # The triggering alert — the agent's whole starting brief.
@@ -873,9 +782,8 @@ class Scenario(BaseModel):
             "name",
             "description",
             "tags",
-            # Benchmark bookkeeping (WP-1.4), evaluator-only without exception:
-            # `difficulty` and `family` would narrow the agent's search for free, and
-            # `benchmark_split` would tell it which runs are being scored.
+            # Benchmark bookkeeping (WP-1.4), evaluator-only without exception: `difficulty`
+            # and `family` narrow the search, `benchmark_split` says which runs are scored.
             "template_id",
             "seed",
             "family",
@@ -898,9 +806,8 @@ class Scenario(BaseModel):
         """This scenario projected onto everything the agent is allowed to see.
 
         The runner builds the agent's run from this and nothing else. An ALLOW-LIST, so
-        what it does with a field it has never heard of is nothing: ``ground_truth``
-        cannot leak by somebody forgetting an exclusion, because there is no exclusion
-        list to forget.
+        ``ground_truth`` cannot leak by somebody forgetting an exclusion — there is no
+        exclusion list to forget.
         """
         return AgentVisibleScenario(
             alert=self.alert.model_dump(),
@@ -921,10 +828,9 @@ class Scenario(BaseModel):
     def chaos(self) -> ChaosPlan:
         """This scenario's fault plan, whichever spelling declared it.
 
-        The ONE reader of ``chaos_setup`` anything downstream should use. A legacy hook
-        normalizes to a one-hook plan and a scenario declaring neither to the EMPTY plan,
-        so no caller spells "no chaos" twice. Computed, not stored: a cached copy could
-        disagree with ``chaos_setup``, which is the drift the validators prevent.
+        The ONE reader of ``chaos_setup`` anything downstream should use: a legacy hook
+        normalizes to a one-hook plan and a scenario declaring neither to the EMPTY plan, so no
+        caller spells "no chaos" twice. Computed, because a cached copy could disagree.
         """
         if self.chaos_plan is not None:
             return self.chaos_plan
@@ -936,9 +842,9 @@ class Scenario(BaseModel):
     def seeds_chaos(self) -> bool:
         """Whether this scenario touches the platform's chaos surface at all.
 
-        What the smoke refusal (ADR 0018), the one-mutating-scenario refusal (ADR 0020)
-        and the ``chaos:invoke`` guard should all key off: ``chaos_setup`` is ``None`` on
-        a plan-declaring scenario, so reading it directly stops counting a plan.
+        What the smoke refusal (ADR 0018), the one-mutating-scenario refusal (ADR 0020) and the
+        ``chaos:invoke`` guard all key off: ``chaos_setup`` is ``None`` on a plan-declaring
+        scenario, so reading it directly stops counting a plan.
         """
         return self.chaos.seeds_chaos
 
@@ -951,10 +857,9 @@ class Scenario(BaseModel):
     def precondition_window_seconds(self) -> float:
         """Wall-clock the preconditions may spend before the agent's first call.
 
-        Summed across probes, because they run in sequence, and with
-        ``polling_window_seconds``' own arithmetic per probe: the delay falls BETWEEN
-        attempts, so a one-look probe waits nothing. Part of a derived TTL, since this is
-        fault-time the run has already spent by the time the agent starts.
+        Summed across probes because they run in sequence, with ``polling_window_seconds``'
+        arithmetic per probe. Part of a derived TTL: this is fault-time the run has already
+        spent by the time the agent starts.
         """
         return sum(
             polling_window_seconds(probe.attempts, probe.delay_seconds)
@@ -966,9 +871,8 @@ class Scenario(BaseModel):
         """Why a recorded run of this scenario would not be a run of it — or ``None``.
 
         WP-14.1, and the one refusal this repo makes about a MODE rather than a world: a
-        recording answers the call that was made at the clock it is replayed at (ADR
-        0046), so a fault whose whole content is when it expires replays as a fault that
-        never expires. The row would carry a temporal label over a static world.
+        recording answers each call at the clock it is replayed at (ADR 0046), so a fault whose
+        whole content is when it expires replays as a fault that never expires.
         """
         if not self.is_temporal:
             return None
@@ -985,13 +889,9 @@ class Scenario(BaseModel):
     def _a_timed_fault_asserts_it_is_present_at_run_start(self) -> Scenario:
         """A temporal template proves its fault is THERE, not that it was seeded.
 
-        A time-windowed fixture drifts by the clock rather than by the data (LESSONS
-        2026-09-07: ``failed_traces_scan``'s seeded traces age out of their own probe
-        window), and a TTL fault is a time-windowed fixture BY DESIGN. Without a
-        precondition the two failure modes are indistinguishable from the grade: a fault
-        so short the agent never saw it reads as an agent that missed it, which measures
-        the harness. So the precondition is structural here, not a scenario author's
-        habit.
+        A TTL fault is a time-windowed fixture BY DESIGN (LESSONS 2026-09-07), and without a
+        precondition a fault so short the agent never saw it reads as an agent that missed it —
+        which measures the harness. So the precondition is structural, not an author's habit.
         """
         if self.is_temporal and not self.expected_precondition:
             raise ValueError(
@@ -1010,9 +910,8 @@ class Scenario(BaseModel):
         """A scenario that declares no ``template_id`` is its own template.
 
         Filled before field validation rather than exposed as a ``template_id or name``
-        property: the split check, the inventory row and the report's grouping key all
-        compare this value, and a computed fallback beside a stored field is two spellings
-        of one identity. Non-mapping payloads are left to pydantic's own message.
+        property: the split check, the inventory row and the report's grouping key all compare
+        this ONE value. Non-mapping payloads are left to pydantic's own message.
         """
         if isinstance(payload, Mapping) and not payload.get("template_id"):
             name = payload.get("name")
@@ -1024,10 +923,8 @@ class Scenario(BaseModel):
     def _template_id_is_not_empty(self) -> Scenario:
         """Belt to ``_template_id_defaults_to_name``'s braces.
 
-        The only route to an empty template id is a construction that bypassed the
-        before-validator, and it is worth one branch: ``""`` compared to ``""`` across
-        unrelated scenarios either refuses a healthy corpus as "one template in two
-        splits" or groups the whole corpus as one template in every report.
+        Worth one branch: ``""`` compared to ``""`` across unrelated scenarios either refuses a
+        healthy corpus as "one template in two splits" or groups the whole corpus as one.
         """
         if not self.template_id:
             raise ValueError(
@@ -1041,10 +938,9 @@ class Scenario(BaseModel):
     def _one_spelling_of_the_fault(self) -> Scenario:
         """Refuse both spellings at once, and refuse a plan that seeds nothing.
 
-        Both-at-once has no defensible reading: firing both composes a world neither
-        declaration describes, and firing one silently ignores the other. An empty
-        ``setup`` reads as "this scenario seeds chaos" to a human while ``seeds_chaos``
-        is False, which puts a scenario the author gated out back into the smoke pass.
+        Firing both composes a world neither declaration describes; firing one silently ignores
+        the other. An empty ``setup`` reads to a human as "this scenario seeds chaos" while
+        ``seeds_chaos`` is False, which puts a gated-out scenario back into the smoke pass.
         """
         if self.chaos_setup is not None and self.chaos_plan is not None:
             raise ValueError(
@@ -1064,12 +960,9 @@ class Scenario(BaseModel):
     def smoke_eligible(self) -> bool:
         """Whether the read-only smoke stage can run and grade this honestly.
 
-        The runner's own two refusals, not a second opinion about "read-only":
-        ``seeds_chaos``, because seeding mutates the shared world the stage exists to
-        prove it did not touch (ADR 0018, S-03) — and read through ``seeds_chaos``, since
-        a plan leaves ``chaos_setup`` ``None``; and ``expected_action_tools``, a graded
-        Tier-1 write the read-scoped token 403s by design. NOT ``not canned_only``: the
-        stage deliberately mixes canned harness-sanity rows with live reads.
+        The runner's own two refusals: ``seeds_chaos``, because seeding mutates the shared world
+        the stage exists to prove it did not touch (ADR 0018, S-03), and
+        ``expected_action_tools``, a graded Tier-1 write the read-scoped token 403s by design.
         """
         return not self.seeds_chaos and not self.expectation.expected_action_tools
 
@@ -1082,9 +975,8 @@ class Scenario(BaseModel):
     def _smoke_exclusion_is_not_redundant(self) -> Scenario:
         """An exclusion the predicate already covers implies a live decision.
 
-        The runner refuses such a scenario from a smoke selection anyway, so the
-        hold-back records a choice nobody still has to make and goes on implying one.
-        A load-time refusal now, so the redundant entry cannot be committed.
+        The runner refuses such a scenario from a smoke selection anyway, so the hold-back
+        records a choice nobody still has to make — refused at load, not at review.
         """
         if self.smoke_exclusion is not None and not self.smoke_eligible:
             raise ValueError(
@@ -1099,10 +991,9 @@ class Scenario(BaseModel):
     def canned_only(self) -> bool:
         """True when the scenario declares no live leg at all.
 
-        A statement about the WORLD, not the env: the platform cannot manufacture this
-        fault, so a "live" run would grade the agent against a premise that does not
-        exist. The runner refuses the selection (exit 8) rather than serving canned
-        fixtures inside a live report, and each such YAML carries what would unblock it.
+        A statement about the WORLD, not the env: the platform cannot manufacture this fault, so
+        the runner refuses a live selection (exit 8) rather than serving canned fixtures inside
+        a live report. Each such YAML carries what would unblock it.
         """
         return not (self.use_live_mcp or self.use_live_llm)
 
@@ -1110,11 +1001,8 @@ class Scenario(BaseModel):
 def _classify_every_scenario_field() -> None:
     """Refuse, at import, a ``Scenario`` field nobody put on a side of the boundary.
 
-    A module-level check rather than a test, because the failure is the quiet one: an
-    undeclared evaluator-only field is safe only while nobody widens the projection, and
-    an undeclared agent-visible one is invisible to every leak test. Either mistake is an
-    OMISSION, which does not announce itself in a diff. ``RuntimeError``, not ``assert``,
-    so ``python -O`` cannot turn it off.
+    A module-level check rather than a test, because either mistake is an OMISSION that does not
+    announce itself in a diff. ``RuntimeError``, not ``assert``, so ``python -O`` cannot skip it.
     """
     declared = Scenario.AGENT_VISIBLE_FIELDS | Scenario.EVALUATOR_ONLY_FIELDS
     actual = set(Scenario.model_fields)

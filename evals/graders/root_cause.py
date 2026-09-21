@@ -1,13 +1,9 @@
 """Root-cause scoring: what the agent concluded vs what was actually wrong.
 
-The arithmetic behind ``GradeDimension.ROOT_CAUSE`` (plan 03 § 7.1, WP-2.2), split
-out so the dependency points one way (``deterministic.py`` imports this) and so
-plan 03 § 12's reward and WP-2.5's aggregate report can reuse it. Four decisions:
-the final diagnosis is ``RunState.hypotheses[0]`` (plan 02 § 11.3); the diagnosed
-SET is that label plus any other cause the ranking still asserts at the bar the
-loop acts on (ADR 0059, amending WO-R3-191's one-label reading); exact set is the
-pass condition; and a label is true of ONE world (INC-003, WO-R3-265) — see
-``label_describes_this_world``, ``not_graded_detail``.
+The arithmetic behind ``GradeDimension.ROOT_CAUSE`` (plan 03 § 7.1, WP-2.2), split out so
+``deterministic.py`` imports this and not the reverse. Four decisions: the final diagnosis
+is ``RunState.hypotheses[0]``; the diagnosed SET adds every cause the ranking asserts at the
+acting bar (ADR 0059); exact set passes; a label is true of ONE world (INC-003, WO-R3-265).
 """
 
 from __future__ import annotations
@@ -22,18 +18,17 @@ from incident_commander.agent.hypothesis import Hypothesis, HypothesisCategory
 from incident_commander.agent.state import RunState
 
 #: How a ROOT_CAUSE detail opens when the run's world is not the label's.
-#: ``deterministic.is_vacuous_detail`` matches on it, so a not-graded row leaves
-#: the accuracy denominator as an unasserted dimension would.
+#: ``deterministic.is_vacuous_detail`` matches on it, so the row leaves the accuracy
+#: denominator as an unasserted dimension would.
 NOT_GRADED_PREFIX: Final[str] = "not graded:"
 
 
 def label_describes_this_world(*, live_mcp: bool, chaos_seeded: bool) -> bool:
     """Is the world this run was in the world the ground truth describes?
 
-    Canned carries the label (it is where the label was read from); so does live
-    that seeded its own fault. Live with nothing seeded does not — the smoke pass
-    (INC-003). Whether the row would PASS is not a factor. Trivial on purpose: the
-    runner and ``scripts/regrade_archive.py`` must answer with the same function.
+    Canned carries the label, and so does live that seeded its own fault; live with nothing
+    seeded is the smoke pass and does not (INC-003). Trivial on purpose: the runner and
+    ``scripts/regrade_archive.py`` must answer with the same function.
     """
     return not live_mcp or chaos_seeded
 
@@ -61,12 +56,9 @@ def is_not_graded_detail(detail: str) -> bool:
 def diagnosis_set(run: RunState) -> tuple[HypothesisCategory, ...]:
     """Every cause the run's final ranking ASSERTS, not merely considers (ADR 0059).
 
-    The top hypothesis, plus any other the ranking still holds at or above the bar the
-    loop acts on. Hedging below the bar stays free and uncounted; naming a second cause
-    at the bar costs precision when it is wrong, which is why this cannot be padded.
-    Empty only when the run produced no ranking at all. Read off the SLOTS the briefing
-    shows a human (WP-11.3, ADR 0065) rather than re-derived here: the set the grader
-    scores and the decomposition the handoff names are one projection, or they drift.
+    The top hypothesis plus any other held at or above the acting bar, so hedging below it
+    stays free and a wrong second cause costs precision. Read off the SLOTS the briefing
+    shows a human (WP-11.3, ADR 0065), or the grade and the handoff drift apart.
     """
     return incidents_of(run).categories
 
@@ -74,12 +66,9 @@ def diagnosis_set(run: RunState) -> tuple[HypothesisCategory, ...]:
 def final_diagnosis(run: RunState) -> Hypothesis | None:
     """The agent's answer to "what was wrong?", or ``None`` if it never said.
 
-    Plan 02 § 11.3's top candidate at the deciding step. Sound because
-    ``investigation.py::_plan_next_step`` is the field's only writer and the
-    ``remediate``/``stop`` branches return from the iteration that wrote it; index 0
-    is top by construction (``InvestigationStep`` re-sorts, B-07). NOT the StepRecord
-    stream, which needs ``EVAL_TRACE_DIR`` and so would not grade under ``make eval``
-    (divergence D1). A run with no ranking grades red: silence is not a diagnosis.
+    Plan 02 § 11.3's top candidate at the deciding step; index 0 is top by construction
+    (``InvestigationStep`` re-sorts, B-07). NOT the StepRecord stream, which needs
+    ``EVAL_TRACE_DIR`` and so would not grade under ``make eval`` (divergence D1).
     """
     return run.hypotheses[0] if run.hypotheses else None
 
@@ -123,10 +112,9 @@ def score_root_cause(
 ) -> RootCauseScore:
     """Score a diagnosis set against a ground-truth set.
 
-    ``NO_FAULT`` needs no branch: the schema refuses to pair it with any other
-    label (``GroundTruth._no_fault_is_the_whole_answer``), so it is the ordinary
-    exact-set case. An empty prediction scores 0.0 precision — the 1.0 convention
-    would score silence above a wrong answer.
+    ``NO_FAULT`` needs no branch: the schema refuses to pair it with another label, so it is
+    the ordinary exact-set case. An empty prediction scores 0.0 precision, because the 1.0
+    convention would score silence above a wrong answer.
     """
     predicted_set = frozenset(predicted)
     expected_set = frozenset(expected)
@@ -165,9 +153,9 @@ class RootCauseCoverage(BaseModel):
     graded: int
     #: Of those, how many named the declared cause exactly.
     correct: int
-    #: Of the ungraded, how many were held back because the run's world is not the
-    #: label's (INC-003) rather than because no label exists — both outside the
-    #: denominator, but different facts. Defaults to 0 so archives keep their meaning.
+    #: Of the ungraded, how many were held back because the run's world is not the label's
+    #: (INC-003) rather than because no label exists — both outside the denominator, but
+    #: different facts. Defaults to 0, so archives keep their meaning.
     not_graded_world: int = 0
 
     @property

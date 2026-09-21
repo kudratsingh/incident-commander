@@ -1,10 +1,8 @@
 """Per-scenario JSONL tracer for eval runs.
 
-Every LLM and MCP call becomes one JSON line in
-``<EVAL_TRACE_DIR>/<scenario>.jsonl`` (``make eval-live`` sets that variable).
-Each line carries a ``kind`` from ``TraceKind`` plus an ``invocation_id``, and the
-full request and response — the raw Anthropic response, captured before parsing,
-because the callbacks plumb straight through ``LLMClient`` and ``MCPClient``.
+Every LLM and MCP call becomes one line in ``<EVAL_TRACE_DIR>/<scenario>.jsonl``, carrying a
+``TraceKind``, an ``invocation_id`` and the full request and response — the raw Anthropic
+response, captured before parsing.
 """
 
 from __future__ import annotations
@@ -41,9 +39,8 @@ class TraceKind(StrEnum):
     PRECONDITION = "precondition"
     #: The chaos hook a live scenario fires to seed its fault (``runner``).
     CHAOS_SETUP = "chaos_setup"
-    #: One planner step as the strategy recorded it: the candidate set, the step,
-    #: the ranking either side, and the bill (``agent.strategies.records
-    #: .StepRecord``, plan 02 § 7). Evaluator-side data, never read back into a run.
+    #: One planner step as ``agent.strategies.records.StepRecord`` wrote it: candidates, step,
+    #: rankings either side, bill (plan 02 § 7). Evaluator-side, never read back into a run.
     STEP = "step"
     #: Scenario boundaries: the header and footer of one invocation.
     SCENARIO_START = "scenario_start"
@@ -67,9 +64,8 @@ class JsonlTracer:
         self.path.parent.mkdir(parents=True, exist_ok=True)
 
     def write(self, record: dict[str, Any]) -> None:
-        # ``record_id`` identifies ONE record inside an invocation: a repaired
-        # call writes two and the second names the first as ``repair_of``
-        # (ADR 0035). ``setdefault`` because ``LLMClient`` mints its own.
+        # ``record_id`` identifies ONE record inside an invocation: a repaired call writes two,
+        # the second naming the first as ``repair_of`` (ADR 0035). ``LLMClient`` mints its own.
         record.setdefault("record_id", uuid.uuid4().hex[:12])
         record.setdefault("timestamp", datetime.now(UTC).isoformat())
         record.setdefault("invocation_id", self.invocation_id)

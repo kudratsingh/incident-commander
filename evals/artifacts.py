@@ -1,11 +1,9 @@
 """Versioned eval artifacts — naming, exclusive-create writes, newest-wins reads.
 
-``<stem>.<YYYYMMDDTHHMMSSZ>.<invocation_id>.<ext>``, written ``open("x")`` so a path
-holding evidence raises rather than being replaced (invariant 9 — the four flat
-"refreshable pointers" are withdrawn, and survive as each family's oldest version).
-``newest(kind, scenario)`` is the ONE resolver: by the filename's stamp, never mtime.
-``KINDS`` carries each family's sub-folder too (WO-R3-257); the map for a human is
-``evals/reports/README.md``, and the move is ``scripts/migrate_reports_layout.py``.
+``<stem>.<YYYYMMDDTHHMMSSZ>.<invocation_id>.<ext>``, written ``open("x")`` so a path holding
+evidence raises rather than being replaced (invariant 9). ``newest(kind, scenario)`` is the
+ONE resolver, by the filename's stamp and never mtime. ``KINDS`` carries each family's
+sub-folder too (WO-R3-257); ``evals/reports/README.md`` is the map for a human.
 """
 
 from __future__ import annotations
@@ -42,10 +40,9 @@ MONTH_FORMAT: Final[str] = "%Y-%m"
 class ArtifactKind:
     """One family of versioned outputs, and where in the tree it lives.
 
-    ``parts`` is the CONTAINER (the old flat directory, which reads still cover);
-    ``folder`` plus ``grouping`` (``none``/``scenario``/``month``) say where a write
-    lands below it. ``fixed_stem`` marks a per-run family (``scenario=None``), and
-    ``legacy_name`` is its pre-versioning filename.
+    ``parts`` is the CONTAINER, which reads still cover; ``folder`` plus ``grouping``
+    (``none``/``scenario``/``month``) say where a write lands below it. ``fixed_stem`` marks a
+    per-run family, and ``legacy_name`` is its pre-versioning filename.
     """
 
     parts: tuple[str, ...]
@@ -67,8 +64,7 @@ KINDS: Final[dict[str, ArtifactKind]] = {
     # 93% repeat renders. Those move to `human/_superseded/<scenario>/`, not deleted.
     "human": ArtifactKind(("evals", "reports", "human"), ".txt", grouping="scenario"),
     # One folder per calendar month under `runs/`, so the one file the gate reads
-    # (`baseline.json`) is visible. The month comes from the report's own
-    # `generated_at` — folder derived from contents, exactly as the name is.
+    # (`baseline.json`) stays visible. The month comes from the report's own `generated_at`.
     "report": ArtifactKind(
         ("evals", "reports"),
         ".json",
@@ -77,15 +73,12 @@ KINDS: Final[dict[str, ArtifactKind]] = {
         folder="runs",
         grouping="month",
     ),
-    # `make world-dossier ONLY=<scenario>` (evals/dossier.py) — the free pre-run
-    # reading of the fault world. A dossier is the evidence somebody looked before
-    # the money was released, so a second reading must not overwrite the first.
+    # `make world-dossier ONLY=<scenario>` (evals/dossier.py) — the free pre-run reading of
+    # the fault world, and the evidence somebody looked before the money was released.
     "dossier": ArtifactKind(("evals", "reports", "dossiers"), ".md", grouping="scenario"),
-    # `make baseline-report --write` (evals/baseline_report.py) — the Phase 0
-    # baseline from the committed archives. Two kinds, one stem: JSON of record plus
-    # the same document for a human. NOT named `baseline`: that is the machine
-    # regression baseline `evals/regression.py` gates against, and a shared stem
-    # would make this family adopt it as its own oldest version.
+    # `make baseline-report --write` (evals/baseline_report.py) — the Phase 0 baseline from the
+    # committed archives, as JSON of record plus the same document for a human. NOT named
+    # `baseline`: that is the machine regression baseline `evals/regression.py` gates against.
     "baseline_report": ArtifactKind(
         ("evals", "reports"), ".json", fixed_stem="baseline_report", folder="baseline"
     ),
@@ -93,9 +86,8 @@ KINDS: Final[dict[str, ArtifactKind]] = {
         ("evals", "reports"), ".md", fixed_stem="baseline_report", folder="baseline"
     ),
     # `make phase-close-report --write` (evals/phase_close_report.py) — plan 03 § 14's
-    # requirement before a phase may be called closed. Its own stem, not `report`:
-    # `newest("report")` answers "which run was last?" and must not resolve to a
-    # document that is not a run.
+    # requirement before a phase may be called closed. Its own stem, because `newest("report")`
+    # answers "which run was last?" and must not resolve to a document that is not a run.
     "phase_close_report": ArtifactKind(
         ("evals", "reports"), ".json", fixed_stem="phase_close_report", folder="phase-close"
     ),
@@ -111,45 +103,34 @@ KINDS: Final[dict[str, ArtifactKind]] = {
     "research_report_md": ArtifactKind(
         ("evals", "reports"), ".md", fixed_stem="research_report", folder="research"
     ),
-    # `make regrade-archive ARCHIVE=<id>` (scripts/regrade_archive.py) — one locked
-    # archive re-graded from its own trajectories under today's rules (WO-R3-265,
-    # INC-003). Its own stem and folder because the archive it is ABOUT is never
-    # rewritten, and two re-grades under two rule sets are two facts.
+    # `make regrade-archive ARCHIVE=<id>` (scripts/regrade_archive.py) — one locked archive
+    # re-graded from its own trajectories under today's rules (WO-R3-265, INC-003). Its own
+    # stem: the archive it is ABOUT is never rewritten, and two re-grades are two facts.
     "regrade_report": ArtifactKind(
         ("evals", "reports"), ".json", fixed_stem="regrade_report", folder="regrades"
     ),
     "regrade_report_md": ArtifactKind(
         ("evals", "reports"), ".md", fixed_stem="regrade_report", folder="regrades"
     ),
-    # `make judge-calibration` (evals/judge_calibration/, WP-6.3) — one judge's trap
-    # agreement, stability and track record. Grouped per JUDGE via the per-scenario
-    # mechanism with the judge's name as the stem: plan 03 § 112's flat fixed stem
-    # cannot carry "one per judge", and the register in `evals/research_report.py` is
-    # keyed by judge (reported as a divergence from 03:112, not silently reshaped).
-    # No `_md` sibling — nothing would open it.
+    # `make judge-calibration` (evals/judge_calibration/, WP-6.3) — one judge's trap agreement,
+    # stability and track record. Grouped per JUDGE through the per-scenario mechanism, because
+    # plan 03 § 112's flat fixed stem cannot carry "one per judge" (a reported divergence).
     "judge_calibration": ArtifactKind(
         ("evals", "reports", "judge-calibration"), ".json", grouping="scenario"
     ),
-    # `make world-record ONLY=<scenario>` (evals/recorder.py, WP-3.1) — one zero-LLM
-    # reading of one seeded fault world, keyed by WIRED arguments, for a replay to
-    # answer from. NOT under `evals/reports/`: it is an INPUT, not a document.
-    # Registered here (divergence D2) so `newest()` resolves it and its writes are
-    # exclusive-create; one folder per scenario, because re-recording accumulates.
+    # `make world-record ONLY=<scenario>` (evals/recorder.py, WP-3.1) — one zero-LLM reading of
+    # one seeded fault world, keyed by WIRED arguments. NOT under `evals/reports/`: it is an
+    # INPUT, not a document. Registered here (divergence D2) so `newest()` resolves it.
     "recorded_world": ArtifactKind(("evals", "recorded_worlds"), ".json", grouping="scenario"),
-    # The evaluator's answer key for the world beside it (ADR 0040 / ADR 0038): a
-    # SIBLING file, so the replay path cannot reach ground truth through a recording.
-    # The `.truth` before the extension keeps the two families disjoint by name.
-    # Pinned by `tests/unit/test_recorder.py` — the property, not the intention.
+    # The evaluator's answer key for the world beside it (ADR 0040 / ADR 0038): a SIBLING file,
+    # so the replay path cannot reach ground truth through a recording. The `.truth` before the
+    # extension keeps the families disjoint, pinned by `tests/unit/test_recorder.py`.
     "recorded_world_truth": ArtifactKind(
         ("evals", "recorded_worlds"), ".truth.json", grouping="scenario"
     ),
-    # `make training-export WRITE=1` (evals/export.py, WP-15.1) — the JSONL a later
-    # training stage reads, plus the evaluator labels it must not, plus the manifest
-    # naming every `template_id` the data covers. Three stems in one folder, disjoint by
-    # suffix on `recorded_world_truth`'s precedent: `newest("training_export")` must
-    # never resolve to the labels beside it, and a re-export is a new version, never a
-    # replacement (invariant 9 — an export whose provenance can be rewritten cannot
-    # support a claim about what a policy was trained on).
+    # `make training-export WRITE=1` (evals/export.py, WP-15.1) — the JSONL a later training
+    # stage reads, the evaluator labels it must not, and the manifest of every `template_id`
+    # covered. Disjoint by suffix, so `newest("training_export")` never resolves to the labels.
     "training_export": ArtifactKind(("evals", "exports"), ".jsonl", fixed_stem="training_export"),
     "training_export_labels": ArtifactKind(
         ("evals", "exports"), ".labels.jsonl", fixed_stem="training_export"
@@ -390,10 +371,9 @@ def versions(
 ) -> list[Path]:
     """Every version of one artifact, oldest first.
 
-    By the filename's stamp then ``invocation_id``, never by mtime, merged across
-    every directory the family owns (``search_directories``); a legacy file sorts
-    first. The path breaks a tie: one name in both places is a half-finished
-    migration, and the deeper copy is the one to resolve.
+    By the filename's stamp then ``invocation_id``, never by mtime, merged across every
+    directory the family owns; a legacy file sorts first. The path breaks a tie, so the
+    deeper copy wins a half-finished migration.
     """
     kind_obj = _kind(kind)
     stem = _stem_for(kind_obj, scenario)

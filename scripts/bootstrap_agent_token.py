@@ -1,26 +1,11 @@
 #!/usr/bin/env python3
-"""Bootstrap a working service-account token against a running incident-platform.
+"""Bootstrap the three eval service-account tokens against a running incident-platform.
 
-Collapses the manual register → promote → login → mint onboarding into one command for
-all three eval principals, printing each plaintext token and the ``.env`` lines to set.
-Idempotent. ``PLATFORM_REST_URL`` and ``PLATFORM_MCP_URL`` are honoured when exported.
-
-Usage:
-    uv run python scripts/bootstrap_agent_token.py
-    uv run python scripts/bootstrap_agent_token.py --scope actions:execute
-    make bootstrap-token
-
-Three principals (owner decision O-4; platform ADR 0007, ADR 0012):
-
-* ``incident-commander`` — the AGENT, ``PLATFORM_TOKEN``: reads plus ``actions:execute``,
-  and **never** ``chaos:invoke``, the scope v0.6.5 keys the ``chaos.%`` audit withholding
-  on; an account already holding it is stripped, loudly.
-* ``incident-commander-chaos`` — the EVALUATOR, ``PLATFORM_CHAOS_TOKEN``: reads plus
-  ``chaos:invoke``, no ``actions:execute``.
-* ``incident-commander-smoke`` — the read-only twin, ``PLATFORM_SMOKE_TOKEN``.
-
-``--scope`` WIDENS the agent account rather than replacing the defaults, and refuses
-``chaos:invoke``.
+``make bootstrap-token``, or ``--scope actions:execute`` to widen the agent account (it
+refuses ``chaos:invoke``). Idempotent; prints each token and its ``.env`` line. The three
+principals (O-4; platform ADR 0007, ADR 0012): AGENT ``PLATFORM_TOKEN`` (reads +
+``actions:execute``, never ``chaos:invoke`` — the ``chaos.%`` audit withholding is keyed on
+it), EVALUATOR ``PLATFORM_CHAOS_TOKEN``, read-only ``PLATFORM_SMOKE_TOKEN``.
 """
 
 from __future__ import annotations
@@ -42,27 +27,21 @@ _API_VERSION_SUFFIX = "/api/v1"
 DEFAULT_BASE_URL = "http://localhost:8000/api/v1"
 DEFAULT_EMAIL = "agent-demo@example.com"
 DEFAULT_PASSWORD = "demo-agent-pass-123"  # noqa: S105 - dev-only placeholder
-# The DEMO stack's postgres (`make demo`), not the platform's dev stack — that default
-# made the protocol's bare `make bootstrap-token` die. Cf. eval-reset's (ADR 0020).
+# The DEMO stack's postgres (`make demo`), not the platform's dev stack — that default made
+# the protocol's bare `make bootstrap-token` die.
 DEFAULT_POSTGRES_CONTAINER = "incident-commander-demo-postgres-1"
 DEFAULT_MCP_URL = "http://localhost:8001/mcp"
 SERVICE_ACCOUNT_NAME = "incident-commander"
-# The agent under test: reads plus actions:execute. chaos:invoke is absent and that is
-# load-bearing — v0.6.5 keys `hidden_audit_action_prefixes` on it, so while the agent held
-# it `list_audit_events` named the hook that broke it (G3, O-4).
+# The agent under test: reads plus actions:execute. The absent chaos:invoke is load-bearing —
+# `hidden_audit_action_prefixes` is keyed on it, so with it `list_audit_events` named the hook
+# that broke the world (G3, O-4).
 SERVICE_ACCOUNT_SCOPES = [
     "telemetry:read",
     "incidents:read",
     "actions:execute",
-    # v0.6.13 (platform ADR 0035), mirroring the platform's own
-    # `scripts/seed_incident_commander.py`: lets the run reporter write
-    # `report_agent_run` / `report_agent_briefing` so a human watching the console
-    # can follow the run. It buys the agent NO reading — there is no read tool for
-    # `agent_runs`, and the `agent.run_reported` rows it writes are withheld from
-    # this principal's own `list_audit_events`. Tokens minted before this line was
-    # added do not carry it: re-run `make bootstrap-token` and paste the new
-    # PLATFORM_TOKEN, or the first report 403s (fail-open, so the run is unharmed
-    # and the console simply stays empty).
+    # v0.6.13 (platform ADR 0035): lets the run reporter write `report_agent_run` /
+    # `report_agent_briefing`, and buys NO reading — there is no read tool for `agent_runs`.
+    # An older token lacks it, and the first report 403s (fail-open, console stays empty).
     "agent_runs:write",
 ]
 # The evaluator: chaos:invoke to seed a fault world, reads to verify its own seeding, and

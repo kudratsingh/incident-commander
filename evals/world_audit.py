@@ -29,19 +29,14 @@ from incident_commander.tools.mcp_client import (
 
 _REPO_ROOT: Final[Path] = Path(__file__).resolve().parents[1]
 
-#: What every read this command makes says about itself in the platform's audit log
-#: (``lab.probe``, platform v0.6.17 / ADR 0038). The audit reads the world under the
-#: SMOKE account, which is a service account like the agent's, so without the label
-#: its rows land as ``agent.tool_invoked`` after the reset boundary and the demo page
-#: reads them as a new run (finding F4, WO-R3-335).
+#: What every read this command makes says about itself in the audit log (``lab.probe``,
+#: platform ADR 0038). These reads use the SMOKE service account, so without the label they
+#: land as ``agent.tool_invoked`` and the demo page reads them as a new run (F4, WO-R3-335).
 LAB_PROBE_REASON: Final[str] = "world audit read"
 
-# The seeded baseline the world must return to after the reset. One copy of these
-# numbers, mirrored from the runbook's "Pre-run checklist" table, which
-# ``tests/unit/test_world_dossier.py::TestBaselineMatchesTheRunbook`` reads.
-# `worker-dispatcher` lag is NOT re-audited: `get_consumer_lag` is served from a
-# 60s window, so a post-reset read can answer about the seeded world — the
-# coordinator reads it at PROTOCOL step 3.
+# The seeded baseline the world must return to after the reset, mirrored from the runbook's
+# "Pre-run checklist" table (``test_world_dossier.py::TestBaselineMatchesTheRunbook``). Lag is
+# NOT re-audited: `get_consumer_lag` is served from a 60s window, so it can answer stale.
 BASELINE_DLQ_TOTAL: Final[int] = 4
 BASELINE_ACTIVE_ALERTS: Final[int] = 3
 BASELINE_CHAOS_KEYS: Final[int] = 0
@@ -131,9 +126,8 @@ def _payload_of(result: ToolResult) -> tuple[dict[str, Any] | None, str]:
 def read_result(client: MCPClientProtocol, probe: Probe) -> tuple[Reading, ToolResult | None]:
     """One read call: the ``Reading`` the audit wants, and the ``ToolResult`` itself.
 
-    ``Reading`` drops the content blocks and ``is_error``, which ``recorder.py`` needs
-    to answer a replay with a real ``ToolResult`` (divergence F3, WO-R3-196). A
-    ``None`` result means the call never reached the platform.
+    ``Reading`` drops the content blocks and ``is_error``, which ``recorder.py`` needs to
+    answer a replay (F3, WO-R3-196). ``None`` means the call never reached the platform.
     """
     try:
         result = client.call_tool(probe.tool, probe.args)
@@ -382,11 +376,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             print("[FAIL] token is not verified read-only; audit refused")
             return 3
         print("[PASS] token is read-only")
-        # Every read from here on is labelled `lab.probe` by the platform. The smoke
-        # account is its own lab credential (platform ADR 0038 honours it by name and
-        # re-checks that it holds no write scope), so the Authorization and the
-        # X-Lab-Principal header carry the same token: the call is the smoke
-        # principal's, and the label says the lab made it.
+        # Every read from here on is labelled `lab.probe`. The smoke account is its own lab
+        # credential (platform ADR 0038 honours it by name and re-checks it holds no write
+        # scope), so Authorization and X-Lab-Principal carry the same token.
         lab_client = LabProbeClient(client, reason=LAB_PROBE_REASON, principal_token=credential)
         lines, rows = audit_world(lab_client, roots)
         for line in lines:

@@ -1,17 +1,9 @@
 """Check that a scenario's world is actually broken before grading the agent.
 
-Probes after seeding, before the run: a fault that was never manufactured is
-reported as that, not graded as the agent being wrong (paid run `bb1fa70abb4c`
-failed for exactly this). ``evals/runner.py`` probes; ``resolve_path`` lives with
-the comparators in ``graders/deterministic.py``.
-
-The probes go out on the AGENT's token, deliberately — the premise has to be true
-of the world the agent will actually see — so since ADR 0075 each one is LABELLED
-as the lab's own (``probe_label``, platform ADR 0038). Without the label the
-platform writes them as ``agent.tool_invoked`` and a console counting the agent's
-calls counts reads the agent never made: the owner's fourth take showed "4 steps
-reported · 5 calls the platform recorded — the two do not agree", and the fifth
-call was this module's.
+Probed after seeding, before the run: a fault that was never manufactured is reported as
+that, not graded as the agent being wrong (paid run `bb1fa70abb4c`). The probes wear the
+AGENT's token and are LABELLED as the lab's own (``probe_label``, ADR 0075, platform
+ADR 0038), or the platform records them as ``agent.tool_invoked``.
 """
 
 from __future__ import annotations
@@ -26,21 +18,17 @@ from incident_commander.tools.mcp_client import LAB_PROBE_REASON_MAX_CHARS
 
 __all__ = ["probe_label", "resolve", "unmet"]
 
-#: What every precondition label opens with, so an operator scanning the platform's
-#: ``lab.probe`` rows can tell the premise reads from the principal guards' and the
-#: world audit's at a glance.
+#: What every precondition label opens with, so an operator scanning ``lab.probe`` rows can
+#: tell the premise reads from the principal guards' and the world audit's.
 LABEL_PREFIX = "precondition"
 
 
 def probe_label(probe: PreconditionProbe) -> str:
     """The lab's own reason for one premise read: what this probe PROVES.
 
-    Built from the probe's own expectations rather than from a written description,
-    for the reason every derived-vs-declared decision in this repo goes the same way:
-    a description is a second source of truth that drifts, and ``expect`` is the thing
-    the probe actually asserts. Truncated to the platform's cap — it REFUSES an
-    over-long reason rather than trimming it, and a refused label is an unlabelled
-    row, which is the failure this function exists to prevent.
+    Derived from ``expect`` rather than a written description, which would be a second
+    source of truth. Truncated to the platform's cap, which REFUSES an over-long reason —
+    and a refused label is the unlabelled row this function exists to prevent.
     """
     proves = "; ".join(f"{field.path} {field.describe()}" for field in probe.expect)
     label = f"{LABEL_PREFIX}: {probe.tool} proves {proves}"

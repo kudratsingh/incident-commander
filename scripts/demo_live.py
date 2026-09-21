@@ -3,51 +3,19 @@
 
 ``make demo-live MODE=consumer_outage|dlq_backlog [LIVE=1 YES_SPEND=1] [AUTO=1]``
 
-What this exists for is the thing a recording needs and an eval run does not: the world
-has to break **while somebody is watching**, in an order they can narrate, with the
-console showing each phase before the next one starts. `make eval-live` seeds and runs in
-one breath, which is correct for a measurement and useless on camera.
+The world has to break while somebody is watching, in an order they can narrate — which
+``make eval-live`` cannot do, because it seeds and runs in one breath. So the fault is fired
+HERE in step 3 and the agent starts in step 5 with ``--world-already-faulted`` (ADR 0075).
+Firing the hooks twice was safe for the WORLD (both are repeat-safe, pinned by
+``test_demo_live.py``) and wrong for the RECORD: the fourth take's console anchored its whole
+timeline on the second injection, 1 m 43 s late.
 
-So the fault is fired HERE, in step 3, and the agent is started separately in step 5. Step 5
-passes ``--world-already-faulted``, so the runner does NOT fire the same hooks a second time
-(ADR 0075).
-
-**The double fire used to happen, and calling it "safe" was half a sentence.** It is safe for
-the WORLD — measured, not assumed (2026-09-19, platform v0.6.13): ``poison_message`` is
-idempotent by ``fixture_name`` and answers the repeat with ``created: false`` and the same
-deterministic ``dlq_job_id``, so the queue holds one poison row either way, and
-``kill_consumer`` simply re-arms its flag with a fresh ``expires_at``. It is wrong for the
-RECORD, which is what the owner's fourth take showed: the second injection landed 1 minute 43
-seconds after the real one, and every reader that anchors on the take's newest ``chaos.*`` row
-— the console's "fault injected" station, its T+ clock, its chart marker, "agent acting after
-N reads" — measured the whole demo from the re-arm. One fault, fired once, in step 3.
-``test_demo_live.py`` still pins that the two modes name only repeat-safe hooks: the world
-tolerating a repeat is why a crashed take can be re-run at all, and that property is worth
-keeping whether or not this script relies on it.
-
-**Spend.** The default path is FREE and is the rehearsal path: the real platform, the real
-hooks, the real Tier-1 action, and a SCRIPTED planner. It is the runner's own
-``--mode rehearsal`` (ADR 0069), not a scenario variant and not an environment trick: the
-first attempt at this blanked ``ANTHROPIC_API_KEY`` for the subprocess, and that made the
-whole run canned — the PLATFORM leg included, because the runner's offline settings hardcode
-``eval.local``, so no hook fired and nothing was rehearsed. The row that comes out reads
-``degraded=True`` with a ``rehearsal`` provenance flag, correctly and by design: it is not a
-measurement of the agent, it is a rehearsal of the demo, and no report will count it.
-``LIVE=1`` is the paid take and REFUSES without ``YES_SPEND=1`` (PROTOCOL step 0: readiness
-is not authorization).
-
-**Where the recording starts (WO-R3-329).** The owner's first take began at the baseline and
-the usable footage began a minute and a half later, because ``consumer_outage``'s metric is
-recomputed on a 60-second interval and the fault is not on screen until a sample crosses the
-threshold. So the default prompt to start recording is now AFTER the fault is visible, and
-``--record-from baseline`` asks for the old order when the baseline itself is the point.
-
-**Visible to whom.** Step 3 waits for the PLATFORM's own reading of the fault, not only for
-the scenario's precondition. They are different claims: the precondition says the world
-satisfies the premise the grader will assume, and this says the source the console draws
-from is showing a breach — which is what decides whether the page an audience is looking at
-has anything on it. The reading is taken over MCP under the read-scoped principal; the
-console reads the REST twin of the same measurement (platform ADR 0035).
+Step 3 waits for the PLATFORM's own reading of the fault, not just the scenario's
+precondition, because the console draws from that source. The prompt to start recording comes
+after the fault is visible (WO-R3-329); ``--record-from baseline`` asks for the old order.
+The default path is FREE — real platform and hooks under the runner's ``--mode rehearsal``
+(ADR 0069), rows ``degraded=True``, counted in no report. ``LIVE=1`` is the paid take and
+REFUSES without ``YES_SPEND=1`` (PROTOCOL step 0).
 """
 
 from __future__ import annotations
@@ -190,11 +158,9 @@ class TrafficHandle:
             stdout=handle,
             stderr=subprocess.STDOUT,
             text=True,
-            # The read-only token, handed over explicitly (ADR 0074). `make traffic` exports it
-            # from make's own variables, which come from `-include .env` — true in a shell and
-            # NOT something this script may assume about the environment it was started in.
-            # `traffic_loop.py` refuses `--until-lag` without it, and the read it would
-            # otherwise be denied is the one that tells the loop when to stop.
+            # The read-only token, handed over explicitly (ADR 0074): `make traffic` gets it
+            # from `-include .env`, which is true in a shell and not assumable here.
+            # `traffic_loop.py` refuses `--until-lag` without the read that stops the loop.
             env={**os.environ, **_smoke_env()},
         )
 
@@ -215,14 +181,10 @@ class TrafficHandle:
 class WindDown:
     """Stop the traffic, reset the world, audit it — once, on every path out of the script.
 
-    A single object instead of the same three calls at five call sites, because the five
-    were not the same: an interrupt arriving DURING the wind-down (the operator pressing
-    ctrl-C twice, which is what a person does when a script seems stuck) escaped the
-    handler, left `make traffic` running and the world dirty. So the work is idempotent,
-    runs from a ``finally``, and survives one further interrupt.
-
-    ``drained`` is the traffic modes' extra wait. It is a fact about the MODE, decided once
-    by the caller, so no call site has to remember it.
+    One object instead of the same three calls at five call sites, which were not the same: a
+    second ctrl-C DURING the wind-down escaped the handler and left `make traffic` running and
+    the world dirty. So the work is idempotent, runs from a ``finally``, and survives another
+    interrupt. ``drained`` is the traffic modes' extra wait, decided once by the caller.
     """
 
     def __init__(self, traffic: TrafficHandle, *, drained: bool) -> None:
@@ -277,10 +239,9 @@ class Console:
 
     def __init__(self, *, auto: bool, out: Any = None) -> None:
         self.auto = auto
-        # NOT `out: Any = sys.stdout`. A default argument is evaluated once, when the
-        # module is imported, so that form binds whatever stdout was at import time and
-        # writes there forever — invisible in normal use and wrong under any harness that
-        # replaces the stream. Resolved per call below instead.
+        # NOT `out: Any = sys.stdout`: a default argument binds whatever stdout was at import
+        # time and writes there forever, which breaks under any harness that replaces the
+        # stream. Resolved per call below instead.
         self.out = out
         self.steps: list[Step] = []
 
@@ -453,12 +414,9 @@ def main(argv: list[str] | None = None) -> int:
         console.say("INTERRUPTED by the operator.")
         code = 130
     except Exception as err:  # noqa: BLE001 - see below; a bare traceback is the bug
-        # The catch-all is deliberate and it was earned. The first rehearsal died at step 3
-        # with a ModuleNotFoundError — after the ten-second countdown had run — and because
-        # only DemoFailed was caught, the script printed a raw traceback and left without
-        # resetting. "Every failure path resets and audits" has to mean EVERY failure, not
-        # only the ones this script thought to name; a demo's own bug must not be the thing
-        # that leaves the shared world dirty.
+        # The catch-all was earned: the first rehearsal died at step 3 with a
+        # ModuleNotFoundError, and with only DemoFailed caught it left without resetting.
+        # A demo's own bug must not be the thing that leaves the shared world dirty.
         console.say()
         console.say(f"UNEXPECTED FAILURE: {type(err).__name__}: {err}")
         console.say("  (this is a bug in the demo machine, not a finding about the agent)")
@@ -594,13 +552,10 @@ def _walk(
             "with a rehearsal provenance flag",
         )
         _must(
-            # `--mode rehearsal` is what keeps the PLATFORM leg real while the model leg is
-            # the scenario's script (ADR 0069). Without it there is no such run: dropping
-            # `--live` puts the runner on its offline settings, which hardcode `eval.local`,
-            # and blanking the key on top only made that fully canned run quieter.
-            # `--world-already-faulted`: step 3 fired the hook, so the runner must not fire it
-            # again — the second row is what the fourth take's timeline was measured from
-            # (ADR 0075).
+            # `--mode rehearsal` keeps the PLATFORM leg real while the model leg is the
+            # scenario's script (ADR 0069); without it the runner falls to offline settings
+            # that hardcode `eval.local`. `--world-already-faulted`: step 3 fired the hook,
+            # and the second row is what the fourth take's timeline was measured from (ADR 0075).
             [
                 sys.executable,
                 "-m",
@@ -689,14 +644,10 @@ def _smoke_env() -> dict[str, str]:
 def _smoke_client() -> Any:
     """The ONE client this script reads the world with, under the read-only principal.
 
-    Every read the runner makes goes through here, and it REFUSES when
-    ``PLATFORM_SMOKE_TOKEN`` is unset rather than falling back to the agent's own token
-    (``Settings.require_smoke_token``, ADR 0074). The fallback it replaced is F3 of the
-    2026-09-20 take: the runner's wind-down client and its two waits read lag every three
-    seconds under the AGENT principal, so the platform wrote each of them into the audit log
-    as `agent.tool_invoked` and the demo page could not tell the runner's polling from the
-    four reads the agent actually made. A demo that cannot show what the agent did is the
-    whole thing this script exists for, so an unset token is a failure and not a degradation.
+    REFUSES when ``PLATFORM_SMOKE_TOKEN`` is unset rather than falling back to the agent's own
+    token (``Settings.require_smoke_token``, ADR 0074). That fallback was F3 of the 2026-09-20
+    take: the runner's polling landed in the audit log as `agent.tool_invoked` and the demo
+    page could not tell it from the four reads the agent actually made.
     """
     from evals.runner import _settings_for_mode
     from incident_commander.config import SmokeTokenNotConfigured
@@ -715,14 +666,10 @@ def _smoke_client() -> Any:
 def _lag_reading() -> LagReading:
     """``worker-dispatcher``'s backlog, whether the platform measured it, and how old it is.
 
-    Under the SMOKE principal: this is an observation about the world, and the read-scoped
-    token is the one that cannot accidentally change it. Any failure reads as "not known",
-    which keeps the baseline wait a wait rather than a crash.
-
-    The AGE comes back with the number (v0.6.7's ``age_seconds``) because a reader of this
-    script's output needs it: the platform recomputes the lag on a 60-second interval, so
-    "lag 10" can mean "10 a minute ago" — which is what made step 3 of the third take look
-    stuck for 106 seconds behind a bare spinner (F7).
+    Under the SMOKE principal, and any failure reads as "not known", which keeps the baseline
+    wait a wait rather than a crash. The AGE travels with the number (v0.6.7's
+    ``age_seconds``) because the lag is recomputed on a 60-second interval, so "lag 10" can
+    mean "10 a minute ago" — which made step 3 of the third take look stuck (F7).
     """
     from evals.world_audit import Probe, read
 
@@ -780,11 +727,10 @@ def _dlq_total() -> tuple[int | None, bool]:
 def _fault_is_visible(mode: str) -> tuple[bool, str]:
     """Whether the platform's own reading shows this mode's fault, and that reading in words.
 
-    Not the scenario's precondition: that one says the world satisfies the premise the
-    grader will assume. This one says the measurement the console draws from is showing a
-    breach, which is what decides whether the page has anything on it. The DLQ half is
-    compared against ``world_audit``'s audited baseline rather than a number of its own —
-    step 1 gated on that baseline, so a rise above it is the row the hook just wrote.
+    Not the scenario's precondition, which says the world satisfies the premise the grader
+    will assume: this says the measurement the console draws from is showing a breach. The DLQ
+    half compares against ``world_audit``'s baseline, which step 1 gated on, so a rise above
+    it is the row the hook just wrote.
     """
     from evals.world_audit import BASELINE_DLQ_TOTAL
 
@@ -949,17 +895,10 @@ def _artifacts(scenario: str) -> list[str]:
 def _wait_for_a_drained_backlog(console: Console) -> None:
     """Hold until `worker-dispatcher` reads a FRESH zero, before the audit asks.
 
-    Measured, not anticipated: the first `consumer_outage` rehearsal ended with
-    `make world-audit` printing `[FAIL] worker-dispatcher lag: 33 (want 0)` two seconds
-    after the reset — and the world was already clean. `make traffic` had produced ~35 jobs
-    while the consumer was dead, the agent's restart drained them in seconds, but the
-    platform recomputes this metric on a 60-second interval and the reset clears the sample
-    history (`lag_samples_cleared: 1`), so the audit was served the last value taken while
-    the consumer was still dead. Twenty seconds later the same read was 0.
-
-    So the wait is for a reading, not for the world: only a `0` proceeds, a stale number
-    keeps polling, and a timeout WARNS and audits anyway — a demo must not be able to
-    convert "the operator waited long enough" into "the world is fine".
+    The first `consumer_outage` rehearsal audited `[FAIL] lag: 33 (want 0)` over an already
+    clean world: the metric is recomputed on a 60-second interval and the reset clears the
+    sample history, so the audit was served the last value taken while the consumer was dead.
+    So the wait is for a READING: only a `0` proceeds, and a timeout warns and audits anyway.
     """
     deadline = time.monotonic() + _DRAIN_TIMEOUT_SECONDS
     while time.monotonic() < deadline:
@@ -980,11 +919,8 @@ def _put_the_world_back(console: Console, *, drained: bool = False) -> None:
     """Reset and re-audit, on EVERY path out of this script including the failing ones.
 
     Reported rather than raised: a reset that fails after a failed demo must not hide the
-    first failure, and the chaos-teardown latch already refuses the next live run.
-
-    ``drained`` is the traffic modes' extra wait (see ``_wait_for_a_drained_backlog``). It
-    is passed from the MODE rather than inferred here, because "this world had a producer
-    in it" is a fact about the mode and this function is called from four places.
+    first failure, and the chaos-teardown latch already refuses the next live run. ``drained``
+    is the traffic modes' extra wait, passed from the MODE because this has four call sites.
     """
     console.say("  resetting the world")
     reset = _run(["make", "eval-reset", "PURGE_IDEMPOTENCY=1"])

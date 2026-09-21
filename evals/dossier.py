@@ -1,13 +1,9 @@
 """Fault-world content review, mechanised — ``make world-dossier ONLY=<scenario>``.
 
-Two readiness sweeps passed `remediate_runaway_saga_success` on MECHANICS and its run
-A still failed on a self-contradictory world — a ``replay_safe`` hint on a
-``SchemaValidationError`` root (archive ``efdc3b2a9864``, 2026-09-07) — visible in a
-free probe nobody made. So: seed ``Scenario.chaos`` through the runner's own
-``invoke_chaos_hook`` (ADR 0037), check the preconditions, make every read
-``derive_probes`` derives under the read-scoped token and print it untruncated, lint
-for coherence as FINDINGS, NOT VERDICTS, then reset and re-audit. Zero LLM calls, zero
-Tier-1 calls. ``evals/recorder.py`` (WP-3.1) imports the shared halves.
+Two readiness sweeps passed `remediate_runaway_saga_success` on MECHANICS and its run A still
+failed on a self-contradictory world (archive ``efdc3b2a9864``) that one free probe would have
+shown. So: seed ``Scenario.chaos`` (ADR 0037), check the preconditions, print every derived read
+untruncated, lint as FINDINGS NOT VERDICTS, then reset and re-audit. Zero LLM, zero Tier-1.
 """
 
 from __future__ import annotations
@@ -101,18 +97,16 @@ EXIT_RESET: Final[int] = 6
 # Probe derivation
 # --------------------------------------------------------------------------
 #
-# Every read is DERIVED, never listed: a hand-written probe list rots the way the
-# SMOKE_ONLY list WO-R2-41 deleted did, in the direction of reading LESS of the world
-# than the reader believes was read.
+# Every read below is DERIVED from the scenario rather than written out by hand. A hand-written
+# probe list goes stale in one direction only — it reads LESS of the world than whoever reads the
+# document believes was read — and an earlier hand-written list of smoke scenarios was deleted
+# for exactly that.
 #
-# ``_KIND_BY_FIELD`` is the derivation's one new fact: which argument names refer to
-# the same KIND of resource, so a value stated in one place can fill an argument
-# elsewhere (``pause_dag.root_job_id`` and ``get_dag_state.job_id`` are one job).
-# Total over ``RESOURCE_ARG_FIELDS``, pinned by ``TestKindByFieldIsTotal``, so a new
-# resource-naming argument cannot produce a guessed probe or none. ``id`` maps to
-# ``incident_id`` because only ``get_incident`` takes a bare ``id``; ids are
-# deliberately NOT harvested out of a ``where`` selector, where a bare ``id`` inside
-# ``items[]`` is a JOB id — guessing would aim a probe at the wrong resource.
+# ``_KIND_BY_FIELD`` is the one fact the derivation adds: which argument names refer to the same
+# KIND of resource, so a value the scenario states in one place can fill an argument somewhere
+# else (a chain's ``root_job_id`` and ``get_dag_state``'s ``job_id`` are the same job). A test
+# asserts it covers every resource-naming argument, so a new argument cannot silently produce a
+# probe aimed at a guessed resource, or no probe at all.
 _KIND_BY_FIELD: Final[dict[str, str]] = {
     "consumer_group": "consumer_group",
     "id": "incident_id",
@@ -141,10 +135,9 @@ def _merge(probes: Sequence[Probe]) -> list[Probe]:
 def _alert_values(alert: Mapping[str, Any]) -> list[tuple[str, str, str]]:
     """``(alert_field, argument_field, value)`` for every resource the alert names.
 
-    ``investigation.alert_subject`` returns only the FIRST match; a dossier wants all,
-    over the same map and the same two levels (top, then ``extra_data``).
-    ``SubjectMatch.UNFILTERED`` is skipped for ``derive_probes``: its probe is the
-    ABSENCE of an argument, and a scope word must never become an argument value.
+    ``investigation.alert_subject`` returns only the FIRST match; a dossier wants all, over the
+    same map and levels. ``SubjectMatch.UNFILTERED`` is skipped: its probe is the ABSENCE of an
+    argument, and a scope word must never become an argument value.
     """
     found: list[tuple[str, str, str]] = []
     for source in (alert, alert.get("extra_data")):
@@ -177,9 +170,8 @@ def _unfiltered_subject(alert: Mapping[str, Any]) -> tuple[str, SubjectProbe] | 
 def _value_pool(scenario: Scenario) -> dict[str, list[str]]:
     """Resource values this scenario states, grouped by kind of resource.
 
-    Three places the scenario has ALREADY written the value down, so nothing is
-    invented: the alert payload via ``ALERT_SUBJECT_PROBES``, the
-    ``expected_precondition`` arguments (literal calls the runner makes), and
+    Three places the scenario has ALREADY written the value down, so nothing is invented: the
+    alert payload via ``ALERT_SUBJECT_PROBES``, the ``expected_precondition`` arguments, and
     ``expected_action_arguments``' ``equals`` values.
     """
     pool: dict[str, list[str]] = {}
@@ -198,8 +190,8 @@ def _value_pool(scenario: Scenario) -> dict[str, list[str]]:
         for name, value in probe.arguments.items():
             add(name, value)
     for expectation in scenario.expectation.expected_action_arguments:
-        # ``argument`` is a resolve_path (``job_ids[]`` names a list's elements); the
-        # base segment is the argument name.
+        # ``argument`` may be a path rather than a plain name (``job_ids[]`` means "the elements
+        # of the job_ids list"), so take the first segment, which is the argument itself.
         base = expectation.argument.split("[")[0].split(".")[0]
         add(base, expectation.equals)
     return pool
@@ -215,10 +207,9 @@ def _read_tool(name: str) -> bool:
 def _fill(tool: str, pool: Mapping[str, list[str]]) -> tuple[list[dict[str, Any]], list[str]]:
     """Argument sets for one read tool, plus notes for what could not be filled.
 
-    A tool with no resource-naming argument gets one call with none, which is what the
-    agent's unfiltered read looks like; one with such an argument gets a call per value
-    of that kind. An unnamed kind produces a NOTE, never a guess: a probe aimed at a
-    made-up resource reads as evidence and is not.
+    A tool with no resource-naming argument gets one call with none, like the agent's unfiltered
+    read; one with such an argument gets a call per value of that kind. An unnamed kind produces
+    a NOTE, never a guess: a probe aimed at a made-up resource reads as evidence and is not.
     """
     fields = sorted(RESOURCE_ARG_FIELDS.get(tool, frozenset()))
     if not fields:
@@ -243,16 +234,17 @@ def _fill(tool: str, pool: Mapping[str, list[str]]) -> tuple[list[dict[str, Any]
 def derive_probes(scenario: Scenario) -> tuple[list[Probe], list[str]]:
     """Every read the agent is expected to make, and what could not be derived.
 
-    Five derivations in the agent's own order: ``ALERT_SUBJECT_PROBES`` (cmd #177),
+    Numbered below, in the agent's own order, from ``ALERT_SUBJECT_PROBES`` (cmd #177),
     ``SOURCE_ROW_FOR_ACTION`` (ADR 0027, where the rem-4 contradiction lived),
-    ``SOURCE_LISTING_FOR_ACTION`` (ADR 0028, UNFILTERED so a category's rows sit beside
-    the ones it leaves), ``VERIFY_PROBE_FOR_ACTION`` (ADR 0025, read PRE-action), and
-    every read tool a claim names. A note is a finding about the SCENARIO.
+    ``SOURCE_LISTING_FOR_ACTION`` (ADR 0028), ``VERIFY_PROBE_FOR_ACTION`` (ADR 0025) and the
+    evidence claims themselves. A note is a finding about the SCENARIO, not about the world.
     """
     pool = _value_pool(scenario)
     probes: list[Probe] = []
     notes: list[str] = []
 
+    # 1. For every resource the alert names — a consumer group, a job, a trace — add the read that
+    #    observes it. The agent is required to make these before anything else.
     dumped = scenario.alert.model_dump()
     for alert_field, argument_field, value in _alert_values(dumped):
         tool = ALERT_SUBJECT_PROBES[alert_field].tool_name
@@ -265,9 +257,8 @@ def derive_probes(scenario: Scenario) -> tuple[list[Probe], list[str]]:
                 "probe this first (cmd #177).",
             )
         )
-    # The unfiltered arm (ADR 0032), separate because its probe is the ABSENCE of a
-    # filter — the same call `_fill` produces for a tool that names no resource, so it
-    # merges with the source-listing derivation rather than adding a call.
+    # 2. Where the alert names a SCOPE rather than one resource, add that same read with NO filter
+    #    at all, so a row nothing has classified cannot hide behind a filtered page.
     unfiltered_subject = _unfiltered_subject(dumped)
     if unfiltered_subject is not None:
         alert_field, probe = unfiltered_subject
@@ -292,6 +283,8 @@ def derive_probes(scenario: Scenario) -> tuple[list[Probe], list[str]]:
             "names a condition, not a resource (see `alert_subject`)."
         )
 
+    # 3. For each action the scenario expects, add the listing whose rows carry the field that
+    #    action's decision depends on, read UNFILTERED so every row in the world is shown.
     action_tools = scenario.expectation.expected_action_tools
     if not action_tools:
         notes.append(
@@ -336,6 +329,8 @@ def derive_probes(scenario: Scenario) -> tuple[list[Probe], list[str]]:
                 )
             )
 
+    # 4. Where an action names a FILTER instead of rows, add the listing that has to have covered
+    #    the slice the platform will expand it into, so the rows it will sweep up are shown too.
     for tool in action_tools:
         for listing in SOURCE_LISTING_FOR_ACTION.get(tool, ()):
             probes.append(
@@ -352,6 +347,8 @@ def derive_probes(scenario: Scenario) -> tuple[list[Probe], list[str]]:
                 )
             )
 
+    # 5. Add the read that can observe what each action changes. Taken here it shows the state
+    #    BEFORE the action, which is the number the scenario's verify claim expects to have moved.
     for tool in action_tools:
         for verify in VERIFY_PROBE_FOR_ACTION.get(tool, ()):
             if verify.argument_field is None:
@@ -385,6 +382,8 @@ def derive_probes(scenario: Scenario) -> tuple[list[Probe], list[str]]:
                     )
                 )
 
+    # 6. Finally, for every read tool an evidence claim names, add one call per resource value the
+    #    scenario states, or a note saying which argument nothing could fill.
     for claim in leaf_claims(scenario.expectation.expected_evidence_fields):
         for tool in claim.tools:
             if not _read_tool(tool):
@@ -410,20 +409,17 @@ def derive_probes(scenario: Scenario) -> tuple[list[Probe], list[str]]:
 # The coherence lint
 # --------------------------------------------------------------------------
 #
-# THE TABLE, grounded in the platform's own enum (app/models/enums.py), which is the
-# only authority on what a hint MEANS: replay_safe = transient/poison, wait_and_replay
-# = external dep down, human_required = persistent bug. A row is coherent when its
-# error text belongs to a family the hint sanctions; the three families are matched by
-# substring against the shapes the platform's own writers emit.
+# The table below says which kinds of error text each remediation hint is allowed to sit on. It
+# is grounded in the platform's own enum (``app/models/enums.py``), the only authority on what a
+# hint MEANS: ``replay_safe`` claims a transient or poison failure, ``wait_and_replay`` an
+# external dependency being down, ``human_required`` a persistent bug. Families are matched by
+# substring against the wording the platform's own writers produce.
 #
-# Two deliberate asymmetries. A **transient** text is coherent with BOTH replay_safe
-# and wait_and_replay — on a transient error the hints differ about WHEN to replay, not
-# whether, and flagging both would put two false findings beside every true one.
-# **rate_limit** is wait_and_replay ONLY and **bad_data** human_required ONLY: an
-# immediate replay of a rate limit is actively wrong, and no replay fixes bad data.
-# replay_safe + bad_data is the rem-4 contradiction. A NULL hint sanctions every family
-# (it is the platform's UNKNOWN, so there is nothing to contradict) and the lint says
-# so rather than staying silent.
+# Two asymmetries are deliberate. A transient text is allowed under BOTH ``replay_safe`` and
+# ``wait_and_replay``, because on a transient error those hints disagree about WHEN to replay
+# rather than whether, and flagging both would put a false finding beside every true one. A rate
+# limit is allowed only under ``wait_and_replay`` and bad data only under ``human_required``:
+# replaying a rate limit immediately is actively wrong, and no replay fixes bad data.
 ERROR_FAMILIES: Final[dict[str, tuple[str, ...]]] = {
     "transient": (
         "timeout",
@@ -469,9 +465,8 @@ ERROR_FAMILIES: Final[dict[str, tuple[str, ...]]] = {
     ),
 }
 
-#: hint value → the error families it sanctions; ``None`` is the null hint. A hint
-#: absent from this table is itself a finding — the platform has three, and a fourth
-#: means the fixture wrote something nothing reads.
+#: hint value → the error families it sanctions; ``None`` is the platform's UNKNOWN and
+#: sanctions all of them. A hint absent from this table is itself a finding.
 HINT_COHERENT_FAMILIES: Final[dict[str | None, frozenset[str]]] = {
     "replay_safe": frozenset({"transient"}),
     "wait_and_replay": frozenset({"transient", "rate_limit"}),
@@ -490,9 +485,8 @@ def error_families(error_message: str) -> frozenset[str]:
     )
 
 
-#: The lint's name for a hint/error contradiction, and for the one case where the
-#: contradiction is the point. Constants because the renderer's verdict column and the
-#: sanctioned rewrite below both compare against them.
+#: The lint's name for a hint/error contradiction, and for the one case where the contradiction
+#: is the point. Constants, because the verdict column and the rewrite below compare on them.
 INCOHERENT_KIND: Final[str] = "INCOHERENT hint vs error"
 SANCTIONED_KIND: Final[str] = "sanctioned incoherent fixture (WO-R2-167)"
 
@@ -518,6 +512,8 @@ def lint_dlq_row(row: Mapping[str, Any], seen_in: str) -> list[Finding]:
     error = row.get("error_message")
     subject = f"DLQ row `{row_id}` (seen in {seen_in})"
 
+    # 1. The row carries a hint the platform does not have, so nothing in the agent's routing
+    #    reads that value: the row is effectively uncategorised while looking categorised.
     if hint is not None and hint not in HINT_COHERENT_FAMILIES:
         return [
             Finding(
@@ -529,6 +525,8 @@ def lint_dlq_row(row: Mapping[str, Any], seen_in: str) -> list[Finding]:
                 "row is effectively uncategorised while looking categorised.",
             )
         ]
+    # 2. There is no error text, so the hint has nothing to be checked against — and if the agent
+    #    is meant to reason from the error, it has nothing to reason from either.
     if not isinstance(error, str) or not error.strip():
         return [
             Finding(
@@ -540,6 +538,8 @@ def lint_dlq_row(row: Mapping[str, Any], seen_in: str) -> list[Finding]:
             )
         ]
 
+    # 3. The table matched no family in this text, so this lint has NO OPINION about the pair. Say
+    #    that out loud: returning no findings would read as "checked, and coherent".
     families = error_families(error)
     if not families:
         return [
@@ -553,6 +553,8 @@ def lint_dlq_row(row: Mapping[str, Any], seen_in: str) -> list[Finding]:
             )
         ]
 
+    # 4. The hint and the error text disagree, so an agent reasoning from the error will contradict
+    #    the hint the scenario grades: decide which of the two is wrong BEFORE paying for a run.
     sanctioned = HINT_COHERENT_FAMILIES[hint]
     if families & sanctioned:
         return []
@@ -653,12 +655,9 @@ def action_targets(scenario: Scenario) -> dict[str, list[str]]:
     return targets
 
 
-#: Chaos hooks whose declared product IS an incoherent row. Exactly one, decided on the
-#: platform: `create_mislabeled_dlq_job` writes the lab's ONE sanctioned pair, gated
-#: behind an explicit `mislabel: true` and still flagged by the platform's own coherence
-#: screen (plat #199). Keyed on the HOOK, not a scenario name or a YAML flag, so a
-#: scenario cannot declare itself exempt: the exemption reaches only the row this hook
-#: returned during THIS dossier's own seeding.
+#: The chaos hooks whose whole purpose is to write a row whose hint contradicts its error text —
+#: exactly one, allowed on the platform side. Keyed on the HOOK rather than on a scenario name or a
+#: YAML flag, so no scenario can declare itself exempt: it covers only the row this hook wrote here.
 SANCTIONED_INCOHERENT_HOOKS: Final[frozenset[str]] = frozenset({"create_mislabeled_dlq_job"})
 
 
@@ -678,6 +677,8 @@ def lint_dlq_coherence(
     for reading in readings:
         if reading.payload is None:
             continue
+        # 1. Lint every dead-letter-shaped row in every reading, once each: two probes often
+        #    return the same row, and listing it twice says nothing the first mention did not.
         for row in dlq_rows_in(reading.payload):
             row_id = str(row.get("id", "<no id>"))
             if row_id in seen_ids:
@@ -685,6 +686,8 @@ def lint_dlq_coherence(
             seen_ids.add(row_id)
             row_findings = lint_dlq_row(row, reading.probe.label)
             incoherent = [f for f in row_findings if f.kind == INCOHERENT_KIND]
+            # 2. Where this row is the one a sanctioned hook wrote, REWRITE the contradiction
+            #    finding to say so rather than dropping it: silence would read as "coherent".
             if row_id in sanctioned and incoherent:
                 row_findings = [
                     Finding(
@@ -703,6 +706,8 @@ def lint_dlq_coherence(
                     for f in row_findings
                 ]
             findings.extend(row_findings)
+            # 3. One row for the summary table either way: the id, the hint, what the error text
+            #    reads as, the verdict, and the text itself.
             raw_error = row.get("error_message")
             error = raw_error if isinstance(raw_error, str) else ""
             verdict = "coherent"
@@ -733,6 +738,8 @@ def lint_action_targets(
     findings: list[Finding] = []
     rows: list[tuple[str, ...]] = []
     for tool, values in action_targets(scenario).items():
+        # 1. The scenario names no resource for this action, so nothing here can check that its
+        #    target exists. That absence IS the finding, and the table row shows dashes.
         if not values:
             findings.append(
                 Finding(
@@ -751,9 +758,8 @@ def lint_action_targets(
             rows.append((tool, "—", "—", "—"))
             continue
         for value in values:
-            # Deduplicated by call, not by reading: the precondition and the derived
-            # probe are frequently the same call made twice, and listing it twice says
-            # nothing the first mention did not.
+            # 2. Does any read's output hold this value, so the agent could reach it by reading?
+            #    Listed by CALL and deduplicated: two probes are often the same call made twice.
             seen = list(dict.fromkeys(r.probe.label for r in readings if r.ok and value in r.raw))
             touching = [
                 p
@@ -777,6 +783,8 @@ def lint_action_targets(
                         "guessed right.",
                     )
                 )
+            # 3. And do the preconditions that mention this value already hold, or is the premise
+            #    the scenario grades against not there yet?
             for probe_reading in touching:
                 if probe_reading.met:
                     continue
@@ -850,10 +858,11 @@ class Seeding:
     #: The rendered "Result" block of § 2: one JSON block per hook that fired, or the
     #: failure that stopped the plan.
     markdown: str
-    #: True when a hook was refused, so the world is half-seeded and the §5.1 exemption
-    #: must not claim a row the platform never wrote.
+    #: True when the platform refused a hook, which means the world is only half seeded: the
+    #: § 5.1 exemption must not then claim a row the platform never wrote.
     failed: bool = False
-    #: Row ids a SANCTIONED_INCOHERENT_HOOKS hook reported creating, off its own reply.
+    #: The ids of the rows a sanctioned contradiction hook reported creating, taken from that
+    #: hook's own reply rather than worked out afterwards.
     sanctioned_incoherent: frozenset[str] = frozenset()
 
 
@@ -868,10 +877,9 @@ def seed_chaos(
 ) -> Seeding:
     """Fire the scenario's whole fault plan, in the order the runner fires it.
 
-    Never the legacy ``chaos_setup`` (``None`` on a plan-declaring scenario, ADR 0037),
-    or this would lint an un-faulted world as the scenario's. ``run_scenario``'s shape:
-    hooks in order, stopping at the FIRST failure, then ``settle_seconds``.
-    ``teardown`` is NOT fired — the reset undoes more than a compensator can.
+    Never the legacy ``chaos_setup`` (``None`` on a plan-declaring scenario, ADR 0037), or this
+    would lint an un-faulted world as the scenario's. ``teardown`` is NOT fired here — the reset
+    in § 6 undoes more than a compensator can.
     """
     plan = scenario.chaos
     if not plan.setup:
@@ -880,6 +888,8 @@ def seed_chaos(
     total = len(plan.setup)
     blocks: list[str] = []
     sanctioned: set[str] = set()
+    # 1. Fire the hooks in the declared order and stop at the FIRST one the platform refuses, as a
+    #    real run does: a cascade is only its own world if the second fault lands on the first.
     for position, hook in enumerate(plan.setup, start=1):
         try:
             result = invoke(url, token, hook.name, dict(hook.arguments))
@@ -891,12 +901,12 @@ def seed_chaos(
                 failed=True,
                 sanctioned_incoherent=frozenset(sanctioned),
             )
-        # A one-hook plan renders a bare JSON block, as it did before plans existed;
-        # the label appears only where there is more than one reply to tell apart.
+        # 2. Render this hook's reply. A one-hook plan gets a bare JSON block; the "hook 2 of 3"
+        #    label appears only where there is more than one reply to tell apart.
         label = "" if total == 1 else f"**Hook {position}/{total} — `{hook.name}`**\n\n"
         blocks.append(label + _json_block(result))
-        # The row this hook just wrote, off the hook's OWN reply rather than computed,
-        # so the §5.1 exemption reaches only a row the platform confirmed it created.
+        # 3. If this was the sanctioned contradiction hook, remember the row id it says it
+        #    created, so the § 5.1 exemption covers only a row the platform confirmed writing.
         if hook.name in SANCTIONED_INCOHERENT_HOOKS:
             seeded_id = result.get("job_id") if isinstance(result, dict) else None
             if isinstance(seeded_id, str) and seeded_id:
@@ -915,10 +925,9 @@ def seed_chaos(
 def run_reset() -> tuple[int, str]:
     """``make eval-reset PURGE_IDEMPOTENCY=1`` — the protocol's own reset.
 
-    Shelled out, not reimplemented: the Makefile owns the compose file, the service
-    name and the purge gate (including the literal-1 ``ifeq``, because make's ``$(if)``
-    turned ``PURGE_IDEMPOTENCY=0`` ON). Always purging: a warm idempotency cache answers
-    a replay ``replayed=1, ok=true`` while nothing runs (LESSONS 2026-09-07).
+    Shelled out, not reimplemented: the Makefile owns the compose file, the service name and the
+    purge gate. Always purging, because a warm idempotency cache answers a replay
+    ``replayed=1, ok=true`` while nothing runs (LESSONS 2026-09-07).
     """
     command = ["make", "eval-reset", "PURGE_IDEMPOTENCY=1"]
     try:
@@ -1049,9 +1058,9 @@ def render(
                 ("expected action tools", ", ".join(expectation.expected_action_tools) or "none"),
                 ("max tool calls", str(expectation.max_tool_calls)),
                 (
-                    # Every setup hook in declared order. Never ``chaos_setup``: it is
-                    # ``None`` on a plan-declaring scenario, so this row would read
-                    # "none declared" over a two-fault world (ADR 0037).
+                    # Read through ``Scenario.chaos``, never the legacy ``chaos_setup`` field:
+                    # that field is ``None`` on a scenario that declares a whole plan, so this
+                    # row would print "none declared" over a two-fault world.
                     "chaos hooks",
                     ", ".join(f"`{hook.name}`" for hook in scenario.chaos.setup) or "none declared",
                 ),
@@ -1061,10 +1070,9 @@ def render(
     add("")
     add("**Evidence claims**")
     add("")
-    # `group` makes an `any_of` readable in a flat table: its members are ALTERNATIVES,
-    # and read as a conjunction they would look like two demanded verify reads. `args`
-    # and `after` are there for the same reason — this table is the pre-run review
-    # surface (PROTOCOL step 4) where verify shapes get checked.
+    # The `group` column is what makes an `any_of` claim readable in a flat table: its members are
+    # ALTERNATIVES, and a reader taking two rows for two separate demands would think the scenario
+    # requires two verify reads. `args` and `after` are here for the same reason.
     evidence_rows: list[tuple[str, ...]] = []
     for position, claim_entry in enumerate(expectation.expected_evidence_fields, start=1):
         members = (
@@ -1121,10 +1129,9 @@ def render(
         )
     )
     add("")
-    # The handoff's own claims, missing from this section until WO-R2-164. On an
-    # escalate-with-an-action scenario the briefing IS the product, and a reviewer of
-    # the two tables above would not have known those claims existed — the same species
-    # of gap this module was built to close.
+    # The claims about the handoff itself. On a scenario that escalates as well as acting, the
+    # briefing IS the product, and a reviewer reading only the two tables above would not know
+    # those claims existed.
     add("**Briefing claims** — substrings the handoff must carry")
     add("")
     add(
@@ -1137,8 +1144,8 @@ def render(
 
     add("## 2. Chaos seeded")
     add("")
-    # Read through ``Scenario.chaos``: reading ``chaos_setup`` would report a two-fault
-    # world as seeding nothing (ADR 0037).
+    # Through ``Scenario.chaos`` again: reading the legacy ``chaos_setup`` field here would
+    # report a two-fault world as having seeded nothing at all.
     plan = scenario.chaos
     if not plan.setup:
         add("This scenario declares no chaos. Nothing was seeded.")
@@ -1149,7 +1156,7 @@ def render(
         add("same function `run_scenario` calls, with the same arguments and the same")
         add("evaluator principal (`PLATFORM_CHAOS_TOKEN`).")
         for position, hook in enumerate(plan.setup, start=1):
-            # The position prefix earns its place only where there is an order to read.
+            # The "1 of 3" prefix earns its place only where there is an order to read.
             place = "" if total == 1 else f"{position}/{total} — "
             add("")
             add(f"**{place}`{hook.name}` arguments**")
@@ -1363,11 +1370,11 @@ def _select(
 ) -> tuple[Scenario | None, int]:
     """The ONLY guard, in the shape ``evals/runner.py`` uses for a live run.
 
-    Three refusals, all exit 2 before anything touches the platform: no name, more than
-    one, and a name that is not a scenario's FULL name — with the runner's did-you-mean
-    list, because a substring widens a selection that SEEDS CHAOS INTO A SHARED WORLD.
-    The vocabulary arguments let ``evals/recorder.py`` share the guard (WO-R3-196).
+    Three refusals, all exit 2 before anything touches the platform. The vocabulary arguments
+    let ``evals/recorder.py`` share the guard (WO-R3-196).
     """
+    # 1. No scenario was named. Refuse with exit 2: this command seeds one fault into a shared
+    #    world and resets it, so there is no meaningful "all scenarios" form of that.
     if not only:
         print(
             f"{label} FAIL: --only <scenario_name> is required. A {noun} seeds the "
@@ -1377,6 +1384,8 @@ def _select(
         print(f"Name exactly one scenario, e.g. make {command} ONLY=remediate_dlq_backlog_success")
         print("nothing was seeded")
         return None, EXIT_SELECTION
+    # 2. More than one was named. Refuse: two faults seeded into one shared world interleave, and
+    #    then neither reading in the document is about the scenario you meant to review.
     if len(only) > 1:
         print(
             f"{label} FAIL: {len(only)} scenarios named ({', '.join(only)}). One "
@@ -1385,6 +1394,8 @@ def _select(
         )
         print("nothing was seeded")
         return None, EXIT_SELECTION
+    # 3. The name is not a scenario's FULL name. Refuse, and print the near misses: a substring
+    #    would silently widen a selection that seeds chaos into a world other runs share.
     wanted = only[0]
     known = {s.name: s for s in scenarios}
     if wanted not in known:
@@ -1418,11 +1429,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parser.parse_args(list(argv) if argv is not None else None)
     only: list[str] = [part for value in args.only for part in str(value).split(",") if part]
 
+    # 1. Pick exactly one scenario by its full name, or print why not and exit without seeding.
     scenarios = load_scenarios(_SCENARIOS_DIR)
     scenario, code = _select(only, scenarios)
     if scenario is None:
         return code
 
+    # 2. Load the settings and both credentials — the read-only one it reads with, the chaos one it
+    #    seeds with — before any hook fires, so a missing token cannot leave a half-seeded world.
     try:
         settings = Settings()  # type: ignore[call-arg]
     except ValidationError as err:
@@ -1433,8 +1447,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         print("nothing was seeded")
         return EXIT_PREFLIGHT
 
-    # The SMOKE token deliberately: a credential that cannot write makes "this check is
-    # free and safe" a property of the credential, not of this file staying correct.
+    # The SMOKE token deliberately: a credential that cannot write makes "this check is free and
+    # safe" a property of the credential, not of this file staying correct.
     if settings.platform_smoke_token is None or not (
         settings.platform_smoke_token.get_secret_value().strip()
     ):
@@ -1446,8 +1460,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         print("nothing was seeded")
         return EXIT_PREFLIGHT
 
-    # Resolved before any hook fires, for the reason above: a credential this tool
-    # cannot work without is a preflight failure, not a half-seeded shared world.
+    # A credential this tool cannot work without is a preflight failure, not a half-seeded world.
     try:
         chaos_token = settings.require_chaos_token()
     except ChaosTokenNotConfigured as err:
@@ -1457,8 +1470,8 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     read_client = make_client(settings, token=settings.platform_smoke_token.get_secret_value())
     try:
-        # Reachability BEFORE seeding: a stack that cannot answer a listing must not be
-        # left holding a half-seeded fault.
+        # 3. Make one read BEFORE seeding anything. A stack that cannot answer a plain listing
+        #    must not be left holding a fault, so this refuses rather than seeding.
         probe = read(read_client, _probe("list_dlq_messages", {}, "reachability"))
         if not probe.ok:
             print(f"DOSSIER FAIL (stack): the platform did not answer a read — {probe.error}")
@@ -1469,8 +1482,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         generated_at = datetime.now(UTC)
         invocation_id = uuid.uuid4().hex[:12]
 
-        # The whole plan, fired the way the runner fires it. ``seed_chaos`` also reads
-        # the §5.1 exemption's row ids off each hook's own reply.
+        # 4. Seed the scenario's whole fault plan the way a real run fires it, and collect the row
+        #    ids any sanctioned contradiction hook reports creating for the § 5.1 exemption.
         seeded = seed_chaos(
             scenario,
             str(settings.platform_mcp_url),
@@ -1479,17 +1492,21 @@ def main(argv: Sequence[str] | None = None) -> int:
         seeding = seeded.markdown
         sanctioned_incoherent = set(seeded.sanctioned_incoherent)
 
+        # 5. Read the world: first the scenario's own precondition probes, then every read the
+        #    derivation above produced, each printed untruncated.
         preconditions = [check_precondition(read_client, p) for p in scenario.expected_precondition]
         probes, notes = derive_probes(scenario)
         readings = [read(read_client, p) for p in probes]
 
-        # Preconditions included: that filtered DLQ page is a reading of the world too,
-        # and its row is usually the one the scenario is about.
+        # 6. Lint everything that came back, precondition readings included: that filtered
+        #    dead-letter page is a reading of the world, and its row is usually the scenario's.
         all_readings = [entry.reading for entry in preconditions] + readings
         dlq_findings, dlq_rows = lint_dlq_coherence(all_readings, sanctioned_incoherent)
         target_findings, target_rows = lint_action_targets(scenario, all_readings, preconditions)
         furniture_findings, furniture_rows = lint_forbidden_furniture(scenario, all_readings)
 
+        # 7. Put the world back with the protocol's own reset, then re-read the baseline it should
+        #    have returned to, so the document ends by proving the world is clean again.
         reset_code, reset_output = run_reset()
         baseline = audit_baseline(read_client)
     finally:
@@ -1497,6 +1514,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         if callable(close):
             close()
 
+    # 8. Render the document, write it under a name carrying this run's own timestamp and id, and
+    #    then exit on the first thing that went wrong: seeding, the reset, or a dirty baseline.
     document = render(
         scenario=scenario,
         generated_at=generated_at,

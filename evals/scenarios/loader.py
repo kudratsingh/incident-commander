@@ -41,24 +41,23 @@ def load_scenario(path: Path) -> Scenario:
 def load_scenarios(directory: Path) -> list[Scenario]:
     """Load every ``*.yaml`` / ``*.yml`` scenario under ``directory``, sorted by name.
 
-    Two refusals, both properties of the DIRECTORY that no single file can see, and both
-    load errors rather than report footnotes. Names must be unique: the whole suite keys
-    on the name, so a collision either crashes the archive's exclusive-create writes
-    after the run is paid for, or — worse — lets one scenario's result stand in for two.
-    And a ``template_id`` may not straddle splits (plan 03 § 4): splits are by TEMPLATE,
-    or a later SFT stage trains on the held-out template's siblings and the holdout
-    measures memorisation while still calling itself a holdout (plan 06 D7).
+    Two refusals are properties of the DIRECTORY that no single file can see: a duplicate
+    name (the whole suite keys on the name) and one ``template_id`` in two benchmark splits
+    (plan 03 § 4 — splits are by TEMPLATE, or a holdout measures memorisation).
     """
     if not directory.is_dir():
         raise ScenarioLoadError(directory, "not a directory")
     scenarios: list[Scenario] = []
     first_seen: dict[str, Path] = {}
-    # template_id -> the first scenario that claimed it and the split it claimed it for.
-    # Name and path both, because the error must name the scenario to go and look at.
+    # Remember the scenario name and file path beside the split each template claimed, so the
+    # refusal below can tell the reader which file to go and look at.
     split_claims: dict[str, tuple[BenchmarkSplit, str, Path]] = {}
     for path in sorted(directory.iterdir()):
         if path.suffix.lower() in {".yaml", ".yml"} and path.is_file():
+            # 1. Parse and validate this one file on its own terms.
             scenario = load_scenario(path)
+            # 2. Refuse a name a previous file already used, because the whole suite keys its
+            #    archives, reports and baselines on the scenario name.
             claimed = first_seen.get(scenario.name)
             if claimed is not None:
                 raise ScenarioLoadError(
@@ -70,6 +69,8 @@ def load_scenarios(directory: Path) -> list[Scenario]:
                     "is a copy.",
                 )
             first_seen[scenario.name] = path
+            # 3. Refuse a template that appears in two different benchmark splits: every
+            #    instance of a held-out template has to be held out with it.
             claimed_split = split_claims.get(scenario.template_id)
             if claimed_split is not None and claimed_split[0] is not scenario.benchmark_split:
                 other_split, other_name, other_path = claimed_split

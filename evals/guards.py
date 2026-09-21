@@ -36,14 +36,15 @@ _PROBE_ARGS: Final[dict[str, Any]] = {
 
 _SCOPE_REFUSAL_CODE: Final[int] = -32002
 
-# The ONLY codes meaning "scope check passed, arguments rejected". Anything else never
-# reached argument validation: the positive guards used to pass on any non-scope MCPError,
-# so they went vacuously green when the probe tool vanished.
+# The only JSON-RPC codes that mean "the platform accepted this principal and then rejected the
+# arguments". Any other code means the call never got as far as argument checking, so it says
+# nothing about the scope: treating one as a pass is how these guards once went green on a
+# probe tool that no longer existed.
 _ARGUMENT_REFUSAL_CODES: Final[frozenset[int]] = frozenset({-32602})
 
-# The chaos half: a ``chaos_setup``-only scenario executes no Tier-1 action, so
-# ``actions:execute`` is the wrong question. ``inject_latency`` has the smallest blast
-# radius — one named group, self-cleaning on a TTL.
+# The probe tool for the chaos half. A scenario that only seeds a fault executes no Tier-1
+# action, so asking whether the token can act is the wrong question there. ``inject_latency``
+# is used because it is the least destructive hook: one named group, and it expires by itself.
 _CHAOS_PROBE_TOOL: Final[str] = "inject_latency"
 
 # Invalid twice over against the hook's committed inputSchema (minLength 1, and a type error
@@ -53,25 +54,29 @@ _CHAOS_PROBE_ARGS: Final[dict[str, Any]] = {
     "latency_ms": "not-a-latency",
 }
 
-# The scope the AGENT principal must never carry (O-4). Named once, because this probe and
-# the platform's ``hidden_audit_action_prefixes`` predicate must key on the same string.
+# The one scope the agent under test must never hold. With it the platform serves the agent the
+# chaos audit rows, so the agent could read which fault was injected against which resource
+# seconds before its own alert — the answer key. Spelled once, because this probe and the
+# platform's own ``hidden_audit_action_prefixes`` check have to agree on the exact string.
 _AGENT_FORBIDDEN_SCOPE: Final[str] = "chaos:invoke"
-# Derived from the tier map, never hand-copied: a second list of Tier-1 names is one more
-# mirror to drift (the F-004 class).
+# Derived from the tier map rather than written out again here: a second hand-written list of
+# Tier-1 tool names is one more copy that can fall out of step with the first.
 _TIER_1_TOOLS: Final[frozenset[str]] = tools_at_or_below(Tier.TIER_1) - tools_at_or_below(Tier.READ)
 
-# The platform's own ceiling (ListAuditEventsInput.limit is le=200), not a tuning choice,
-# for both the page request and the saturation check below.
+# The largest page the platform will serve (its ``ListAuditEventsInput.limit`` is capped at 200).
+# This is the platform's number, not a tuning choice, and both the request and the "was the page
+# full?" check below use it.
 _AUDIT_PAGE_LIMIT: Final[int] = 200
 
-# Memory ceiling on one stage's in-window rows. Not a knob: 2000 audit rows from a read-only
-# stage is anomalous, so hitting this reports inconclusive rather than clean.
+# How many audit rows one stage may hold in memory before this guard stops merging them. Not a
+# tuning knob: 2000 rows out of a read-only stage is already abnormal, so reaching it makes the
+# stage report "cannot tell" instead of "clean".
 _AUDIT_SCAN_ROW_CAP: Final[int] = 2000
 
 
-# The reason each probe sends with ``_lab_probe`` + ``X-Lab-Principal`` (platform ADR 0038),
-# so the platform writes ``lab.probe`` rather than ``agent.tool_invoked`` (F4). One short
-# sentence naming what the probe proves — it is what an operator reads months later.
+# The sentence each probe sends along with itself, so the platform records it in the audit log
+# as a lab probe (``lab.probe``) instead of as the agent invoking a tool. Each one names what
+# its probe proves, because this text is what an operator reads out of the log months later.
 _READ_ONLY_PROBE_REASON: Final[str] = (
     "principal guard: proves this token cannot execute a Tier-1 action"
 )
@@ -230,24 +235,30 @@ def _assert_scope_absent(
     different files. Shared, not copied — a second copy reintroduces the fail-open bug.
     """
     reason, token = _label(lab_probe_reason, lab_principal_token)
+    # 1. Make the one deliberately invalid call, labelled as the lab's own probe.
     try:
         result = client.call_tool(
             probe_tool, probe_args, lab_probe=reason, lab_principal_token=token
         )
+    # 2. If the platform rejected the LABEL, that is a bug in how this request was built and says
+    #    nothing about the scope, so give up rather than quietly retrying without the label.
     except LabProbeRefused:
-        # A refused LABEL is a request bug, not a verdict about the scope, and its -32602
-        # is the code the clause below reads as "the scope check passed". Never re-sent
-        # unlabelled: a silent retry is how F4's rows became the agent's.
         raise
     except MCPError as err:
+        # 3. The platform refused the call because this token lacks the scope. That is exactly
+        #    what the guard set out to prove, so the check passes here.
         if err.code == _SCOPE_REFUSAL_CODE and "scope" in str(err).lower():
             return
+        # 4. The platform got as far as checking the arguments, which means it accepted the
+        #    principal: the token DOES carry the scope, and the run must not start.
         if err.code in _ARGUMENT_REFUSAL_CODES:
             raise PrincipalGuardError(
                 f"{label}: the negative probe on {probe_tool} was refused on its "
                 f"ARGUMENTS (MCPError {err.code}: {err}), which means the scope "
                 f"check passed. The token carries {scope}, {carried_consequence}"
             ) from err
+        # 5. Any other error code means the call never reached argument checking, so it proves
+        #    nothing about the scope: raise, and the caller refuses to start the run.
         raise PrincipalGuardError(
             f"{label}: the negative probe on {probe_tool} failed with MCPError "
             f"{err.code}: {err} — neither the scope refusal "
@@ -258,14 +269,16 @@ def _assert_scope_absent(
             f"validation, so it proves nothing about {scope}. Failing closed — "
             "the run does not proceed on an unverified control."
         ) from err
+    # 6. Anything else at all leaves the question unanswered, which counts as a failure: a safety
+    #    check that shrugs and lets the run continue is the hole this guard exists to close.
     except Exception as err:  # noqa: BLE001 — fail closed, deliberately
-        # An unverified guard is an unmet precondition, not a warning: a safety check
-        # that shrugs is the bypass F-001 is about.
         raise PrincipalGuardError(
             f"{label}: could not verify the principal "
             f"({type(err).__name__}: {err}). Failing closed — the run does "
             "not proceed on an unverified control."
         ) from err
+    # 7. And if the invalid call SUCCEEDED, the platform accepted arguments it should have
+    #    rejected: the token holds the scope and the probe is no longer safe to fire, so raise.
     raise PrincipalGuardError(
         f"{label}: the negative probe on {probe_tool} SUCCEEDED "
         f"(result: {str(result)[:200]}). A deliberately invalid call must never "
@@ -292,24 +305,30 @@ def _assert_scope_carried(
     shipped with is what a second hand-written copy would reintroduce.
     """
     reason, token = _label(lab_probe_reason, lab_principal_token)
+    # 1. Make the same deliberately invalid call, labelled as the lab's own probe.
     try:
         result = client.call_tool(
             probe_tool, probe_args, lab_probe=reason, lab_principal_token=token
         )
+    # 2. A rejected LABEL matters more here than in the negative guard: an argument refusal is
+    #    this guard's PASS, so a label refusal carrying the same code would read as "can act".
     except LabProbeRefused:
-        # Worse here than in the negative guard: a -32602 is the PASS condition, so a
-        # refused label would read as "the principal can act".
         raise
     except MCPError as err:
+        # 3. The platform refused on scope, so this token cannot act. That is this guard's
+        #    failure: raise, and the caller refuses to start the run rather than grading it red.
         if err.code == _SCOPE_REFUSAL_CODE and "scope" in str(err).lower():
             raise PrincipalGuardError(
                 f"{label}: the negative probe was refused on SCOPE "
                 f"(MCPError {err.code}: {err}). This token lacks {scope}, "
                 f"{refusal_consequence}"
             ) from err
+        # 4. The platform got as far as checking the arguments, which means it accepted the
+        #    principal: the token can act, so return and let the run start.
         if err.code in _ARGUMENT_REFUSAL_CODES:
-            # Refused on the arguments, not the scope: the principal can act.
             return
+        # 5. Any other error code means the call never reached argument checking, so it proves
+        #    nothing about the scope: raise, and the caller refuses to start the run.
         raise PrincipalGuardError(
             f"{label}: the negative probe on {probe_tool} failed with MCPError "
             f"{err.code}: {err} — neither the scope refusal "
@@ -319,12 +338,16 @@ def _assert_scope_carried(
             f"validation, so it proves nothing about {scope}. {unreached_hint} "
             "Failing closed — the run does not proceed on an unverified control."
         ) from err
+    # 6. Anything else at all leaves the question unanswered, which counts as a failure here too:
+    #    the run does not start on a control nobody managed to check.
     except Exception as err:  # noqa: BLE001 — fail closed, deliberately
         raise PrincipalGuardError(
             f"{label}: could not verify the principal "
             f"({type(err).__name__}: {err}). Failing closed — the run does "
             "not proceed on an unverified control."
         ) from err
+    # 7. And if the invalid call SUCCEEDED, the platform's argument checking has moved and this
+    #    probe is no longer safe to fire at all, so raise instead of reporting a pass.
     raise PrincipalGuardError(
         f"{label}: the negative probe SUCCEEDED "
         f"(result: {str(result)[:200]}). A deliberately invalid "
@@ -345,12 +368,13 @@ class AuditWindowScan:
 
     def __init__(self, since: datetime, *, lab_principal_token: str | None = None) -> None:
         self.since = since
-        # The scan's own reads are the lab's too, so they carry the same label: rows this
-        # guard writes while reading must not show up as the agent's work.
+        # This scan's own reads are the lab's as well, so they carry the same label. Without it
+        # the rows this guard writes while reading would show up in the log as the agent's work.
         self._lab_principal_token = lab_principal_token
         self.checkpoints = 0
-        # Only in-window rows are retained: an older row can never be a violation, and its
-        # timestamp has already extended coverage by the time it is dropped.
+        # Only rows inside the stage's own time window are kept. A row older than the window
+        # cannot be a violation, and its timestamp has already widened the covered range by the
+        # time it is dropped, so nothing is lost by not storing it.
         self._rows: dict[str, AuditEventEntry] = {}
         self._covered_from: datetime | None = None
         self._covered_upto: datetime | None = None
@@ -375,21 +399,24 @@ class AuditWindowScan:
         self.checkpoints += 1
         self._last_page = (len(events), total)
         self._merge(events)
-        # ``total`` is an unlimited COUNT over the same filter, so ``total > len(events)`` is
-        # the server saying it withheld rows — still true if the cap moves off 200.
+        # ``total`` is the server's unlimited count over the same filter, so ``total`` being
+        # larger than the page is the server telling us it held rows back. That reading stays
+        # correct even if the platform's page cap moves off 200.
         if not (total > len(events) or len(events) >= _AUDIT_PAGE_LIMIT):
             self._complete = True
             return
         if not events:
-            # Truncated but empty is incoherent; claim nothing.
+            # The server said it withheld rows and then returned none, which cannot both be
+            # true. Return without extending the covered range, so this claims nothing.
             return
         page_oldest = min(e.created_at for e in events)
         page_newest = max(e.created_at for e in events)
         if self._covered_upto is not None and page_oldest <= self._covered_upto:
             self._covered_upto = max(self._covered_upto, page_newest)
         else:
-            # More than a page landed since the last checkpoint, so the rows between
-            # them are gone. Coverage restarts here rather than spanning the hole.
+            # More than one page of rows landed since the last checkpoint, so the rows in
+            # between can never be fetched. Start the covered range again at this page rather
+            # than claiming to cover the gap.
             self._covered_from = page_oldest
             self._covered_upto = page_newest
 
@@ -470,6 +497,8 @@ def assert_no_tier1_successes(
     leaves the guard deliberately over-broad. Without ``scan``, a single post-stage page is
     inconclusive above 200 rows.
     """
+    # 1. Take the caller's scan if it covers this exact window, or start one; a scan that began
+    #    at a different moment would be graded against a window it never watched.
     if scan is None:
         scan = AuditWindowScan(since, lab_principal_token=lab_principal_token)
     elif scan.since != since:
@@ -478,22 +507,25 @@ def assert_no_tier1_successes(
             f"about {since.isoformat()}; a window graded against the wrong "
             "start is not a graded window."
         )
+    # 2. Read one last page and fold it in. If that read fails, the audit log could not be
+    #    checked at all, so raise: an unverifiable stage is not a clean stage.
     try:
         scan.checkpoint(client)
     except PrincipalGuardError:
         raise
     except Exception as err:  # noqa: BLE001 — fail closed, deliberately
-        # An audit query we couldn't run proves nothing: inconclusive is a failure.
         raise PrincipalGuardError(
             "post-stage audit could not be read "
             f"({type(err).__name__}: {err}); treating as a failure — an "
             "unverifiable stage is not a clean stage."
         ) from err
     violations = scan.violations(principal_ids)
+    # 3. If any part of the window went unread, raise: the rows nobody could fetch may hold the
+    #    very Tier-1 successes this looks for. The message names the ones already visible too.
     if not scan.fully_scanned:
-        # A-13: the rows we could not fetch may hold the successes this exists to catch, so
-        # inconclusive is a failure — and what is already visible is named, not swallowed.
         raise PrincipalGuardError(scan.inconclusive_reason() + _visible_suffix(violations))
+    # 4. The window was fully read, so the audit log can answer: raise if it recorded any
+    #    successful Tier-1 action by this stage's principals, and return the empty list if not.
     if violations:
         raise PrincipalGuardError(
             f"read-only stage executed {len(violations)} successful Tier-1 "

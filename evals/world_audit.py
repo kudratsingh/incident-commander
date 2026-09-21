@@ -29,9 +29,9 @@ from incident_commander.tools.mcp_client import (
 
 _REPO_ROOT: Final[Path] = Path(__file__).resolve().parents[1]
 
-#: What every read this command makes says about itself in the audit log (``lab.probe``,
-#: platform ADR 0038). These reads use the SMOKE service account, so without the label they
-#: land as ``agent.tool_invoked`` and the demo page reads them as a new run (F4, WO-R3-335).
+#: The sentence every read this command makes sends along with itself, so the platform records
+#: it in the audit log as a lab probe (``lab.probe``) rather than as the agent doing its work.
+#: Unlabelled, these reads land as ``agent.tool_invoked`` and the demo page draws a new run.
 LAB_PROBE_REASON: Final[str] = "world audit read"
 
 # The seeded baseline the world must return to after the reset, mirrored from the runbook's
@@ -47,14 +47,16 @@ BASELINE_HOT_SET_SIZE: Final[int] = 120
 BASELINE_PROCESSES: Final[int] = 0
 HOT_SET_KEY: Final[str] = "cache:jobs:worker-dispatcher:hot_set"
 
-# The failed_traces_scan probe's window. Identities, not a count: two unrelated
-# fresh failures cannot stand in for stale fixtures.
+# How far back the failed-trace check looks, and which traces it expects to find. It compares
+# the two seeded trace IDs rather than counting rows, because two unrelated fresh failures
+# would otherwise stand in for the seeded ones and hide that those had aged out.
 TRACE_PROBE_WINDOW_HOURS: Final[int] = 1
 BASELINE_FAILED_TRACE_IDS: Final[frozenset[str]] = frozenset(
     {"0e24ca29-1d47-57e9-b898-4d79bb6da981", "edeeb994-56d2-53e6-88fd-8af47e695dbc"}
 )
 
-#: Redis key scan target; defaults match the Makefile's ``PLATFORM_COMPOSE``.
+#: Which compose file and service the redis key scan below runs against. The defaults match
+#: the Makefile's ``PLATFORM_COMPOSE``, so the two cannot drift apart.
 _COMPOSE_FILE_ENV: Final[str] = "PLATFORM_COMPOSE"
 _DEFAULT_COMPOSE_FILE: Final[str] = "demo/compose.yml"
 _REDIS_SERVICE: Final[str] = "redis"
@@ -279,13 +281,18 @@ def audit_world(
     client: MCPClientProtocol, roots: Sequence[str] = ()
 ) -> tuple[list[BaselineLine], list[dict[str, Any]]]:
     """The pre-run audit adds checks to the shared dossier post-reset baseline."""
+    # 1. Start with the checks the pre-run dossier also makes after it resets the world: the
+    #    numbers a world with nothing wrong in it has to show.
     lines = audit_baseline(client)
 
     def check(label: str, observed: object, expected: object) -> None:
-        # bool == 0/1 in Python; those are distinct readings on the wire.
+        # Compare the type as well as the value, because in Python ``True == 1``: "the flag is
+        # on" and "the count is one" are different readings of the platform's answer.
         passed = type(observed) is type(expected) and observed == expected
         lines.append(BaselineLine(label, str(expected), str(observed), passed))
 
+    # 2. Read the dead-letter queue row by row, and trust it only when the page is COMPLETE: a
+    #    partial listing would quietly under-count the unclassified and fenced rows.
     dlq = read(client, _probe("list_dlq_messages", {"limit": 50}, "world audit"))
     rows: list[dict[str, Any]] = []
     items = dlq.payload.get("items") if dlq.ok and dlq.payload else None
@@ -317,6 +324,8 @@ def audit_world(
         for label in ("DLQ unclassified rows", "DLQ fenced rows"):
             lines.append(BaselineLine(label, "0", dlq.error or "incomplete listing", False))
 
+    # 3. Then the two reads that each name one resource: the backlog of the consumer group the
+    #    alerts are about, and the cache key the dispatcher keeps its hot set in.
     for tool, arguments, fields in (
         (
             "get_consumer_lag",
@@ -333,12 +342,16 @@ def audit_world(
         for label, field, expected in fields:
             observed = reading.payload.get(field) if reading.ok and reading.payload else None
             check(label, observed, expected)
+    # 4. Then each job chain the caller named, which has to still exist and must not have been
+    #    left paused by an earlier run.
     for root in roots:
         reading = read(client, _probe("get_dag_state", {"job_id": root}, "world audit"))
         payload = reading.payload if reading.ok and reading.payload else {}
         check(f"chain {root} paused", payload.get("paused"), False)
         nodes = payload.get("nodes")
         check(f"chain {root} present", isinstance(nodes, list) and bool(nodes), True)
+    # 5. Finally this machine, because a traffic generator or an eval runner left running would
+    #    keep changing the world while somebody reads this audit.
     count, detail = process_count()
     lines.append(
         BaselineLine(
@@ -353,10 +366,13 @@ def audit_world(
 
 def main(argv: Sequence[str] | None = None) -> int:
     """Audit the seeded world under the read-only token and print PASS/FAIL per line."""
+    # 1. Read the optional list of job chain roots the caller wants checked as well.
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--roots", default="", help="comma-separated root job ids; read only")
     args = parser.parse_args(argv)
     roots = tuple(part.strip() for part in args.roots.split(",") if part.strip())
+    # 2. Load the settings and the read-only token. Exit code 3 means "the configuration is
+    #    wrong", which a reader must be able to tell apart from "a check failed".
     try:
         settings = Settings()  # type: ignore[call-arg]
     except ValidationError as error:
@@ -370,17 +386,18 @@ def main(argv: Sequence[str] | None = None) -> int:
     credential = token.get_secret_value()
     client = make_client(settings, token=credential)
     try:
+        # 3. Prove the token genuinely cannot write anything, before making one read with it.
         try:
             assert_read_only_principal(client, lab_principal_token=credential)
         except PrincipalGuardError:
             print("[FAIL] token is not verified read-only; audit refused")
             return 3
         print("[PASS] token is read-only")
-        # Every read from here on is labelled `lab.probe`. The smoke account is its own lab
-        # credential (platform ADR 0038 honours it by name and re-checks it holds no write
-        # scope), so Authorization and X-Lab-Principal carry the same token.
+        # 4. Label every read from here on as the lab's own, so the demo page does not draw these
+        #    probes as a new agent run. The platform lets this account label its own reads.
         lab_client = LabProbeClient(client, reason=LAB_PROBE_REASON, principal_token=credential)
         lines, rows = audit_world(lab_client, roots)
+        # 5. Print one line per check, then the dead-letter rows in full, then the verdict.
         for line in lines:
             print(
                 f"[{'PASS' if line.passed else 'FAIL'}] {line.name}: "

@@ -9,7 +9,8 @@ from __future__ import annotations
 import re
 from typing import Final
 
-#: What a prompt file writes where a shared rule belongs (``test_prompts_snapshot.py`` sweeps it).
+#: What a prompt file writes where a shared rule belongs: ``{{rule:<key>}}``, lower-case key.
+#: ``test_prompts_snapshot.py`` sweeps every prompt for these and checks each key is known here.
 PLACEHOLDER: Final[re.Pattern[str]] = re.compile(r"\{\{rule:([a-z0-9_]+)\}\}")
 
 
@@ -20,8 +21,8 @@ class UnknownSharedRuleError(RuntimeError):
     """
 
 
-#: Conditional routing for a stuck dependency chain (O-19; ADR 0054, ADR 0034 for
-#: error-outranks-hint). Discriminator: the root's own dead-letter row, never the chain view.
+#: What to do about a dependency chain that stopped: fence the dead-lettered root out of replay,
+#: or replay it. The root's OWN dead-letter row decides, never the chain view (ADR 0034, ADR 0054).
 STUCK_CHAIN_ROOT_RULE: Final[str] = (
     "A stuck dependency chain is routed by its dead-lettered root's own "
     "dead-letter row and never by the chain view: when that row reads "
@@ -35,8 +36,8 @@ STUCK_CHAIN_ROOT_RULE: Final[str] = (
 )
 
 
-#: How the briefing's structured remainder is read, by both its writer and its judge
-#: (WP-11.3, ADR 0065, INC-002). Quotes the block heading ``agent/briefing.py`` renders.
+#: How to read the list of causes a run did NOT address: everything in it is still open, and no
+#: run may call any of them fixed. The briefing writer and the judge get the same words (ADR 0065).
 UNRESOLVED_REMAINDER_RULE: Final[str] = (
     "The run context carries a structured remainder — the block headed `Remaining (not "
     "addressed by this run):` — which is computed from the run's own ranking and its own "
@@ -48,8 +49,8 @@ UNRESOLVED_REMAINDER_RULE: Final[str] = (
 )
 
 
-#: WHICH node of a chain an action may name (WO-R3-284, ADR 0070, amending ADR 0032) — the
-#: prompt half of that guard. Discriminator: the alerted job's own ``get_dag_state`` reading.
+#: WHICH job of a dependency chain an action may name: only one the alerted job's own
+#: ``get_dag_state`` reading lists (ADR 0070, amending ADR 0032). Code enforces it too.
 CHAIN_NODE_ACTION_RULE: Final[str] = (
     "An action about a dependency chain names a node the alerted job's own "
     "`get_dag_state` reading names — the alerted job itself, or, when that job "
@@ -62,9 +63,8 @@ CHAIN_NODE_ACTION_RULE: Final[str] = (
 )
 
 
-#: Who may be credited with a recovery, and what a run says when nobody may (O-29; ADR 0071,
-#: amending ADR 0062). Discriminator: the pair of readings, before and after — never how clean
-#: the response looked. Both sentences are VERBATIM; ``agent/attribution.py`` holds them.
+#: When a run may say its own action fixed the incident: only with a reading that showed the fault
+#: just before acting and one that shows it gone after (ADR 0071). ``agent/attribution.py`` agrees.
 ATTRIBUTION_RULE: Final[str] = (
     "A recovery belongs to your action only when the last reading you took of that resource "
     "BEFORE acting showed the fault present and your reading after it shows the fault gone, "
@@ -79,9 +79,8 @@ ATTRIBUTION_RULE: Final[str] = (
 )
 
 
-#: How MANY times a "re-read before X" rule asks to be satisfied (INC-004; ADR 0073, amended by
-#: ADR 0074). Held here because its two readers are two RULES in `investigation_planner.md`: the
-#: re-reads of ADR 0009 and ADR 0071. Structural half: `investigation._probe_withdrawn`.
+#: How many times the "re-read before you act" rules have to be satisfied: once. A second reading
+#: of the same resource is the same evidence, so the machine then withdraws ``probe`` (ADR 0073).
 CONFIRMING_READ_BOUND_RULE: Final[str] = (
     "One fresh reading that shows the fault is the whole demand of this rule — a second is "
     "not more evidence, it is the same evidence and one step you cannot get back — so once "

@@ -19,18 +19,21 @@ from pydantic import BaseModel, ValidationError
 
 _STRUCTURED_TOOL_NAME: Final[str] = "record_output"
 
-# Explicit SDK bounds (C-07): the outer loop owns retry policy, so SDK retries are off.
-# The 120s read bound is what makes a stalled call reach the wall meter (ADR 0015).
+# Retrying is ``LLMClient.call``'s own job below, so the SDK never retries by itself (finding
+# C-07). The 120-second read bound ends a stalled call, so the run's budget can escalate on it.
 _SDK_MAX_RETRIES: Final[int] = 0
 _SDK_TIMEOUT: Final[httpx.Timeout] = httpx.Timeout(120.0, connect=5.0)
-# Preflight is one models.list call — it must fail fast on a dead network.
+# ``preflight_auth`` at the bottom makes one cheap call, so it waits far less: a dead network or
+# a bad key should be reported before a run starts, not two minutes into it.
 _PREFLIGHT_TIMEOUT: Final[httpx.Timeout] = httpx.Timeout(30.0, connect=5.0)
-# Cap the honored Retry-After: a long server-suggested pause stalls the state machine.
+# Longest pause this client will take between attempts even when the server's Retry-After header
+# asks for more: honouring a multi-minute suggestion would stall the incident run behind it.
 _MAX_RETRY_AFTER_SECONDS: Final[float] = 60.0
 
 
-#: Model ids that reject ``temperature`` with a 400, so sampled inference (WP-5.3) would
-#: 400. A tripwire: ``tests/unit/test_best_of_n_sampled.py`` forbids a ``MODEL_PRICING`` id here.
+#: Model ids that answer any request carrying a ``temperature`` field with an HTTP 400, so a
+#: strategy that samples several answers cannot use one. ``tests/unit/test_best_of_n_sampled.py``
+#: fails if an id listed here is also a priced model in ``MODEL_PRICING``.
 SAMPLING_REJECTED_MODELS: Final[frozenset[str]] = frozenset(
     {
         "claude-fable-5",
@@ -176,7 +179,8 @@ class LLMClient:
         self._retry_base_delay = retry_base_delay
         self._sleep = sleep
         self._tracer = tracer
-        # Injectable like ``sleep``: a real duration could only be pinned to ">= 0".
+        # Injected like ``sleep`` so a test can assert an exact reported duration; against a real
+        # clock the only safe assertion would be ">= 0", which proves nothing about the timing.
         self._clock = clock
 
     def call[T: BaseModel](
@@ -195,7 +199,11 @@ class LLMClient:
         One forced tool carries the output schema; transient failures are retried.
         ``elapsed_ms`` spans the whole retry loop, not the attempt that returned.
         """
+        # 1. Start the clock for the whole logical call, so the elapsed time reported to the
+        #    caller covers every retry and every backoff sleep, not just the attempt that won.
         call_started = self._clock()
+        # 2. Build the request once; every attempt re-sends these same bytes. The caller's model
+        #    becomes the schema of one tool the model MUST call, so the answer arrives typed.
         request_body: dict[str, Any] = {
             "model": model,
             "max_tokens": max_tokens,
@@ -216,10 +224,13 @@ class LLMClient:
             ],
             "tool_choice": {"type": "tool", "name": _STRUCTURED_TOOL_NAME},
         }
-        # Never defaulted: newer models reject the field (``SAMPLING_REJECTED_MODELS``).
+        # 3. Send a temperature only when the caller passed one. The field is never defaulted
+        #    because the ids in ``SAMPLING_REJECTED_MODELS`` answer any request carrying it 400.
         if temperature is not None:
             request_body["temperature"] = temperature
 
+        # 4. How a failed attempt is written to the trace: one record per attempt that produced
+        #    no output, so the run's trace still shows calls that cost money and returned nothing.
         def _trace_error(err: Exception, attempt: int, *, terminal: bool) -> None:
             """Record a call that was billed (or attempted) and did not return."""
             if self._tracer is None:
@@ -236,45 +247,54 @@ class LLMClient:
                 }
             )
 
+        # 5. Send the request, up to ``max_attempts`` times. Each attempt gets its own trace id,
+        #    because a later repair re-ask has to name the exact attempt whose output failed.
         last_exc: Exception | None = None
         retry_after: float | None = None
-        # One id per ATTEMPT: ``repair_of`` must name the exact record that failed.
         record_id = ""
         for attempt in range(self._max_attempts):
             started = self._clock()
             record_id = uuid.uuid4().hex[:12]
-            # ``attempt`` is the count already billed and discarded; every exit charges it.
+            # ``attempt`` is how many attempts were already billed and thrown away. Every way out
+            # of this loop charges for them: ADR 0015 says over-report cost, never under-report.
             discarded = LLMUsage(discarded_attempts=attempt, discarded_max_tokens=max_tokens)
             try:
                 response = self._client.messages.create(**request_body)
+            # 6. No answer came back at all (connection refused, DNS, read timeout). Retry, and
+            #    mark the trace record terminal if this was the last attempt we had.
             except anthropic.APIConnectionError as err:
                 _trace_error(err, attempt, terminal=attempt == self._max_attempts - 1)
                 last_exc = err
                 retry_after = None
+            # 7. The API answered with an error status: give up on one we cannot fix by asking
+            #    again, retry a rate limit or a server fault with backoff.
             except anthropic.APIStatusError as err:
                 if err.status_code != 429 and err.status_code < 500:
-                    # Client-side (bad request, auth): retrying can't help, so wrap
-                    # it. Charges `attempt`: a rejected request is known unbilled.
+                    # A bad request, a bad key or a missing permission answers a resend the same
+                    # way. Charge only the earlier attempts: a rejected request is never billed.
                     _trace_error(err, attempt, terminal=True)
                     raise LLMError(
                         f"LLM API error {err.status_code}: {err}",
                         usage=discarded,
                         record_id=record_id,
                     ) from err
-                # 429 + 5xx are transient: retry with backoff, honoring a numeric Retry-After.
+                # A 429 (rate limited) or a 5xx may succeed on a resend, so retry with backoff and
+                # honour the server's Retry-After when it gives a number we can read.
                 _trace_error(err, attempt, terminal=attempt == self._max_attempts - 1)
                 last_exc = err
                 retry_after = _retry_after_seconds(err)
+            # 8. Any other SDK failure, notably a 200 whose body the SDK itself refused to read.
+            #    That answer was generated, so charge this attempt as well as the earlier ones.
             except anthropic.APIError as err:
                 _trace_error(err, attempt, terminal=True)
-                # Catch-all: an APIResponseValidationError (a 200 the SDK rejected) billed too.
                 raise LLMError(
                     f"LLM API error: {type(err).__name__}: {err}",
                     usage=LLMUsage(discarded_attempts=attempt + 1, discarded_max_tokens=max_tokens),
                     record_id=record_id,
                 ) from err
+            # 9. The API answered: record the call, turn the forced tool call into the caller's
+            #    model, and return. Traced BEFORE parsing: an unreadable answer was billed (F-002).
             else:
-                # Trace BEFORE parsing: an unparseable call is billed too (F-002).
                 trace: dict[str, Any] | None = None
                 if self._tracer is not None:
                     trace = {
@@ -301,13 +321,16 @@ class LLMClient:
                         dict(trace, output=result.output.model_dump(mode="json"))
                     )
                 return result
+            # 10. The attempt failed in a way worth retrying and there is another attempt left:
+            #     wait the doubling backoff, or the server's Retry-After when that asks for longer.
             if attempt < self._max_attempts - 1:
                 delay = self._retry_base_delay * (2**attempt)
                 if retry_after is not None:
                     delay = max(delay, min(retry_after, _MAX_RETRY_AFTER_SECONDS))
                 self._sleep(delay)
         assert last_exc is not None
-        # Every attempt was discarded, so every attempt is charged.
+        # 11. The attempts ran out without one answer. Charge every attempt, and raise the last
+        #     transport failure as the cause so the caller can see what kept going wrong.
         raise LLMError(
             f"LLM transport failure after {self._max_attempts} attempts: "
             f"{type(last_exc).__name__}: {last_exc}",
@@ -329,8 +352,8 @@ class LLMClient:
                 try:
                     output = output_model.model_validate(block.input)
                 except ValidationError as err:
-                    # ADR 0007: only the domain exception crosses this boundary.
-                    # A raw ValidationError also skipped the trace below (F-002).
+                    # Only this module's own exception type may leave here (ADR 0007), so callers
+                    # need to know one error type; a raw Pydantic error also escaped untraced.
                     raise LLMOutputError(
                         f"output failed schema validation for {output_model.__name__}: {err}",
                         usage=usage,
@@ -339,7 +362,8 @@ class LLMClient:
                 return usage.with_output(
                     output, response.stop_reason or "unknown", record_id, elapsed_ms
                 )
-        # Billed and unreturned — the max_tokens-truncation case, so ``usage`` is charged.
+        # The response carried no such tool call at all, which is what a reply cut off at
+        # ``max_tokens`` looks like. It was generated and billed, so ``usage`` is charged.
         raise LLMOutputError(
             f"no {_STRUCTURED_TOOL_NAME} tool_use in response; stop_reason={response.stop_reason}",
             usage=usage,
@@ -394,5 +418,6 @@ def preflight_auth(api_key: str) -> None:
     except anthropic.APIConnectionError as err:
         raise LLMError(f"auth preflight failed: connection error: {err}") from err
     except anthropic.APIError as err:
-        # Catch-all, like ``call``: an APIResponseValidationError must not escape raw.
+        # Catch-all, as in ``call``: every failure leaves here as an ``LLMError``, so no caller
+        # has to know the SDK's own exception types to report a bad key.
         raise LLMError(f"auth preflight failed: {type(err).__name__}: {err}") from err

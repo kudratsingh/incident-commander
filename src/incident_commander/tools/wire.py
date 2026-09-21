@@ -1,7 +1,8 @@
-"""Serialize tool arguments to the exact bytes sent over the wire.
+"""Turn tool arguments into the exact bytes that go over the wire.
 
-The platform hashes a ``tools/call`` body for idempotency, so the ``model_dump`` options here
-are a contract (WO-R2-83). ``wire_arguments`` default-fills and refuses nothing (ADR 0024).
+The platform hashes the arguments of a ``tools/call`` to recognise a repeated call, so the dump
+options in this file are part of that agreement: change one and the same call hashes differently.
+``wire_arguments`` fills in defaults and rejects nothing, which is deliberate (ADR 0024).
 """
 
 from __future__ import annotations
@@ -15,26 +16,29 @@ from incident_commander.tools.registry import ToolSpec
 
 
 def wire_arguments(tool: ToolSpec, raw_args: Mapping[str, Any]) -> dict[str, Any]:
-    """Validate ``raw_args`` against ``tool.input_model`` and dump to wire JSON.
+    """Validate ``raw_args`` against the tool's input model and dump it as the JSON to be sent.
 
-    Pydantic-filled defaults ARE included (ADR 0010); Tier-1 needs ``idempotency_key``.
+    Fields Pydantic filled in from defaults are included, because the platform hashes what it
+    receives, not what the caller typed (ADR 0010). Every action tool needs ``idempotency_key``.
     """
     return tool.input_model.model_validate(dict(raw_args)).model_dump(mode="json")
 
 
 def canonical_arguments_body(arguments: Mapping[str, Any]) -> bytes:
-    """The exact bytes the platform's idempotency store hashes.
+    """The exact bytes the platform hashes when it decides whether it has seen this call before.
 
-    ADR 0010 §2's normalization, reimplemented not imported: sorted keys, no
-    whitespace, ``default=str``, ``ensure_ascii`` on, UTF-8. A wire contract.
+    Sorted keys, no whitespace, non-JSON values stringified, ASCII-escaped, UTF-8 — the rules from
+    ADR 0010 §2, written out here rather than imported, because importing platform code to build a
+    request the platform must verify independently would defeat the check (invariant 1).
     """
     return json.dumps(dict(arguments), sort_keys=True, separators=(",", ":"), default=str).encode()
 
 
 def arguments_hash(arguments: Mapping[str, Any]) -> str:
-    """SHA-256 (lowercase hex) of :func:`canonical_arguments_body`.
+    """SHA-256, lower-case hex, of :func:`canonical_arguments_body`.
 
-    The commander's pinned half of the platform's ``IdempotencyRecord.arguments_hash``
-    — off the request path, exercised by ``tests/unit/test_idempotency_hash_matrix.py``.
+    This side's copy of the hash the platform stores as ``IdempotencyRecord.arguments_hash``. No
+    request uses it; it exists so ``tests/unit/test_idempotency_hash_matrix.py`` can prove the two
+    sides still agree on the same bytes.
     """
     return hashlib.sha256(canonical_arguments_body(arguments)).hexdigest()

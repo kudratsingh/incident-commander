@@ -20,19 +20,21 @@ from incident_commander.config import Settings
 _DEFAULT_TIMEOUT_SECONDS: Final[float] = 30.0
 _DEFAULT_MAX_ATTEMPTS: Final[int] = 3
 _DEFAULT_RETRY_BASE_DELAY: Final[float] = 1.0
-# Ceiling on a server-supplied Retry-After: a hint, not an instruction.
+# Longest pause this client takes between attempts even when the platform's Retry-After header
+# asks for more: the header is a hint, and a long one would stall the incident run behind it.
 _MAX_RETRY_AFTER_SECONDS: Final[float] = 60.0
 _JSON_RPC_INTERNAL_ERROR: Final[int] = -32603
 _JSON_RPC_INVALID_PARAMS: Final[int] = -32602
 
-# The lab's label on a call it makes with the agent's token (platform ADR 0038). It sits
-# BESIDE ``arguments`` in ``params``, so it reaches no tool's input model and no prompt.
+# How the evaluator marks a call as its own, so the platform's audit log does not credit the agent
+# with the lab's reads (platform ADR 0038). It sits BESIDE ``arguments``, so no prompt ever sees it.
 LAB_PROBE_PARAM: Final[str] = "_lab_probe"
 LAB_PRINCIPAL_HEADER: Final[str] = "X-Lab-Principal"
-#: The platform refuses an over-long reason rather than truncating it.
+#: Longest reason the platform accepts with that marker. It refuses a longer one outright rather
+#: than shortening it, so the check below happens here instead of costing a round trip.
 LAB_PROBE_REASON_MAX_CHARS: Final[int] = 200
-#: ``data.error_code`` on the refusal. The CODE is -32602, which is also what an
-#: argument-validation refusal carries, so the distinguishing mark is this string.
+#: The string in ``data.error_code`` when the platform refuses to honour that marker. The numeric
+#: code is -32602, which a bad-argument refusal also uses, so only this string tells them apart.
 LAB_PROBE_REFUSED_ERROR_CODE: Final[str] = "lab_probe_refused"
 
 
@@ -48,13 +50,13 @@ class MCPError(RuntimeError):
 class LabProbeRefused(MCPError):
     """The platform refused to label this call as the lab's own, and did not run it.
 
-    Its own type because the refusal arrives as ``-32602``, the same code an
-    argument-validation refusal carries, which the principal guards read as a pass (F4).
+    Its own type because the refusal arrives as ``-32602``, the code a bad-argument refusal also
+    uses: the guards that check who made a call read that code as "fine, carry on" (finding F4).
     """
 
     @property
     def reason_code(self) -> str:
-        """Which half of the rule the request failed, per the platform's closed set."""
+        """Which part of the labelling rule the request broke, in the platform's own words."""
         data = self.data
         if isinstance(data, Mapping):
             return str(data.get("reason_code", "unknown"))
@@ -64,8 +66,8 @@ class LabProbeRefused(MCPError):
 def _error_from_member(member: object) -> MCPError:
     """Build an ``MCPError`` from a server-supplied JSON-RPC ``error`` member.
 
-    The member crosses the trust boundary, so nothing about its shape is
-    guaranteed; an uncoercible code is folded into the message, never dropped.
+    The member comes from outside this process, so nothing about its shape can be assumed. A code
+    that is not a number is put into the message rather than dropped, so no detail is lost.
     """
     if not isinstance(member, Mapping):
         return MCPError(
@@ -90,10 +92,10 @@ def _error_from_member(member: object) -> MCPError:
 
 
 def _lab_probe_envelope(reason: str | None, principal_token: str | None) -> dict[str, str]:
-    """Validate the label pair and return the header it travels with.
+    """Check the lab's reason and credential, and return the header the credential travels in.
 
-    Both or neither: either alone is a request bug, and raises here rather than spending
-    a round trip to be told so.
+    Both or neither: one without the other is a mistake in the calling code, and it raises here
+    rather than spending a round trip to be told the same thing by the platform.
     """
     if reason is None or principal_token is None:
         raise ValueError(
@@ -123,8 +125,8 @@ class ToolResult(BaseModel):
     model_config = ConfigDict(extra="allow", frozen=True)
 
     content: list[dict[str, Any]] = []
-    # The wire spells the flag ``isError``, fixtures ``is_error``; without the alias
-    # {"isError": true} falls into extras and every escalate-on-error guard is dead (C-02).
+    # The platform spells it ``isError``, our fixtures ``is_error``. Without the alias a real
+    # ``{"isError": true}`` lands in the extras and every escalate-on-error guard sees False (C-02).
     is_error: bool = Field(default=False, validation_alias=AliasChoices("isError", "is_error"))
 
 
@@ -183,16 +185,22 @@ class MCPClient:
     ) -> ToolResult:
         """Invoke one platform tool and return its result; the call is traced either way.
 
-        ``lab_probe`` makes the platform write ``lab.probe`` instead of ``agent.tool_invoked``
-        and needs ``lab_principal_token``; ``MCPClientProtocol`` offers neither to the agent.
+        ``lab_probe`` makes the platform record the call as ``lab.probe`` rather than
+        ``agent.tool_invoked``, and needs ``lab_principal_token`` with it. The agent's own path
+        cannot reach either argument, because ``MCPClientProtocol`` does not declare them.
         """
+        # 1. Build the ``tools/call`` parameters. The arguments are copied into a plain dict so the
+        #    trace below records exactly what was sent, whatever kind of mapping the caller passed.
         started = time.monotonic()
         args_dict = dict(arguments)
         params: dict[str, Any] = {"name": name, "arguments": args_dict}
         extra_headers: dict[str, str] | None = None
+        # 2. When the evaluator is making this call rather than the agent, check the label pair and
+        #    send the lab's own credential, which is what makes the platform log it as the lab's.
         if lab_probe is not None or lab_principal_token is not None:
             extra_headers = _lab_probe_envelope(lab_probe, lab_principal_token)
             params[LAB_PROBE_PARAM] = lab_probe
+        # 3. Make the round trip and read the result envelope the platform sent back.
         try:
             result = self._call(
                 "tools/call",
@@ -200,12 +208,15 @@ class MCPClient:
                 timeout_seconds=timeout_seconds,
                 extra_headers=extra_headers,
             )
-            # Inside the wrapper on purpose: transitions catch MCPError and nothing else, so
-            # a raw ValidationError would walk past every escalate-with-reason rail.
+            # Converted to ``MCPError`` inside this wrapper on purpose: the state transitions catch
+            # ``MCPError`` and nothing else, so a raw Pydantic error would escape every rail that
+            # turns a tool failure into an escalation with a reason.
             try:
                 tool_result = ToolResult.model_validate(result)
             except ValidationError as exc:
                 raise MCPError(-32700, f"malformed tools/call result envelope: {exc}") from exc
+        # 4. The call failed somewhere above: record it in the trace with the error text, then let
+        #    the exception through unchanged so the caller decides what the run does about it.
         except Exception as exc:
             if self._tracer is not None:
                 self._tracer(
@@ -217,6 +228,8 @@ class MCPClient:
                     }
                 )
             raise
+        # 5. The call succeeded: record it with its result, then hand the result back. Content
+        #    blocks inside it are untrusted data, so nothing here reads or acts on them.
         if self._tracer is not None:
             self._tracer(
                 {
@@ -237,21 +250,27 @@ class MCPClient:
         extra_headers: Mapping[str, str] | None = None,
     ) -> dict[str, Any]:
         """One JSON-RPC round trip, retrying transient failures, returning the result object."""
+        # 1. Build the JSON-RPC envelope. The id comes from this client's own counter, so a reply
+        #    can be matched to the request that asked for it.
         body = {
             "jsonrpc": "2.0",
             "id": next(self._ids),
             "method": method,
             "params": dict(params),
         }
-        # A per-request copy: the lab credential belongs to one call, not to the client.
+        # 2. Assemble the per-request headers and timeout. The headers are copied rather than
+        #    mutated because a lab credential belongs to one call, not to the whole client, and an
+        #    explicit timeout is how a slow Tier-1 action gets longer than an ordinary read.
         headers = self._headers if extra_headers is None else {**self._headers, **extra_headers}
-        # Per-request timeout override for Tier-1 action tools; None = client default.
         post_kwargs: dict[str, Any] = {"json": body, "headers": headers}
         if timeout_seconds is not None:
             post_kwargs["timeout"] = timeout_seconds
+        # 3. Send the same body up to ``max_attempts`` times.
         for attempt in range(self._max_attempts):
             try:
                 response = self._client.post(self._base_url, **post_kwargs)
+            # 4. The request never got an answer (connection refused, DNS, timeout). Back off and
+            #    resend, unless this was the last attempt, in which case report the transport error.
             except httpx.RequestError as exc:
                 if attempt == self._max_attempts - 1:
                     raise MCPError(
@@ -261,27 +280,37 @@ class MCPClient:
                     ) from exc
                 self._sleep(self._retry_base_delay * (2**attempt))
                 continue
+            # 5. The platform is rate limiting us or is briefly broken, and an attempt is left:
+            #    wait the doubling backoff, or the server's own Retry-After when it asks for longer.
             status = response.status_code
             if (status >= 500 or status == 429) and attempt < self._max_attempts - 1:
                 delay = self._retry_base_delay * (2**attempt)
                 retry_after = response.headers.get("retry-after")
                 if retry_after is not None:
                     with contextlib.suppress(ValueError):
-                        # Capped like LLMClient's: `Retry-After: 86400` would
-                        # outlast every wall-clock budget (invariant 7).
+                        # Capped at 60 seconds, as in ``LLMClient``: a header saying
+                        # `Retry-After: 86400` would outlast the run's whole time budget.
                         delay = max(delay, min(float(retry_after), _MAX_RETRY_AFTER_SECONDS))
                 self._sleep(delay)
                 continue
+            # 6. Any other error status, including a 5xx on the last attempt. The first 200
+            #    characters of the body go in the message; the rest could be a wall of HTML.
             if status >= 400:
                 raise MCPError(-32000, f"HTTP {status} from MCP endpoint: {response.text[:200]}")
+            # 7. A 2xx, so read the body. Anything that is not a JSON object is a broken server,
+            #    not a tool failure, and is reported as a parse error rather than trusted.
             try:
                 payload = response.json()
             except ValueError as exc:
                 raise MCPError(-32700, f"non-JSON response body: {exc}") from exc
             if not isinstance(payload, dict):
                 raise MCPError(-32700, f"non-object JSON response: {type(payload).__name__}")
+            # 8. The platform refused the call and said why: raise it as ``MCPError``, or as
+            #    ``LabProbeRefused`` when the refusal is specifically about the lab label.
             if "error" in payload:
                 raise _error_from_member(payload["error"])
+            # 9. Success. A ``result`` that is not an object reads as an empty one, so a caller
+            #    never has to type-check what it got back from here.
             result = payload.get("result", {})
             return result if isinstance(result, dict) else {}
         raise RuntimeError("unreachable: retry loop exited without response")
@@ -292,10 +321,11 @@ def make_client(
     tracer: Callable[[dict[str, Any]], None] | None = None,
     token: str | None = None,
 ) -> MCPClient:
-    """Build a client from Settings — the app-code entry point.
+    """Build a client from Settings — the entry point application code should use.
 
-    ``token`` overrides ``settings.platform_token`` for a different principal;
-    empty or blank RAISES rather than falling back to the full principal (S-04).
+    ``token`` replaces ``settings.platform_token`` when the caller is a different principal, such
+    as the read-only smoke account. An empty or blank one RAISES instead of quietly falling back
+    to the agent's full-privilege token, which is how a read-only run gained write scope (S-04).
     """
     if token is not None and not token.strip():
         raise ValueError(

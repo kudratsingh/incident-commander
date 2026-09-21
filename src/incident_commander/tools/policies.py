@@ -1,7 +1,8 @@
 """Tier policy: which tools the agent may call in which state.
 
-``READ`` is safe any time; ``TIER_1`` mutates within a bounded, reversible blast radius;
-``TIER_2`` needs propose → approve → execute and is unpopulated. FIRST filter only (invariant 2).
+``READ`` changes nothing and is safe at any time; ``TIER_1`` changes something, but only within a
+small and reversible radius; ``TIER_2`` needs a human to approve it first and holds no tools yet.
+This is the agent's own first filter — the platform decides again on every call (invariant 2).
 """
 
 from __future__ import annotations
@@ -13,7 +14,7 @@ from incident_commander.tools.registry import TOOL_REGISTRY
 
 
 class Tier(StrEnum):
-    """Blast-radius classification for one tool, least to most privileged."""
+    """How much one tool could change, listed from the least privileged to the most."""
 
     READ = "read"
     TIER_1 = "tier_1"
@@ -23,12 +24,14 @@ class Tier(StrEnum):
 class PolicyCoverageError(RuntimeError):
     """A registered tool has no tier decision, or has more than one.
 
-    Not a ``KeyError``: an unclassified tool is a missing safety decision.
+    Its own type rather than a ``KeyError`` because it means a safety decision was never taken,
+    which is a different problem from asking about a tool that does not exist.
     """
 
 
-# Every registered tool is classified in exactly one set below; one that is not fails
-# ``ensure_covered`` AND ``tier_of``. The read set is written out, never inferred (ADR 0003).
+# Every tool in the registry belongs to exactly one of the three sets below. One that belongs to
+# none makes both ``tier_of`` and ``ensure_covered`` raise, rather than being treated as a read;
+# that is why even the harmless read tools are listed by hand instead of inferred (ADR 0003).
 _READ_TOOLS: Final[frozenset[str]] = frozenset(
     {
         "get_cache_key_info",
@@ -56,7 +59,8 @@ _TIER_1_TOOLS: Final[frozenset[str]] = frozenset(
         "pause_dag",
         "replay_dlq_messages",
         "invalidate_cache_key",
-        # v0.4.0 DLQ tools: idempotent, bounded by `actions:execute` + this tier policy.
+        # The v0.4.0 dead-letter-queue tools. Safe to repeat (the platform dedupes them) and no
+        # more privileged than the three above, so they sit in the same tier.
         "replay_dlq_by_ids",
         "replay_dlq_by_category",
         "mark_dlq_permanent",
@@ -69,8 +73,9 @@ _TIER_2_TOOLS: Final[frozenset[str]] = frozenset()
 class Resolution(StrEnum):
     """Whether a Tier-1 action can END an incident, or only hold it still.
 
-    Independent of tier (how much damage it can do). Tier-1 used to imply
-    resolution, so a stabilizer could carry a run to RESOLVED.
+    A separate question from the tier, which says how much damage an action could do. Being
+    Tier-1 used to imply the action resolved things, which let an action that merely bought time
+    carry a run all the way to RESOLVED — a fix reported for an incident still broken.
     """
 
     RESOLVES = "resolves"
@@ -88,15 +93,17 @@ class Resolution(StrEnum):
 class ResolutionPolicy(NamedTuple):
     """One tool's resolution class plus the written reason for it.
 
-    ``remediation.py`` quotes the rationale verbatim to a human — say what is still wrong.
+    ``remediation.py`` quotes ``rationale`` word for word to the human it escalates to, so each
+    one is written as an explanation of what is still wrong after the action succeeds.
     """
 
     resolution: Resolution
     rationale: str
 
 
-# Single source of truth for "can this action end an incident?". TOTAL over the Tier-1
-# slice: an absent entry raises in ``resolution_class_of`` (``test_policies.py`` pins it).
+# The one place "can this action end an incident?" is answered. Every Tier-1 tool needs an entry:
+# a missing one makes ``resolution_class_of`` raise instead of guessing, and
+# ``tests/unit/test_policies.py`` fails if a Tier-1 tool is ever added without one.
 RESOLUTION_CLASS: Final[dict[str, ResolutionPolicy]] = {
     "pause_dag": ResolutionPolicy(
         Resolution.STABILIZES,
@@ -135,9 +142,9 @@ RESOLUTION_CLASS: Final[dict[str, ResolutionPolicy]] = {
         "legacy bulk re-submit. Kept resolving for parity with the two "
         "targeted replay tools it predates.",
     ),
-    # STABILIZES since WO-R2-140 (user decision), amending ADR 0026's RESOLVES: the fence
-    # stops a later bulk replay from re-running the poison, but the job is still dead and a
-    # human still fixes the payload. Scenario: `dlq_human_required_escalates`.
+    # Changed from RESOLVES to STABILIZES by WO-R2-140, amending ADR 0026: fencing the job stops a
+    # later bulk replay from re-running a poisoned payload, but the job is still dead and a human
+    # still has to fix the data. The scenario that grades this is `dlq_human_required_escalates`.
     "mark_dlq_permanent": ResolutionPolicy(
         Resolution.STABILIZES,
         "fences one dead-lettered job out of auto-replay — it sets "
@@ -155,10 +162,11 @@ RESOLUTION_CLASS: Final[dict[str, ResolutionPolicy]] = {
 
 
 def resolution_class_of(tool_name: str) -> ResolutionPolicy:
-    """Classify one Tier-1 action's worth. Unclassified raises, never defaults.
+    """Say whether a verified success of this Tier-1 action ends the incident or only holds it.
 
-    Not in ``TOOL_REGISTRY`` → ``KeyError``; not Tier-1 or no entry →
-    ``PolicyCoverageError``, because "of course it resolves" must not default.
+    An unknown tool raises ``KeyError``. A tool that is not Tier-1, or a Tier-1 tool with no entry
+    in ``RESOLUTION_CLASS``, raises ``PolicyCoverageError``: there is deliberately no default,
+    because "of course it resolves" is how a run reports a fix that fixed nothing.
     """
     if tool_name not in TOOL_REGISTRY:
         raise KeyError(f"unknown tool: {tool_name}")
@@ -191,8 +199,9 @@ def stabilize_only_tools() -> frozenset[str]:
     )
 
 
-# Read tools served from a cache, with their declared staleness window in seconds: a reading
-# inside its window may predate the fault, so a contradicting probe earns a re-read (ADR 0009).
+# Read tools the platform answers from a cache, and how many seconds old that answer may be. A
+# reading this old can predate the fault entirely, so when one contradicts a live hypothesis the
+# investigation is allowed to read it again before believing it (ADR 0009).
 CACHED_READ_FRESHNESS_SECONDS: Final[dict[str, int]] = {
     "get_consumer_lag": 60,
 }
@@ -203,19 +212,22 @@ def is_cached_read(tool_name: str) -> bool:
     return tool_name in CACHED_READ_FRESHNESS_SECONDS
 
 
-# Argument fields whose values NAME a platform resource (a cache key, a job id) rather than
-# filter. A plan may fill these only from values copied VERBATIM out of the alert or the
-# evidence ledger (ADR 0009). Total over TOOL_REGISTRY; `test_policies.py` pins that.
+# For each tool, the argument fields whose value NAMES a particular thing on the platform (a cache
+# key, a job id) rather than filtering a list. A plan may fill these only by copying a value word
+# for word from the alert or the evidence ledger, never by inventing or retyping one (ADR 0009).
+# Every tool in the registry needs an entry; `tests/unit/test_policies.py` fails if one is missing.
 RESOURCE_ARG_FIELDS: Final[dict[str, frozenset[str]]] = {
-    # `key` NAMES a resource — same copy-don't-re-type rule as the write tool.
+    # `key` names one cache entry, so the same copy-it-exactly rule applies as to the tool that
+    # deletes that entry — a mistyped key reads a different entry and proves nothing.
     "get_cache_key_info": frozenset({"key"}),
-    # No arguments — declared empty rather than omitted (ADR 0003).
+    # Takes no arguments. Written as an empty set rather than left out, so the table is complete
+    # and a missing entry always means "nobody decided" (ADR 0003).
     "get_circuit_breakers": frozenset(),
     "get_consumer_lag": frozenset({"consumer_group"}),
     "get_dag_state": frozenset({"job_id"}),
     "get_deploy_history": frozenset(),
     "get_incident": frozenset({"id"}),
-    # No arguments, so nothing can name a resource. Declared empty (ADR 0003).
+    # Takes no arguments either, so nothing it is given can name a resource.
     "get_outbox_status": frozenset(),
     "get_postgres_health": frozenset(),
     "get_redis_health": frozenset(),
@@ -237,10 +249,11 @@ RESOURCE_ARG_FIELDS: Final[dict[str, frozenset[str]]] = {
 
 
 def _derive_uuid_resource_fields() -> dict[str, frozenset[str]]:
-    """Which ``RESOURCE_ARG_FIELDS`` entries the platform types as a UUID.
+    """Which of the resource-naming fields above the platform declares to be UUIDs.
 
-    DERIVED from the input schemas, not declared (architecture principle #2), and
-    ``anyOf``/``items`` are walked so a list or optional UUID field is picked up.
+    Worked out from each tool's own input schema rather than listed by hand, so this cannot drift
+    from the schemas (architecture-principles rule 2). Optional and list-valued fields are walked
+    through their ``anyOf`` and ``items`` branches, so a ``list[UUID]`` counts as UUID-typed.
     """
 
     def _is_uuid(schema: object) -> bool:
@@ -259,16 +272,17 @@ def _derive_uuid_resource_fields() -> dict[str, frozenset[str]]:
     return derived
 
 
-# Resource-naming fields whose values must be canonical UUIDs, per tool. Total over
-# ``TOOL_REGISTRY``: an empty entry is a DECLARED "nothing to check", not silence.
+# Per tool, the resource-naming fields whose values have to be well-formed UUIDs. Every tool in the
+# registry appears, so an empty entry says "checked, nothing to validate here" rather than nothing.
 UUID_RESOURCE_FIELDS: Final[dict[str, frozenset[str]]] = _derive_uuid_resource_fields()
 
 
 def tier_of(tool_name: str) -> Tier:
-    """Classify one tool. Anything unclassified raises, never defaults.
+    """Say which tier one tool is in. Anything unclassified raises, and nothing defaults.
 
-    Not in ``TOOL_REGISTRY`` → ``KeyError``; in it but in no tier set →
-    ``PolicyCoverageError``, which used to be a silent ``Tier.READ``.
+    A tool that is not in ``TOOL_REGISTRY`` raises ``KeyError``; one that is in the registry but in
+    no tier set raises ``PolicyCoverageError``. That case used to return ``Tier.READ`` silently,
+    which let an unreviewed action tool through the investigation gate as if it were harmless.
     """
     if tool_name not in TOOL_REGISTRY:
         raise KeyError(f"unknown tool: {tool_name}")
@@ -294,23 +308,28 @@ def tools_at_or_below(max_tier: Tier) -> frozenset[str]:
 
 
 def ensure_covered() -> None:
-    """Assert the tier sets partition ``TOOL_REGISTRY`` exactly. From tests.
+    """Check that the three tier sets cover ``TOOL_REGISTRY`` exactly, once each. Called by tests.
 
-    Catches drift both ways — a new tool with no decision, a tier entry left by
-    a retired tool — and a tool claimed by two tiers (ADR 0003's guarantee).
+    It catches drift in both directions — a newly registered tool nobody classified, and a tier
+    entry left behind by a retired tool — plus a tool claimed by two tiers at once, which is what
+    would make "exactly one tier per tool" (ADR 0003) an assumption instead of a fact.
     """
     registered = set(TOOL_REGISTRY)
     classified = _READ_TOOLS | _TIER_1_TOOLS | _TIER_2_TOOLS
     problems: list[str] = []
+    # 1. A tool the agent can call that nobody has assigned a tier: the safety decision is missing.
     if unclassified := sorted(registered - classified):
         problems.append(
             f"in TOOL_REGISTRY with no tier: {', '.join(unclassified)} — "
             "classify each in _READ_TOOLS, _TIER_1_TOOLS or _TIER_2_TOOLS"
         )
+    # 2. A tier entry for a tool that no longer exists: harmless today, misleading tomorrow.
     if stale := sorted(classified - registered):
         problems.append(
             f"assigned a tier but not in TOOL_REGISTRY: {', '.join(stale)} — drop the stale entry"
         )
+    # 3. A tool listed in two tiers: ``tier_of`` would answer with whichever set it checks first,
+    #    so the same tool would be read-only or an action depending on the order of the code above.
     overlaps = sorted(
         (_READ_TOOLS & _TIER_1_TOOLS)
         | (_READ_TOOLS & _TIER_2_TOOLS)
@@ -318,6 +337,7 @@ def ensure_covered() -> None:
     )
     if overlaps:
         problems.append(f"classified in more than one tier: {', '.join(overlaps)}")
+    # 4. Report every problem found in one message, so one fix-and-rerun cycle clears them all.
     if problems:
         raise PolicyCoverageError(
             "tier policy does not cover the registry — " + "; ".join(problems)

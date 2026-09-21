@@ -248,6 +248,11 @@ same reason: a timeout (180 s) WARNS, and the precondition below it is the gate.
 
 ### Re-measured on v0.6.19, where the backlog climbs without stalling and the run stays on screen
 
+> **History as of WO-R3-344.** The one-rate producer below was right while the platform's job
+> ceiling was a literal. v0.6.20 makes it a setting, the demo stack raises it to 240 a minute,
+> and the fault phase runs at 0.75 s again — honestly this time. See "Re-measured on v0.6.20"
+> for the numbers that replace this section's.
+
 WO-R3-342, from the fifth take's four commander findings. The platform image is v0.6.19 and
 its BACKEND is v0.6.18's behaviour unchanged — `make snapshot` against the live stack showed no
 diff at all, 40 tools — so nothing below is a platform change. Both modes rehearsed
@@ -341,6 +346,76 @@ take. Ctrl-C during the hold skips the rest of it and the world still goes back 
 operator saying "I have read it", not a reason to leave a dirty world. `HOLD=0` resets at once
 and a negative value is refused at parse time.
 
+### Re-measured on v0.6.20, where the fault phase runs fast because the ceiling is a setting
+
+WO-R3-344. The platform image is v0.6.20 and the only thing it changes is that the `POST /jobs`
+rate limit is `JOB_CREATE_RATE_LIMIT` rather than a literal 30 per 60 s (plat #236, WO-R3-343);
+`tools/list` is byte-identical, `make snapshot` showed **no diff**, `make test-contract` passed.
+`demo/compose.yml` sets `JOB_CREATE_RATE_LIMIT: "240"` on the `api` service — the process that
+serves `POST /jobs` — so the demo's producer can be fast without borrowing from a window it then
+has to repay. Both modes rehearsed 2026-09-21 with `AUTO=1 HOLD=5`, both PASS, `make world-audit`
+PASS before and after each. Runs `37991778-7305-5ef7-9613-0d82bd6b2457` (`consumer_outage`, the
+second of two identical takes) and `ee06a376-e52a-59c0-a452-dc0b89352816` (`dlq_backlog`):
+
+| Step | | `dlq_backlog` | `consumer_outage` |
+|---|---|---|---|
+| 1 | stack check, reset, world audit, console URL | 2.5 s | 2.6 s |
+| 2 | baseline (`consumer_outage` starts `make traffic` at 2.0 s) | 0.0 s | 0.0 s |
+| 3 | inject the fault, hand over to the 0.75 s producer, wait for the reading and the page | 17.0 s | 31.1 s |
+| 4 | prove the premise the scenario grades against | 0.4 s | 0.4 s |
+| 5 | run the agent (scripted planner) | 1.2 s | 1.2 s |
+| 6 | wind down, **including a 5 s hold** | 7.5 s | 7.9 s |
+| | **total** | **28.6 s** | **43.2 s** |
+
+**The lag ring, read from the platform's own `GET /admin/consumer-lag` at its 5-second tick.**
+Both `consumer_outage` takes, seconds relative to the fault:
+
+```text
+take 1  fault 13:12:05.534 → 0(-1.5) 4(+3.8) 11(+8.8) 17(+14.4) 24(+19.5) → restart +22.0 s → 0(+24.6)
+take 2  fault 13:15:37.025 → 0(-1.3) 5(+4.0) 10(+9.0) 17(+14.1) 23(+19.1) → restart +21.9 s → 0(+24.3)
+```
+
+Four strictly increasing samples per take and **zero flat ones** between the fault and the
+restart, and the producer's own tally says why: `30 created` with nothing rate-limited and no
+errors. The v0.6.19 series was `0 → 2 → 4 → 7 → 10 → 12 → 15 → 17 → 20` over 43 s; the same
+climb now takes 19 s. The fifth take's was `0 → 5 → 11 → 18 → 24 → 28` and then flat at 28 for
+about 25 s, which is what a producer looks like when it has spent its window.
+
+| | `consumer_outage` (take 2) | `dlq_backlog` |
+|---|---|---|
+| take boundary (`lab.world_reset`) | 13:15:25.629 | 13:17:03.500 |
+| fault (`chaos.tool_invoked`) | `kill_consumer` 13:15:37.025 | `seed_dlq_messages` 13:17:14.869 |
+| the platform's page (`alert.raised`) | `consumer_stalled` 13:15:56.180 at lag 23 | `dlq_depth_warning` 13:17:19.649 at depth 7 |
+| **fault → page** | **19.15 s** (take 1: 19.47 s) | **4.78 s** |
+| the agent's first own call | `get_consumer_lag` 13:15:58.901 | `list_dlq_messages` 13:17:22.656 |
+| **page → agent start** | **2.72 s** (take 1: 2.44 s) | **3.01 s** |
+| the Tier-1 action | `restart_consumer_group` 13:15:58.945 | `replay_dlq_by_category` 13:17:22.688 |
+| `alert.resolved` | 13:16:01.337 | 13:17:24.870 |
+
+**The audit sequence per take is unchanged and still what a reader would draw:** exactly **one**
+`chaos.tool_invoked` with `outcome: success` and no `lab_probe_reason` (the fault), exactly
+**one** `alert.raised`, and **zero** `agent.*` rows before the run's own first call. The other
+two `chaos.*` rows in the window are the principal guards as always — one `chaos.tool_denied`
+(`unauthorized`) and one `chaos.tool_invoked` (`error`) — and every read the demo machine and the
+traffic loop make is `lab.probe`.
+
+**The one target this does NOT hit, and the arithmetic that says why.** The order asked for lag
+**≥ 40 before the restart**. It is not reachable in a REHEARSAL at any rate, and the reason is
+that the restart chases the page rather than the clock: the platform pages at the first sample
+past 20, which is on average 2.5 s after the backlog really crosses it, and the scripted planner
+then acts 2.5 s later. So the last sample before the restart is `20 + 5 × rate`, and 40 needs
+**4 jobs a second** — a job every 0.25 s, exactly the 240-a-minute ceiling — which would put the
+threshold 5 s after the fault and leave only two samples in the whole climb. A chart with two
+points is worse than a shallow backlog, so the rate stays at 0.75 s and this is reported rather
+than tuned around.
+
+**A PAID take reaches 40 at this rate without changing anything**, and the fifth take is the
+measurement: its page landed at 11:39:26.7 and its `restart_consumer_group` at 11:39:56.05 —
+**29.4 s** of real model latency between them, against this rehearsal's 2.7 s. At 0.75 s that is
+39 more jobs of backlog, so the sixth take should show the last pre-restart sample in the 50s or
+low 60s rather than the low 20s. Read the rehearsal's 23 as "the machine is fast", not as "this
+is how deep the sixth take's backlog will be".
+
 ## What the operator endpoints showed, per phase
 
 `consumer_outage`, the same rehearsal, polled every 2 s as the operator console polls. All four
@@ -413,13 +488,16 @@ excludes them by principal (they are not the run's), which is why they were left
 1. **Stack, reset, audit, console URL.** Brings the stack up if it is down, resets the world,
    and runs `make world-audit` as a **gate**: a demo that starts from a world somebody else
    left dirty shows the audience a fault that is not yours. Non-zero stops the demo.
-2. **Baseline.** In `consumer_outage`, starts `make traffic` at the mode's one rate (`RATE=2.0`,
-   the platform's own sustained ceiling for creating jobs) and waits for a healthy reading (lag
-   known, small). That producer is never restarted, so the fault changes what the arrivals MEAN
-   and not how fast they come. In `dlq_backlog`, nothing — the world is seeded and quiet. Prints
+2. **Baseline.** In `consumer_outage`, starts `make traffic` at the mode's baseline rate
+   (`RATE=2.0 MAX_PER_WINDOW=240`) and waits for a healthy reading (lag known, small). 2.0 s is
+   ordinary-looking traffic that fits even the platform's DEFAULT allowance of 30 creations a
+   minute. In `dlq_backlog`, nothing — the world is seeded and quiet. Prints
    **BASELINE — START RECORDING NOW**.
 3. **The fault, and then the page.** Ten-second countdown, then the scenario's own chaos plan
-   fires under the chaos principal — printed, so you can say what fired. Then TWO waits, and
+   fires under the chaos principal — printed, so you can say what fired. Then the producer is
+   handed over to a faster one (`RATE=0.75`), started BEFORE the slower one is stopped so the
+   arrivals never pause: nothing drains the backlog from here on, so a gap in arrivals is a
+   repeated sample on the chart. Then TWO waits, and
    they are different claims: the platform's own READING crossing the threshold (the source the
    chart draws from is showing a breach) and the platform's own ALERT ROW (it has paged). The
    second is new in WO-R3-339 and it prints the alert id, the time and the summary, because

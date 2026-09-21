@@ -44,11 +44,10 @@ DEFAULT_INTERVAL_SECONDS: Final = 3.0
 # uses, so the traffic blends with the seeded rows.
 DEFAULT_JOB_TYPE: Final = "bulk_api_sync"
 
-#: The platform's own allowance for creating jobs, which this loop paces itself against:
-#: `rate_limiter(limit=30, window=60, key_prefix="jobs:create")` on `POST /jobs`
-#: (`backend/app/api/jobs.py`), a FIXED window keyed on the caller's address. So 30 creations a
-#: minute is the sustained ceiling however fast the loop asks, and asking faster only front-loads
-#: the window. Pass `--max-per-window 0` to switch the pacing off and meet the limit head-on.
+#: The platform's `POST /jobs` allowance this loop paces itself against — a FIXED window keyed
+#: on the caller's ADDRESS, shared with `POST /sagas`. 30 per 60 s is the platform's DEFAULT;
+#: since v0.6.20 it is the `JOB_CREATE_RATE_LIMIT` setting, and the demo stack runs 240, so pass
+#: `--max-per-window` whatever the stack being driven is really set to.
 DEFAULT_MAX_PER_WINDOW: Final = 30
 DEFAULT_WINDOW_SECONDS: Final = 60.0
 

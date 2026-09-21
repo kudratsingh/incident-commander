@@ -36,12 +36,13 @@ htmlcov/
 *.swo
 .DS_Store
 
-# `scripts/demo_live.py`'s producer log: `make traffic`'s stdout for one take, opened
-# with "w" so each take replaces it. Operational output rather than evidence — what the
-# traffic DID is in the platform's own job rows and in the take's audit stream — and it
-# is ignored because it is otherwise the one untracked file sitting in `evals/` after
-# every rehearsal, which is how a stray `git add` sweeps something in (WO-R3-339).
-evals/.demo-traffic.log
+# `scripts/demo_live.py`'s producer logs: `make traffic`'s stdout, one file per phase of a
+# take (`-baseline`, `-fault`), opened with "w" so each take replaces them. Operational
+# output rather than evidence — what the traffic DID is in the platform's own job rows and
+# in the take's audit stream — and they are ignored because they are otherwise the only
+# untracked files sitting in `evals/` after every rehearsal, which is how a stray
+# `git add` sweeps something in (WO-R3-339).
+evals/.demo-traffic*.log
 
 # Eval and trajectory artifacts
 evals/trajectories/*

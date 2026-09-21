@@ -254,10 +254,12 @@ class TestTheLagReadIsTheLabsOwnRead:
 class TestThePacerStaysUnderThePlatformsAllowance:
     """The fifth take's F4: the lag climbed to 28 and then sat flat at 28 for 25 seconds.
 
-    `POST /jobs` allows 30 creations per FIXED 60-second window, so a producer at 0.75 s spends
-    the whole window in 22 s and then collects 429s until the window rolls — which on the
-    console's chart is a climb that stops being a climb. The pacer reads the same clock the
-    platform cuts its window from and spreads what is left over the time that is left.
+    `POST /jobs` allows a FIXED window of creations per caller address, and it was 30 per 60 s
+    when the take ran: a producer at 0.75 s spent the whole window in 22 s and then collected
+    429s until it rolled, which on the console's chart is a climb that stops being a climb. The
+    pacer reads the same clock the platform cuts its window from and spreads what is left over
+    the time that is left. The 30 is only the platform's DEFAULT since v0.6.20
+    (`JOB_CREATE_RATE_LIMIT`), which is why the limit is an argument here.
     """
 
     @staticmethod
@@ -268,7 +270,9 @@ class TestThePacerStaysUnderThePlatformsAllowance:
         pacer = WindowPacer(limit=limit, window=60.0, floor=floor, clock=lambda: clock["t"])
         return pacer, clock
 
-    def test_the_published_allowance_is_what_it_paces_against(self) -> None:
+    def test_the_default_allowance_is_the_platforms_own_default(self) -> None:
+        """Not the demo stack's 240: a loop told a ceiling the stack does not honour gets 429s,
+        so the safe default is what an unconfigured platform allows."""
         assert (DEFAULT_MAX_PER_WINDOW, DEFAULT_WINDOW_SECONDS) == (30, 60.0)
 
     def test_a_whole_window_is_spread_evenly_across_it(self) -> None:

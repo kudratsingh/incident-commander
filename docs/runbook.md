@@ -999,24 +999,39 @@ operate by:
   default, and it needs the **user** login, not the service-account token
   the eval uses — `POST /jobs` depends on `get_current_user`.
 
-  **`RATE` is a floor, not a rate, and 30 a minute is the ceiling nothing
-  gets past.** The platform's allowance is
-  `rate_limiter(limit=30, window=60, key_prefix="jobs:create")` in
-  `backend/app/api/jobs.py` — a **literal, not a setting**, and keyed on the
-  CALLER'S ADDRESS rather than on the identity, so every producer on this
-  machine shares one bucket and no token arrangement widens it. The window
-  is fixed (`int(time.time()) // 60`), so asking faster does not raise the
-  sustained arrival rate: it front-loads one window and then collects 429s
-  until the window rolls. `scripts/traffic_loop.py` reads that same clock
-  and spreads whatever allowance is left over the time left in the window
-  (`WindowPacer`), so `RATE=0.5` gets a steady 30 a minute instead of a
-  burst and a stall, and a 429 — which only another producer can now cause —
-  marks the window spent rather than being asked for again. Two numbers
-  follow from the ceiling and they are worth having before a demo: a backlog
-  of **20 takes 40 s** to build and one of **40 takes 80 s**, from the moment
-  the consumer dies. A deeper backlog than that inside a minute is not
-  available from one machine, and the lever is the platform's literal, not
-  the loop.
+  **`RATE` is a floor, not a rate, and `MAX_PER_WINDOW` is the ceiling it
+  is a floor under.** The platform's allowance is keyed on the CALLER'S
+  ADDRESS rather than on the identity, so every producer on this machine
+  shares one bucket and no token arrangement widens it, and the window is
+  fixed (`int(time.time()) // window`), so asking faster than the allowance
+  does not raise the sustained arrival rate: it front-loads one window and
+  then collects 429s until the window rolls. `scripts/traffic_loop.py` reads
+  that same clock and spreads whatever allowance is left over the time left
+  in the window (`WindowPacer`), so a `RATE` the allowance cannot cover is
+  slowed down instead of refused, and a 429 — which only another producer
+  can now cause — marks the window spent rather than being asked for again.
+
+  **Since platform v0.6.20 the allowance is a SETTING, and this stack raises
+  it** (plat #236, WO-R3-343). `JOB_CREATE_RATE_LIMIT` and
+  `JOB_CREATE_RATE_WINDOW_SECONDS` default to the 30-per-60-seconds literal
+  they replaced, and `demo/compose.yml` sets `JOB_CREATE_RATE_LIMIT: "240"`
+  on the `api` service — the process that serves `POST /jobs`; the
+  `platform` service runs the MCP app and mounts no REST route. `POST /sagas`
+  shares the same bucket and the same ceiling. So tell the loop what the
+  stack it is driving really allows: `make traffic RATE=0.75
+  MAX_PER_WINDOW=240` here, and the script's own default of 30 against any
+  stack that has not raised the setting. A `MAX_PER_WINDOW` the stack does
+  not honour is the one way to get the 429s back.
+
+  **What the ceiling costs in seconds, which is the number to have before a
+  demo.** The backlog grows by one job per `RATE` seconds from the moment
+  the consumer dies, so at 240 a minute the useful range is a job every
+  0.25 s or slower. `make demo-live MODE=consumer_outage` runs 2.0 s at the
+  baseline and 0.75 s from the fault, which puts a backlog of **20 about 16 s
+  after the fault** (measured: two rehearsals reached lag 23 and 24 at the
+  platform's first sample past the threshold, 19.1 s and 19.5 s in). At the
+  platform's own default of 30 a minute the same 20 takes **40 s**, which is
+  what the fifth and sixth takes were paced by.
 
   Expect 503s once lag passes 1000. That is not a failure: the platform's
   backpressure check reads `kafka:consumer_lag:worker-dispatcher`, the
@@ -1207,7 +1222,8 @@ pin whose re-record would rewrite a graded trajectory; the tenth with v0.6.17, t
 first pin that moved the REQUEST and left `tools/list` byte-identical; the eleventh
 with v0.6.18, the first pin that made a platform CONSTANT a setting this stack then
 sets to something else; the twelfth with v0.6.19, the first release that changes
-nothing on the agent's side of the wire at all):
+nothing on the agent's side of the wire at all; the thirteenth with v0.6.20, the
+first pin where the new setting changes how fast the DEMO can build its fault):
 
 1. Update `demo/compose.yml` — **all THREE platform-code services**
    (`migrate`, `platform`, `api`) and the prose that names the version:
@@ -1799,6 +1815,37 @@ nothing on the agent's side of the wire at all):
     **The one-line rebless note still gets written**, in the hub's
     `docs/wave4-specs/rebless-notes.md`, and it says the diff was empty. A version
     with no ledger row reads later as a version nobody checked.
+
+13. **A setting the DEMO sets is part of the pin, and it belongs on exactly one
+    service.** v0.6.20 (plat #236, WO-R3-343) turns the `POST /jobs` rate limit
+    into `JOB_CREATE_RATE_LIMIT` / `JOB_CREATE_RATE_WINDOW_SECONDS`, defaults
+    unchanged, and `tools/list` is byte-identical (checked on both sides by the
+    platform PR; `make snapshot` against the live stack came back with **no diff**
+    and `make test-contract` passed **1**). The commander's half is the digests plus
+    one line: `JOB_CREATE_RATE_LIMIT: "240"` on the `api` service.
+
+    **Which service, and how to be sure rather than to assume.** `api` runs
+    `app.main:app`, the REST app, and that is where `POST /jobs` lives; `platform`
+    overrides `command:` to run `app.mcp.standalone:app`, which mounts no REST
+    router, and no MCP tool creates a job. Read the route's module and the two
+    `command:` lines before putting a REST setting on a service — this is the same
+    class of mistake as `SEED_EVAL_FIXTURES`, which sat for weeks on the one
+    service that could not act on it.
+
+    **Check the setting on the stack, not in the file.** One command proves it:
+    `make traffic RATE=0.2 MAX_PER_WINDOW=240 COUNT=45` creates 45 jobs inside a
+    single 60-second window and reports `45 created` with nothing rate-limited.
+    Against the platform's default of 30 the last 15 would be 429s, so the
+    measurement distinguishes "the compose file says 240" from "the process is
+    running 240".
+
+    **A raised ceiling is a demo change, so re-rehearse and re-measure.** The
+    number this pin buys is a fault-phase producer at 0.75 s instead of 2.0 s, and
+    the thing to read off the platform's own 15-minute sample ring
+    (`GET /admin/consumer-lag`, operator session) is that every sample between the
+    fault and the restart is strictly higher than the one before it. A repeated
+    sample means the producer was refused, which is the fifth take's plateau
+    returning.
 
 ## Connection pool and run capacity ([ADR 0022](ADR/0022-connection-pool-sizing-and-the-run-concurrency-ceiling.md))
 

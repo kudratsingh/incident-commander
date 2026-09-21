@@ -1,9 +1,8 @@
 """Single-flight lease per incident: one live run, enforced by Postgres.
 
-ADR 0002 named it, ADR 0016 pinned it: a session-scoped ``pg_try_advisory_lock``
-held on ONE pinned connection for the whole run — a lock on a connection handed
-back to the pool is silently released. A lease table with an expiry column is
-pre-authorized by ADR 0016 if PgBouncer or a worker pool lands.
+ADR 0002 named it, ADR 0016 pinned it: a session-scoped ``pg_try_advisory_lock`` held on ONE
+pinned connection for the whole run — a lock on a connection handed back to the pool is
+silently released.
 """
 
 from __future__ import annotations
@@ -28,8 +27,7 @@ def incident_lease(engine: Engine, incident_id: UUID) -> Iterator[bool]:
     parameters = {"incident_id": str(incident_id)}
     with engine.connect() as conn:
         acquired = bool(conn.execute(_ACQUIRE, parameters).scalar_one())
-        # Session-scoped locks survive the commit; committing here keeps the
-        # connection idle rather than idle-in-transaction for the whole run.
+        # Session-scoped locks survive the commit, which avoids idle-in-transaction.
         conn.commit()
         try:
             yield acquired

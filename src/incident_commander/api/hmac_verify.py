@@ -31,8 +31,7 @@ def verify(body: bytes, signature_header: str, secret: str) -> bool:
 def signed_material(timestamp: str, nonce: str, body: bytes) -> bytes:
     """The exact bytes the nonce-bound signature covers: ``{timestamp}.{nonce}.{body}``.
 
-    Transcribed from the emitter's ``alerts.signed_material`` — two ends that
-    disagree verify nothing.
+    Transcribed from the emitter's ``alerts.signed_material``.
     """
     return f"{timestamp}.{nonce}.".encode() + body
 
@@ -57,8 +56,7 @@ def verify_delivery(
 ) -> bool:
     """True iff ``signature_header`` is a valid MAC over timestamp, nonce and body.
 
-    Constant-time, like ``verify``. The timestamp inside the MAC is what bounds
-    replay.
+    Constant-time, like ``verify``. The timestamp inside the MAC is what bounds replay.
     """
     return _matches(signature_header, signed_material(timestamp_header, nonce_header, body), secret)
 

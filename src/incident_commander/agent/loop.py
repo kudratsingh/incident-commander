@@ -41,17 +41,15 @@ def _escalate(run_state: RunState, reason: str, at: datetime) -> RunState:
 def _budget_exemption(run_state: RunState, *, resuming: bool) -> str | None:
     """Name the ADR 0006 exemption that lets this step run over budget, or None.
 
-    Both protect one invariant: an executed Tier-1 action is always verified, or
-    escalated with the fact declared. Re-invoking after a crash resume is safe
-    because the rebuilt idempotency key makes the platform replay (ADR 0008).
+    Both protect one invariant: an executed Tier-1 action is always verified or escalated
+    with that fact declared.
     """
     if run_state.state is IncidentState.VERIFYING:
         return "verify-after-execute"
     if (
         resuming
         and run_state.state is IncidentState.REMEDIATING
-        # No stored plan means nothing was ever dispatched, so there is nothing
-        # to re-invoke — a corrupt checkpoint, not a crash-resume.
+        # No stored plan means nothing was dispatched: a corrupt checkpoint, not a resume.
         and run_state.remediation_plan is not None
     ):
         return "reinvoke-after-crash-resume"
@@ -61,8 +59,8 @@ def _budget_exemption(run_state: RunState, *, resuming: bool) -> str | None:
 def _accrue_wall_time(run_state: RunState, now: datetime) -> RunState:
     """Advance the wall meter to the elapsed time since ``created_at``.
 
-    Anchored on ``created_at`` so a resumed run keeps what the crashed process
-    burned (ADR 0015). The monotone guard blocks meter rewinds.
+    Anchored there so a resumed run keeps what the crashed process burned (ADR 0015);
+    the monotone guard blocks meter rewinds.
     """
     elapsed = (now - run_state.created_at).total_seconds()
     if elapsed <= run_state.budget.wall_seconds_used:
@@ -77,32 +75,11 @@ def _stamp_entered(
 ) -> RunState:
     """Stamp the state a transition produced with the moment it was ENTERED (ADR 0075).
 
-    ``dispatch`` is handed the iteration's START time, and every transition stamps the state
-    it returns with that reading — so the owner's fourth take reported "investigating · 10 ms"
-    for an investigation that ran for 22 seconds and three planner calls, and gave PLANNING
-    the timestamp of the moment INVESTIGATING began. Every transition stamp was the time the
-    transition function was ENTERED rather than the time the new state was.
-
-    **Structural, and in the loop rather than in the twenty call sites that write the stamp.**
-    The alternative the work order offered — pass ``clock`` into the transitions and read it at
-    the point of decision — was rejected for two reasons. It would change the ``Transition``
-    signature and every function that implements it, when the fact being recorded is not a
-    transition's fact at all: "the moment the new state was entered" is the moment control
-    came back to the loop, which only the loop can observe. And a stamp each transition took
-    for itself is a stamp twenty functions can drift on, which is the shape of the bug being
-    fixed. So the loop owns it, unconditionally: ``ALLOWED_TRANSITIONS`` has no self-loop, so a
-    dispatch that returned always produced a state that was entered exactly now.
-
-    ``entered`` is the reading ``_accrue_wall_time`` already takes after the transition, so the
-    honest stamp costs no extra clock read — the two facts were always meant to be the same
-    one.
-
-    The transition's own evidence entry is restamped with it too, under three conditions that
-    keep it to the row the transition wrote to record its exit: the entry was APPENDED by this
-    dispatch, it still carries the iteration's start time, and it is an underscore-prefixed
-    bookkeeping marker (the repo-wide convention for a row that is the loop talking rather than
-    a call the platform answered). A real tool entry is left alone on purpose — its timestamp
-    is about the read, not about the transition.
+    The loop owns the stamp because only the loop observes that moment; ``entered`` reuses
+    ``_accrue_wall_time``'s reading, so it costs no extra clock call. The transition's own
+    evidence row is restamped only when this dispatch appended it, it still carries
+    ``dispatched_at``, and it is an underscore bookkeeping marker — a real tool row keeps
+    the time of its read.
     """
     entries = run_state.evidence
     update: dict[str, object] = {"updated_at": entered}
@@ -139,13 +116,11 @@ def run_to_completion(
     while not run_state.state.is_terminal:
         if steps >= max_steps:
             raise MaxStepsExceededError(f"run did not terminate within {max_steps} steps")
-        # The moment this iteration STARTED. Handed to the transition, which is what its
-        # own reads and refusals are stamped with; the state it produces is stamped with
-        # the second reading below instead (ADR 0075).
+        # The iteration's START: what the transition's own reads and refusals are stamped
+        # with. The state it produces gets the second reading below (ADR 0075).
         now = clock()
         run_state = _accrue_wall_time(run_state, now)
-        # Both exemptions cover wall/USD exhaustion too, not just tool calls,
-        # consistent with ADR 0006.
+        # Both exemptions cover wall/USD exhaustion too, not just tool calls (ADR 0006).
         exemption = _budget_exemption(run_state, resuming=resuming)
         if run_state.budget.is_exhausted and exemption is None:
             run_state = _escalate(run_state, "budget exhausted", now)
@@ -159,9 +134,8 @@ def run_to_completion(
                 if checkpointer is not None:
                     checkpointer.write(run_state)
                 raise
-            # Read again so a terminal transition records its own duration — and so the
-            # state it produced is stamped with the moment it was ENTERED (ADR 0075).
-            # ONE read, shared by the meter and the stamp: they are the same fact.
+            # ONE read shared by the meter and the stamp: a terminal transition's own
+            # duration and the moment its state was entered are the same fact (ADR 0075).
             entered = clock()
             run_state = _stamp_entered(
                 run_state,

@@ -1,9 +1,8 @@
 """``DiagnosisCandidate`` and ``EvidenceRef`` — the candidate schema (plan 02 § 11.3).
 
-Four rules are validators, not prompt prose: an ``EvidenceRef`` resolves to an ``evidence_id``
-in ``RunState.evidence``; ``(category, name)`` and ``candidate_id`` are unique; ``candidates[0]``
-is the top-confidence entry; ADR-0035's decode covers every nested field. ``grounded_in`` binds
-the ledger in a ``ContextVar``, so an ungrounded set is repairable and an unbound one refuses.
+Four rules are validators, not prompt prose: an ``EvidenceRef`` resolves in
+``RunState.evidence``; ``(category, name)`` and ``candidate_id`` are unique; ``candidates[0]``
+is the top-confidence entry; ADR-0035's decode covers every nested field.
 """
 
 from __future__ import annotations
@@ -35,10 +34,7 @@ DUPLICATE_CANDIDATE_ID: Final[str] = "duplicate candidate_id"
 
 @contextmanager
 def grounded_in(evidence: Iterable[EvidenceEntry]) -> Iterator[None]:
-    """Bind the ledger a candidate set is resolved against.
-
-    Re-entrant: a nested call leaves no stale ledger behind.
-    """
+    """Bind the ledger a candidate set is resolved against. Re-entrant: no stale ledger."""
     token = _LEDGER.set(frozenset(entry.evidence_id for entry in evidence))
     try:
         yield
@@ -77,8 +73,7 @@ class EvidenceRef(StructuredOutput):
     def _resolves_to_a_ledger_entry(cls, value: UUID) -> UUID:
         """Grounding, as a validator (plan 02 § 11.3).
 
-        On ``EvidenceRef`` rather than on ``DiagnosisCandidate``'s fields, so ``evidence_for``,
-        ``evidence_against`` and every future field of this type are covered by one line.
+        On ``EvidenceRef`` rather than the fields, so every field of this type is covered once.
         """
         ledger = _bound_ledger(f"evidence_id {value}")
         if value not in ledger:
@@ -139,9 +134,9 @@ def _one_candidate_each(
 ) -> tuple[DiagnosisCandidate, ...]:
     """Reject duplicates, then normalise the ranking (plan 02 § 11.1, § 11.3).
 
-    Also the only check an *uncited* set reaches, so a forgotten ``grounded_in`` cannot
-    pass. Duplicates compare the pair exactly: normalising ``name`` would collide labels
-    a reader can tell apart, and hide part of WP-5.2's duplicate rate.
+    Also the only check an *uncited* set reaches, so a forgotten ``grounded_in`` cannot pass.
+    Duplicates compare ``(category, name)`` exactly — normalising would hide WP-5.2's
+    duplicate rate.
     """
     _bound_ledger("a candidate set")
     seen_ids: set[str] = set()
@@ -191,9 +186,8 @@ def exact_candidate_tuple(n: int) -> Any:
     """``CandidateTuple`` bounded to exactly ``n`` entries — the WP-5.2 schema.
 
     The length constraint must precede ``AfterValidator`` or pydantic emits ``minLength`` /
-    ``maxLength`` on an array, which reads as no bound at all
-    (``tests/unit/test_best_of_n.py::TestTheExactNSchema``). Returns ``Any``: an
-    ``Annotated[...]`` from a run-time ``n`` is not a static type.
+    ``maxLength`` on an array, which reads as no bound at all. Returns ``Any`` because an
+    ``Annotated[...]`` built from a run-time ``n`` is not a static type.
     """
     if n < 1:
         raise ValueError(f"a candidate set holds at least one candidate; got n={n}")
@@ -219,8 +213,5 @@ class CandidateSet(StructuredOutput):
 
     @property
     def top(self) -> DiagnosisCandidate:
-        """The highest-confidence candidate — index 0 after validation.
-
-        A property, not a caller-side ``[0]``: one spelling.
-        """
+        """The highest-confidence candidate — index 0 after validation."""
         return self.candidates[0]

@@ -1,7 +1,4 @@
-"""Build a fresh ``RunState``; derive the ingress incident identity (ADR 0016).
-
-Deliberately separate — see ``start_run``.
-"""
+"""Build a fresh ``RunState``; derive the ingress incident identity (ADR 0016)."""
 
 from __future__ import annotations
 
@@ -28,11 +25,8 @@ _MAX_RECURRENCE_GENERATIONS: Final[int] = 64
 
 
 def derive_incident_id(alert: Mapping[str, object], checkpointer: Checkpointer) -> UUID:
-    """Deterministic incident id for an alert carrying ``(source, fingerprint)``.
-
-    ADR 0016: ``uuid5`` over ``dedup_key``, advancing a generation each time the
-    previous one's run has already terminated, so a recurrence opens a NEW incident.
-    No usable fingerprint means no dedupe at all: ``uuid4()``.
+    """``uuid5`` over ``dedup_key`` (ADR 0016), a generation per terminated run so a
+    recurrence opens a new incident. No usable fingerprint means no dedupe: ``uuid4()``.
     """
     raw_fingerprint = alert.get("fingerprint")
     if not isinstance(raw_fingerprint, str) or not raw_fingerprint.strip():
@@ -64,11 +58,11 @@ def start_run(
     *,
     max_tool_calls: int | None = None,
 ) -> RunState:
-    """Build a fresh TRIAGE-state run with a BudgetLedger seeded from settings.
+    """Build a fresh TRIAGE run with a BudgetLedger seeded from settings.
 
-    The ``uuid4`` default must stay (ADR 0016): callers other than ingress need a
-    distinct incident each time. ``max_tool_calls`` overrides the setting for this run
-    only (ADR 0019); 0 is ignored, and the strategy budget multipliers apply only here.
+    The ``uuid4`` default must stay (ADR 0016): non-ingress callers need a distinct
+    incident each time. ``max_tool_calls`` overrides the setting for this run only
+    (ADR 0019); 0 is ignored.
     """
     return RunState(
         incident_id=incident_id or uuid4(),

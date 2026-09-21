@@ -1,33 +1,8 @@
 """The run's own reasoning, observed the moment the loop accepts it (ADR 0075).
 
-``ToolCallLog`` (``agent/run_reporting.py``) reports a tool call when the client seam sees it
-return. This module is its twin for the thing no client seam can see: the RANKING a planner
-call produced, and the verify judge's verdict. Both are LLM calls, so they exist nowhere but
-the run's own state — and before ADR 0075 they reached a watching operator only at the next
-state transition. In the owner's fourth take that meant three planner rankings decided over 22
-seconds arriving as one burst at the end, and a console that showed the agent thinking nothing
-for the whole investigation.
-
-Three properties, in the order they matter:
-
-1. **It is observed where it is ACCEPTED, not where it is produced.** The loop is the one
-   place every strategy's proposal passes through (ADR 0036: strategies propose, the loop
-   decides), so that is the single write point for a planner ranking — one line, and it covers
-   ``baseline``, ``reflection``'s revision, both ``best_of_n`` arms, ``candidate_selector``,
-   ``search`` and ``adaptive`` without any of them learning that telemetry exists.
-2. **The stamp is the observation's own moment**, read from this log's clock when the
-   observation is made — the same rule ``ToolCallLog`` follows and the same rule ADR 0075
-   applies to a transition. The loop's ``at`` is the iteration's START, which is precisely the
-   lie this work order is about.
-3. **Nothing here can fail a run.** ``observe`` swallows everything its sink raises, a sink
-   that cannot send is a counted drop, and ``None`` in place of a log means nobody is
-   watching. A dropped observation still reaches the console on the next transition report,
-   which carries the ranking as it always has.
-
-Why its own module rather than beside ``ToolCallLog``: the producers are
-``agent/investigation.py`` and ``agent/remediation.py``, and ``agent/run_reporting.py`` imports
-both of them transitively (through ``agent/briefing.py``). A shared type has to sit below all
-three, and this is that place — it imports one model and nothing else.
+``ToolCallLog``'s twin for what no client seam can see: the ranking a planner call produced and
+the verify judge's verdict. Observed where the loop ACCEPTS it, so one write point covers every
+strategy (ADR 0036); stamped with this log's clock, not the iteration's start; never fails a run.
 """
 
 from __future__ import annotations
@@ -42,10 +17,8 @@ from incident_commander.agent.hypothesis import Hypothesis
 
 _LOG: Final = logging.getLogger(__name__)
 
-#: The tool name each kind of thinking is filed under. They are LLM ROLES, not platform
-#: tools — a ``report``-kind step is the platform's own word for "this row is the agent
-#: telling you something, not a call it made" — so nothing here is in ``TOOL_REGISTRY`` and
-#: none of them can reach the planner's page.
+#: The tool name each kind of thinking is filed under. LLM ROLES, not platform tools: none of
+#: them is in ``TOOL_REGISTRY``, so none can reach the planner's page.
 PLANNER_TOOL: Final = "investigation_planner"
 REFLECTION_TOOL: Final = "reflection"
 VERIFY_JUDGE_TOOL: Final = "verify_judge"
@@ -55,13 +28,11 @@ THINKING_TOOLS: Final[frozenset[str]] = frozenset(
     {PLANNER_TOOL, REFLECTION_TOOL, VERIFY_JUDGE_TOOL}
 )
 
-#: How many ranked entries one thinking row carries. Five, because this is the ranking a
-#: person reads at a glance while a run is happening; the whole ranking travels on the
-#: report's own ``hypotheses`` field beside it.
+#: How many ranked entries one thinking row carries — what a person reads at a glance. The
+#: whole ranking travels on the report's own ``hypotheses`` field beside it.
 RANKING_ENTRIES: Final = 5
 
-#: How much of the model's own reason travels. The platform's cap on a report excerpt, named
-#: here so the truncation happens once, where the sentence is built.
+#: The platform's cap on a report excerpt, named here so the truncation happens once.
 MAX_REASON_CHARS: Final = 280
 
 
@@ -71,11 +42,8 @@ def _now() -> datetime:
 
 
 class ThinkingAction(NamedTuple):
-    """The move the thinking chose, in the two fields a console row shows.
-
-    ``kind`` is the planner's own ``next_action.kind`` (``probe``, ``remediate`` or ``stop``)
-    and ``tool`` the tool a probe named, ``None`` for the two that name none.
-    """
+    """The move the thinking chose: ``kind`` is the planner's own ``next_action.kind``
+    (``probe``/``remediate``/``stop``), ``tool`` the probe's tool or ``None``."""
 
     kind: str
     tool: str | None = None
@@ -85,9 +53,8 @@ class ThinkingAction(NamedTuple):
 class ObservedThinking:
     """One accepted piece of the run's reasoning, as the loop accepted it.
 
-    ``hypotheses`` is the ranking THIS call produced, carried on the observation rather than
-    read back off the run state: a report that goes out mid-transition would otherwise carry
-    the ranking as of the last transition, which is the stale number the owner's take showed.
+    ``hypotheses`` is the ranking THIS call produced, carried here rather than read off the
+    run state — a mid-transition report would otherwise carry the last transition's ranking.
     """
 
     #: One of ``THINKING_TOOLS``.
@@ -105,12 +72,8 @@ class ObservedThinking:
     headline: str | None = None
 
     def ranking(self) -> list[dict[str, Any]]:
-        """The top entries, in the three fields a ranking card draws.
-
-        Without the reasoning: the whole ranking WITH reasoning travels on the report's
-        ``hypotheses`` field, and repeating it inside the step's arguments would send the same
-        paragraphs twice per planner call.
-        """
+        """The top entries, in the three fields a ranking card draws — without the reasoning,
+        which the report's own ``hypotheses`` field already carries in full."""
         return [
             {
                 "name": entry.name,
@@ -129,9 +92,8 @@ class ObservedThinking:
     def sentence(self) -> str:
         """One readable sentence — the row an operator sees without clicking anything.
 
-        ``top consumer_saturation 0.85 → probe get_consumer_lag: one more fresh reading of
-        the alerted subject``. Built here rather than in the reporter so the wording is the
-        same for every producer and testable without a platform.
+        ``top consumer_saturation 0.85 → probe get_consumer_lag: <reason>``. Built here, not in
+        the reporter, so every producer words it the same and it is testable without a platform.
         """
         top = self.hypotheses[0] if self.hypotheses else None
         lead = (
@@ -166,17 +128,15 @@ def _reason(text: str | None) -> str | None:
 class PlannerLog:
     """Where the loop writes the reasoning it just accepted, and who is watching it.
 
-    One subscriber, because one reporter reports one run — the same shape as
-    ``ToolCallLog.subscribe``, and for the same reason: the producer must not have to know
-    whether anybody is listening.
+    One subscriber, like ``ToolCallLog.subscribe``: the producer must not have to know whether
+    anybody is listening.
     """
 
     def __init__(self, *, clock: Callable[[], datetime] = _now) -> None:
         self.clock = clock
         self._sink: Callable[[ObservedThinking], bool] | None = None
-        #: How many observations were made, and how many nobody could send. Counts, not
-        #: rails: they change nothing about the run and exist so "the console showed no
-        #: thinking" has an answer other than "the frontend is broken".
+        #: Observations made, and observations nobody could send. Counts, not rails: they exist
+        #: so "the console showed no thinking" has an answer other than a broken frontend.
         self.observed = 0
         self.dropped = 0
 
@@ -212,11 +172,8 @@ class PlannerLog:
         attempt: int,
         of: int,
     ) -> None:
-        """Record one verify poll's verdict, stamped now.
-
-        The ranking travels unchanged — a verdict does not re-rank anything — so the row says
-        what the run still believes beside what the judge just said about the action.
-        """
+        """Record one verify poll's verdict, stamped now. The ranking travels unchanged — a
+        verdict does not re-rank anything — so the row keeps what the run still believes."""
         self.observe(
             ObservedThinking(
                 tool=VERIFY_JUDGE_TOOL,
@@ -231,12 +188,9 @@ class PlannerLog:
     def observe(self, thinking: ObservedThinking) -> None:
         """Hand one observation to the subscriber. Never raises.
 
-        It is called from inside a transition, between an LLM call and the loop's decision
-        about it, so an exception here would surface as a failed investigation step in the run
-        this is describing. A sink that answers ``False`` — no state to stamp a report with
-        yet, or a platform that does not declare the step field — is a counted drop: the
-        ranking still reaches the console on the next transition report, which has carried it
-        since WO-R3-329.
+        Called inside a transition, so an exception here would surface as a failed
+        investigation step in the run it is describing. A sink answering ``False`` is a
+        counted drop; the ranking still reaches the console on the next transition report.
         """
         self.observed += 1
         sent = False

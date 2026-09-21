@@ -1,8 +1,8 @@
 """Which causes a run named, and which it left standing: primary / secondary / unresolved-extra.
 
-One projection of a run for every reader — the escalation briefing, the deterministic grader,
-the briefing judge and the ``StepRecord`` stream (WP-11.3, ADR 0065, INC-002). Derivation
-only: the bar is passed in and every gate stays in ``agent/investigation.py``.
+One projection for every reader — briefing, grader, judge, ``StepRecord`` stream (WP-11.3,
+ADR 0065, INC-002). Derivation only: the bar is passed in, the gates stay in
+``agent/investigation.py``.
 """
 
 from __future__ import annotations
@@ -34,8 +34,8 @@ class IncidentSlot(BaseModel):
 class IncidentSlots(BaseModel):
     """A run's causes by slot: the one it is about, the others it asserts, the remainder.
 
-    ``unresolved_extra`` is WO-R2-164's rule made structural — every cause the run still
-    asserts and took no action on, so a briefing cannot omit a remainder by accident.
+    ``unresolved_extra`` holds every asserted cause no attempt aimed at, so a briefing
+    cannot omit a remainder by accident (WO-R2-164).
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -64,8 +64,8 @@ class IncidentSlots(BaseModel):
 def addressed_targets(evidence: Sequence[EvidenceEntry]) -> frozenset[str]:
     """Every cause an attempt in this run aimed at, in the spelling its plan used.
 
-    Read off the two markers that carry it — the plan that survived its guards and each
-    failed attempt (ADR 0056) — so the fact travels with the ledger rather than with a flag.
+    Read off the two ledger markers rather than a flag, so the fact travels with the
+    evidence (ADR 0056).
     """
     return frozenset(
         str(entry.arguments[TARGET_KEY])
@@ -88,11 +88,9 @@ def incident_slots(
 ) -> IncidentSlots:
     """Split a ranking into slots at the bar the loop acts on.
 
-    ``bar`` is a parameter, not an import: this module is read by the loop, so it cannot
-    import ``investigation.REMEDIATE_CONFIDENCE_THRESHOLD`` back. Its callers pass that one
-    constant. The top hypothesis is the primary whatever its confidence — the same reading
-    ``final_diagnosis`` has always had — and only the REST of the ranking must clear the bar,
-    so hedging below it stays free.
+    ``bar`` is a parameter, not an import of ``investigation.REMEDIATE_CONFIDENCE_THRESHOLD``,
+    which would be a cycle. The top hypothesis is primary whatever its confidence; only the
+    rest of the ranking must clear the bar, so hedging below it stays free.
     """
     if not hypotheses:
         return IncidentSlots()

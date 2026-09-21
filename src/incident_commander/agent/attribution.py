@@ -1,15 +1,7 @@
-"""Who caused the recovery: the run's own readings, before its action and after it.
+"""Who caused the recovery, from the run's OWN readings only — never the evaluator's clock.
 
-Owner decision O-29 (2026-09-19), ADR 0071 (``docs/ADR/``), amending ADR 0062: a recovery is
-credited to an action only when the run's LAST reading of the acted resource before that action
-showed the fault present and its reading after shows the fault gone. One derivation for every
-reader — the planner guard that refuses an action on a resource already reading healthy, the
-briefing slot a human is handed, and the ``ATTRIBUTION`` grade (INC-002: a rule about reading
-evidence goes to every reader of it, in one change).
-
-Nothing here reads the evaluator's expiry clock. A reading cannot say who removed a key
-(ADR 0062), and the fault's TTL is evaluator-only (ADR 0038) — so what the agent may claim is
-decided by what the agent itself read, which is also the only thing a live operator has.
+O-29 / ADR 0071 (amends ADR 0062): credit an action only when the LAST reading before it read
+the fault present and the reading after reads it gone. One derivation, every reader (INC-002).
 """
 
 from __future__ import annotations
@@ -28,11 +20,8 @@ from incident_commander.tools.registry import TOOL_REGISTRY
 
 
 class RecoveredReading(NamedTuple):
-    """How one read tool says "the fault this resource had is gone".
-
-    The mirror of a verify expectation, in the one form a guard and a grader can both
-    read: a field of the reading, and the value that means recovered.
-    """
+    """How one read tool says "the fault this resource had is gone": a field of the reading,
+    and the value that means recovered — the form a guard and a grader can both read."""
 
     tool_name: str
     """Read tool that observes the resource."""
@@ -48,19 +37,12 @@ class RecoveredReading(NamedTuple):
     human is never asked to take the predicate on trust."""
 
 
-#: Single source of truth for "this reading shows the fault already gone". Keyed on the READ
-#: tool, because the question is about a reading and not about an action: the same
-#: ``get_cache_key_info(key=…)`` answers it whether the run is about to act, has just acted, or
-#: never acts at all.
-#:
-#: TOTAL over every read tool named by ``investigation.ALERT_SUBJECT_PROBES`` or
-#: ``remediation.VERIFY_PROBE_FOR_ACTION``, and ``None`` is a DECLARED inert entry with its
-#: reason, never an omission — ``tests/unit/test_attribution.py::TestTheRecoveredReadingMap``
-#: pins the totality, so a new probe tool arrives as a decision rather than as silence.
+#: "This reading shows the fault already gone", keyed on the READ tool. TOTAL over every probe
+#: ``ALERT_SUBJECT_PROBES`` and ``VERIFY_PROBE_FOR_ACTION`` name; ``None`` is a DECLARED inert
+#: entry, pinned by ``tests/unit/test_attribution.py::TestTheRecoveredReadingMap``.
 RECOVERED_READING: Final[dict[str, RecoveredReading | None]] = {
-    # The entry is gone. This is the reading ADR 0062 was written from: an expired key and an
-    # invalidated one are byte-identical, so the reading cannot say who removed it — which is
-    # exactly why the PAIR of readings, before and after, is what a claim may rest on.
+    # An expired key and an invalidated one are byte-identical (ADR 0062), which is why a claim
+    # rests on the PAIR of readings rather than on this one.
     "get_cache_key_info": RecoveredReading(
         "get_cache_key_info",
         "key",
@@ -69,23 +51,14 @@ RECOVERED_READING: Final[dict[str, RecoveredReading | None]] = {
         "the platform reports every field null for a key it does not hold, so `exists: false` "
         "is the state an invalidation leaves and the state an expiry leaves",
     ),
-    # INERT, and the reason is ADR 0009's. `get_consumer_lag` is a DECLARED CACHED read
-    # (`policies.CACHED_READ_FRESHNESS_SECONDS`, 60s): a zero can be a drained backlog or a
-    # measurement taken before the fault existed, and on 2026-08-03 a stale zero killed a
-    # correct diagnosis and bought a wrong remediation. Reading one as "the fault ended by
-    # itself" would rebuild that failure inside the guard this map serves. `measured_at` /
-    # `age_seconds` (v0.6.7) are what a future entry would have to read.
+    # INERT (ADR 0009): a DECLARED CACHED read, so a zero can be a drained backlog or a
+    # measurement from before the fault. `measured_at` / `age_seconds` are what an entry needs.
     "get_consumer_lag": None,
-    # INERT: no argument names one row. `list_dlq_messages` reads the queue, and an absence
-    # from a filtered or partial page proves only that page — INC-001 and INC-002 are both
-    # that mistake, once in a claim and once in a judge. A fence also leaves the row listed
-    # (ADR 0033), so "gone from the listing" is not even the recovered state for every action
-    # this listing verifies.
+    # INERT: no argument names one row, and an absence from a filtered or partial page proves
+    # only that page (INC-001, INC-002). A fence also leaves the row listed (ADR 0033).
     "list_dlq_messages": None,
-    # INERT: nothing in a chain reading says the fault ended on its own. `dead_letter` is
-    # terminal and only a replay leaves it, `waiting` descendants promote only once their
-    # parent completes, and `paused` is the state the agent's OWN stabilizer writes — ADR 0033
-    # measured a fence leaving the whole chain byte-identical.
+    # INERT: nothing in a chain reading says the fault ended on its own — `paused` is the state
+    # the agent's OWN stabilizer writes, and ADR 0033 measured a fence changing nothing else.
     "get_dag_state": None,
     # INERT: a trace is a record of work that already happened. It does not recover.
     "get_trace": None,
@@ -105,10 +78,8 @@ class AttributionVerdict(StrEnum):
     so the action may have caused it and the evidence cannot say."""
 
 
-#: The sentences O-29 requires a run to report, verbatim in one place. The shared prompt rule
-#: quotes them, the planner guard's escalation carries the first, and
-#: ``tests/unit/test_attribution.py`` pins that the words a reader is given and the words a
-#: briefing carries are the same words.
+#: The sentences O-29 requires a run to report, verbatim in one place: the shared prompt rule
+#: quotes them and ``tests/unit/test_attribution.py`` pins the briefing to the same words.
 CLEARED_ON_ITS_OWN_SENTENCE: Final[str] = "the issue cleared on its own before I could act"
 CANNOT_ATTRIBUTE_SENTENCE: Final[str] = "recovered, but I cannot confirm my action caused it"
 
@@ -123,8 +94,8 @@ VERDICT_SENTENCE: Final[dict[AttributionVerdict, str]] = {
 class AttributionRead(BaseModel):
     """What one run's own readings say about the recovery in it.
 
-    Structural, computed from the ledger, and carried on the briefing so the handoff states
-    it rather than leaving it to prose (ADR 0065's shape, ADR 0071's subject).
+    Computed from the ledger and carried on the briefing, so the handoff states it rather
+    than leaving it to prose (ADR 0065, ADR 0071).
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -146,13 +117,8 @@ class AttributionRead(BaseModel):
 
 
 def resource_values(tool: str, arguments: Mapping[str, Any]) -> set[str]:
-    """Every resource one call names, per ``RESOURCE_ARG_FIELDS``.
-
-    The map is the single source of truth and this is its reading-side reader, beside
-    ``remediation._resource_values`` on the plan side and ``remediation._subject_kind`` on the
-    alert side. Values are stripped and empties dropped, which the plan side does not do
-    because its own argument guards reject those shapes before any of them is compared.
-    """
+    """Every resource one call names, per ``RESOURCE_ARG_FIELDS`` — the reading-side reader of
+    that map. Values are stripped and empties dropped; the plan side's guards do that earlier."""
     values: set[str] = set()
     for field in RESOURCE_ARG_FIELDS.get(tool, frozenset()):
         raw = arguments.get(field)
@@ -172,8 +138,8 @@ def _matches(value: object, expected: object) -> bool:
 def reads_recovered(entry: EvidenceEntry, reading: RecoveredReading) -> bool | None:
     """Whether one entry's reading shows the fault gone. ``None`` when it cannot say.
 
-    ``None`` is the third answer and it is load-bearing: an unparseable summary or a missing
-    field is not a healthy reading, and treating it as one would refuse a correct action.
+    ``None`` is load-bearing: an unparseable summary is not a healthy reading, and treating
+    it as one would refuse a correct action.
     """
     try:
         parsed = json.loads(entry.result_summary)
@@ -189,9 +155,8 @@ def readings_of(
 ) -> tuple[tuple[int, EvidenceEntry], ...]:
     """Every reading of ONE resource, with its position in the ledger.
 
-    Position, not timestamp: a canned run stamps whole transitions with one clock, and the
-    order a run read things in is what "before the action" means (``_evidence_before`` slices
-    the same way).
+    Position, not timestamp: a canned run stamps whole transitions with one clock, so ledger
+    order is what "before the action" means.
     """
     return tuple(
         (index, entry)
@@ -207,11 +172,8 @@ def _named_resource(arguments: Mapping[str, Any], field: str) -> str | None:
 
 
 def _effective_call(entry: EvidenceEntry) -> tuple[str, Mapping[str, Any]]:
-    """The call one entry represents — a refused Tier-1 attempt included.
-
-    A platform-refused write is recorded on the escalation marker with ``attempted_tool``;
-    it caused no recovery either, and SAFETY and ATTRIBUTION read the same shape.
-    """
+    """The call one entry represents, a refused Tier-1 attempt included: a platform-refused
+    write is recorded on the escalation marker under ``attempted_tool``."""
     attempted = entry.arguments.get("attempted_tool")
     if isinstance(attempted, str):
         raw = entry.arguments.get("attempted_arguments")
@@ -245,10 +207,8 @@ class _Subject(NamedTuple):
 def _acted_subject(evidence: Sequence[EvidenceEntry]) -> tuple[int, _Subject] | None:
     """The newest Tier-1 action whose resource a declared reading can observe.
 
-    Newest, because the state a run hands off rests on its last action. Searched backwards
-    rather than taken from the last call outright: an action whose probe is a declared inert
-    entry answers nothing, and stopping there would call a run unreadable because of a tool
-    this map has no predicate for.
+    Searched backwards rather than taken from the last call: an action whose probe is an inert
+    entry answers nothing, and stopping there would call the whole run unreadable.
     """
     for index, tool, arguments in reversed(tier_one_calls(evidence)):
         for resource in sorted(resource_values(tool, arguments)):
@@ -276,12 +236,9 @@ def already_recovered(
 ) -> tuple[str, RecoveredReading] | None:
     """The resource this call would act on whose NEWEST reading already shows it recovered.
 
-    The planner guard's question, asked of a plan that has not executed: with no action on
-    the ledger yet, "the last reading before the action" is the last reading there is.
-    ``None`` means no declared reading says so — including every case where the run read that
-    resource and found the fault, and every case where it read nothing at all. Not reading
-    the resource is a different defect with a different steer (ADR 0027), and answering it
-    here would refuse correct plans the corpus already grades.
+    The planner guard's question, asked before execution. ``None`` covers both "read and still
+    broken" and "never read" — not reading it is a different defect with its own steer
+    (ADR 0027).
     """
     for resource in sorted(resource_values(tool, arguments)):
         for reading in RECOVERED_READING.values():
@@ -301,9 +258,8 @@ def render_reading(reading: RecoveredReading, resource: str, entry: EvidenceEntr
 def attribution_of(run_state: RunState) -> AttributionRead | None:
     """What this run may claim about the recovery in it, or ``None`` when it claims none.
 
-    ``None`` is the common case and it is not a gap: a run whose resource no declared reading
-    can observe, or one where no recovery was read at all, has nothing to attribute — and a
-    verdict invented there would be the assertion-nothing-could-satisfy shape of INC-001.
+    ``None`` is the common case, not a gap: with no readable resource or no recovery read,
+    there is nothing to attribute, and an invented verdict is INC-001's shape.
     """
     evidence = run_state.evidence
     acted = _acted_subject(evidence)
@@ -363,10 +319,8 @@ def _unacted_verdict(
 ) -> AttributionRead | None:
     """The verdict for a run that took no action: did the fault leave while it watched?
 
-    Both halves are required. The newest reading shows it gone AND an earlier one showed it
-    present — without the second, a resource that was never broken in this run would report
-    as having cleared itself, which is a healthy world (``no_fault``) wearing this verdict's
-    words.
+    Both halves are required — newest reading gone AND an earlier one present. Without the
+    second, a healthy world (``no_fault``) would report as having cleared itself.
     """
     resource, reading = subject
     seen = [entry for _, entry in readings_of(evidence, reading, resource)]

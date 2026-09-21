@@ -1,11 +1,8 @@
 """``CandidateGeneration`` — what a generator hands a selector (WP-6.2).
 
-Plan 02 § 12 makes the arm ``(generator, N, selector)``, so the seam is one method,
-``generate``, and each arm's ``plan_next_step`` is expressed in terms of it — one generation
-path per arm. A ``StepRecord``'s ``CandidateRecord`` could not serve: it carries a probe's
-*tool name* and not its arguments. The generator's whole record travels out and the selector
-**rebuilds** it (``dataclasses.replace``), so ``planner_context_chars`` has one definition;
-``generate`` never writes it, so a step produces exactly one record.
+The arm is ``(generator, N, selector)``, so the seam is one method, ``generate``, and each arm's
+``plan_next_step`` is expressed in terms of it. The selector **rebuilds** the generator's record
+rather than writing a second one, so a step produces exactly one.
 """
 
 from __future__ import annotations
@@ -35,13 +32,13 @@ class CandidateGeneration:
     #: The set, ranked by confidence at the schema boundary, so index 0 is the
     #: top candidate for every generator.
     candidates: tuple[DiagnosisCandidate, ...]
-    #: The step this generator would have emitted on its own. The selector replaces it, and a
-    #: selector that fails leaves it as what the run does — the generator arm's own behaviour.
+    #: The step this generator would have emitted on its own; a selector that fails leaves it
+    #: as what the run does.
     proposed_step: InvestigationStep
     #: The generator's own ``StepRecord``, with ``selector=None``.
     record: StepRecord
     #: Everything the generation billed, ADR-0035 repairs included: a selector can fail AFTER
-    #: this was paid for, and ``accrue_llm_error`` charges pre-``plan_next_step`` (ADR 0045).
+    #: this was paid for (ADR 0045).
     billed_usage: LLMUsage | None = None
 
 
@@ -50,8 +47,7 @@ class CandidateGenerator(Protocol):
     """A strategy that can be asked for its candidate set.
 
     Both best-of-N arms satisfy it; ``baseline`` does not, because a selector over its one
-    candidate is a billed call with one possible answer. ``runtime_checkable`` so the check
-    sees only METHOD NAMES — enough, since ``baseline`` has no ``generate`` at all.
+    candidate is a billed call with one possible answer.
     """
 
     name: str
@@ -69,11 +65,8 @@ class CandidateGenerator(Protocol):
 def candidate_record_of(
     candidate: DiagnosisCandidate, *, generation_call_id: str
 ) -> CandidateRecord:
-    """One candidate, as the trace record holds it.
-
-    Shared by both arms, so the projection is written once. ``proposed_probe`` is the tool name,
-    not the probe: ``evals/candidate_metrics.py`` groups on labels.
-    """
+    """One candidate, as the trace record holds it. ``proposed_probe`` is the tool name, not
+    the probe, because ``evals/candidate_metrics.py`` groups on labels."""
     return CandidateRecord(
         candidate_id=candidate.candidate_id,
         category=candidate.category,
@@ -89,11 +82,8 @@ def candidate_record_of(
 
 
 def billed_usage_of(calls: Sequence[RepairedCall[Any]]) -> LLMUsage | None:
-    """Everything a generation billed: each call that parsed, and each repair leg.
-
-    ``best_of_n_sampled._billed_so_far``'s arithmetic, once. ``sum_usage`` treats a
-    ``None`` member as nothing, so no usage gives ``None``, not a zero.
-    """
+    """Everything a generation billed: each call that parsed, and each repair leg. No usage
+    gives ``None``, not a zero, because ``sum_usage`` treats a ``None`` member as nothing."""
     billed: list[LLMUsage | None] = []
     for call in calls:
         billed.extend(usage_of(err) for err in call.failures)

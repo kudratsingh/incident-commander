@@ -1,10 +1,8 @@
 """``StepCritique``, its context and the ``reflection_critic`` call (plan 02 § 13, WP-9.1).
 
-No strategy here — ``strategies/reflection.py`` turns a verdict into at most one revised step.
-The four finding classes are plan 02 § 13's, the verdict is tied to them by a validator (a
-critique that names a contradiction and keeps the step anyway is LESSONS 2026-09-17's failure
-mode), contradictions are grounded through ``candidates.EvidenceRef``, and ``missing_probe`` is a
-``ReadToolName``, so a critic cannot name a privileged tool. No temperature (decision O-24).
+A validator ties the verdict to the findings (LESSONS 2026-09-17: a critique that names a
+contradiction and keeps the step), contradictions are grounded through ``EvidenceRef``, and
+``missing_probe`` is a ``ReadToolName`` so a critic cannot name a privileged tool.
 """
 
 from __future__ import annotations
@@ -32,9 +30,8 @@ from incident_commander.llm.prompts.loader import load_prompt
 from incident_commander.llm.repair import RepairedCall, call_with_output_repair
 from incident_commander.llm.structured import StructuredOutput
 
-#: Prompt file the critic role is asked with, and the addendum the revising planner call
-#: appends to ``investigation_planner.md``. Named so the strategy, the snapshot suite and
-#: the loader each spell them once.
+#: Prompt file the critic is asked with, and the addendum the revising planner call appends to
+#: ``investigation_planner.md``. One spelling for strategy, snapshot suite and loader.
 CRITIC_PROMPT: Final[str] = "reflection_critic"
 REVISION_PROMPT: Final[str] = "investigation_planner_revision"
 
@@ -55,8 +52,8 @@ CAP_ALREADY_SPENT: Final[str] = "this step's one revision pass is already spent"
 class ReflectionCapExceeded(RuntimeError):
     """A second revision pass was asked for on one step.
 
-    Not an ``LLMError``: the loop escalates on those, and a breached cap is a defect in this
-    module rather than something a run should absorb and report as an escalation.
+    Not an ``LLMError`` (which the loop escalates on): a breached cap is a defect here, not
+    something a run should absorb.
     """
 
     def __init__(self, spent: int, allowed: int) -> None:
@@ -73,8 +70,8 @@ class ReflectionCapExceeded(RuntimeError):
 class RevisionPass:
     """One step's revision budget: one pass, spendable once, then it raises.
 
-    The cap as an object rather than as the absence of a loop: a later edit that wrapped the
-    revision in one would raise here instead of billing a third planner call.
+    The cap as an object rather than the absence of a loop, so an edit that wrapped the
+    revision in one raises here instead of billing a third planner call.
     """
 
     allowed: int = MAX_REVISION_PASSES
@@ -167,10 +164,8 @@ class StepCritique(StructuredOutput):
 
     @property
     def findings(self) -> tuple[str, ...]:
-        """Every finding as one class-prefixed line, in plan 02 § 13's order.
-
-        One projection, so the validator, the record and the report count the same things.
-        """
+        """Every finding as one class-prefixed line, in plan 02 § 13's order — one projection, so
+        the validator, the record and the report count the same things."""
         lines = [f"unsupported_assumption: {claim}" for claim in self.unsupported_assumptions]
         lines += [
             f"contradiction: {item.contradicted_claim} (evidence {item.evidence.evidence_id})"
@@ -190,9 +185,8 @@ class StepCritique(StructuredOutput):
     def _the_verdict_follows_the_findings(self) -> StepCritique:
         """``keep`` iff nothing was found — the structural half of LESSONS 2026-09-17.
 
-        A critique that lists a contradiction and approves the step is quoting a fact and
-        drawing the opposite conclusion from it; the schema refuses it, so ADR 0035 re-asks
-        once and the rejected leg is billed rather than silently accepted.
+        Refusing it in the schema makes ADR 0035 re-ask once and bills the rejected leg,
+        instead of silently accepting a contradiction in the critique itself.
         """
         named = self.findings
         if self.verdict is RevisionVerdict.KEEP and named:
@@ -221,8 +215,8 @@ UNRESOLVED_EVIDENCE: Final[str] = "(no such entry in the ledger)"
 def render_action(action: NextAction) -> str:
     """One ``next_action``, as both readers are shown it.
 
-    Arguments are rendered for a probe (INC-002): a filtered read and an unfiltered one share
-    a tool name, and a critic that cannot see the filter cannot fault its absence.
+    A probe's arguments are rendered (INC-002): a critic that cannot see the filter cannot
+    fault its absence.
     """
     if isinstance(action, ProbeAction):
         return f"probe {action.tool_name}({json.dumps(action.arguments, sort_keys=True)})"
@@ -245,8 +239,8 @@ def render_proposed_step(step: InvestigationStep) -> str:
 def render_critique(run_state: RunState, critique: StepCritique) -> str:
     """The findings, with each cited id resolved to the ledger line it names.
 
-    The reviser is shown ``baseline``'s context, which carries no ids, so a raw uuid would be
-    a reference to something not on its page. Derived from the ledger, never invented (ADR 0047).
+    The reviser is shown ``baseline``'s context, which carries no ids, so a raw uuid would
+    point at something not on its page. Derived from the ledger, never invented (ADR 0047).
     """
     resolved = _ledger_lines(run_state)
     lines = [CRITIQUE_HEADING]
@@ -293,8 +287,8 @@ def format_revision_context(
 ) -> str:
     """What the revising planner call is shown: ``baseline``'s context, its step, the critique.
 
-    ``show_evidence_ids`` stays off, so the only difference from the control group's turn is
-    the two blocks appended to it (ADR 0044).
+    ``show_evidence_ids`` stays off, so the only difference from the control arm's turn is the
+    two blocks appended to it (ADR 0044).
     """
     return (
         f"{format_planner_context(run_state)}\n\n"
@@ -306,8 +300,8 @@ def format_revision_context(
 def revision_system_prompt() -> str:
     """``investigation_planner.md`` plus the revision addendum, cached by the loader.
 
-    An addendum rather than a second planner prompt: two copies of the agent's behaviour would
-    drift, and the arm comparison would become a comparison of prompts (ADR 0044's argument).
+    An addendum, not a second planner prompt: two copies would drift, and the arm comparison
+    would become a comparison of prompts (ADR 0044).
     """
     return f"{load_prompt('investigation_planner').rstrip()}\n\n{load_prompt(REVISION_PROMPT)}"
 
@@ -321,12 +315,8 @@ def revise_step(
 ) -> RepairedCall[InvestigationStep]:
     """The second and last planner call of the step: the same schema, plus the critique.
 
-    Takes the rendered turn (``format_revision_context``) rather than rendering it, so the
-    caller can measure the string that was sent instead of a second render of it.
-
-    ``output_model`` is that same schema, passed in rather than named here: when the loop has
-    withdrawn the probe for this step (ADR 0074) the revision is held to the narrowed model
-    too, or a critique would be a way to get the withdrawn move back.
+    Takes the rendered turn so the caller can measure the string that was sent. ``output_model``
+    is passed in so a step whose probe the loop withdrew (ADR 0074) keeps it withdrawn here.
     """
     return call_with_output_repair(
         llm_client,
@@ -346,9 +336,8 @@ def critique_step(
 ) -> RepairedCall[StepCritique]:
     """Ask the ``reflection_critic`` what is wrong with the step the planner proposed.
 
-    One call through ``call_with_output_repair``, so a critique whose verdict does not follow
-    its findings is an ordinary output failure: ADR 0035 re-asks once, ADR 0015 charges both
-    legs. ``grounded_in`` wraps the call so the citation validator runs inside the repair loop.
+    ``grounded_in`` wraps the call so the citation validator runs inside the repair loop: a
+    verdict that does not follow its findings is then an ordinary output failure (ADR 0035).
     """
     with grounded_in(run_state.evidence):
         return call_with_output_repair(

@@ -1,9 +1,7 @@
 """The search node, its score and the bounds a walk is held to (plan 02 § 14, WP-12.1).
 
-No strategy here — ``strategies/search.py`` walks these. The bounds are objects that raise, not
-prompt text (ADR 0055's pattern), and the ceilings a walk spends against are the run's OWN
-ledger: tool calls are never multiplied (plan 02 § 8), so every branch competes with the chosen
-path for one budget.
+The bounds are objects that raise, not prompt text (ADR 0055), and a walk spends the run's OWN
+ledger: tool calls are never multiplied, so every branch competes with the chosen path.
 """
 
 from __future__ import annotations
@@ -18,9 +16,8 @@ from typing import Final
 from incident_commander.agent.hypothesis import Hypothesis, ProbeAction
 from incident_commander.agent.state import BudgetLedger, EvidenceEntry
 
-#: Levels below the root one planner step may explore, and branches one node may open.
-#: Structural and deliberately not raisable: a bound an operator can lift is not a bound
-#: (ADR 0055). ``SEARCH_DEPTH`` / ``SEARCH_BRANCH`` may ask for LESS, never more.
+#: Levels below the root, and branches per node. Not raisable: ``SEARCH_DEPTH`` /
+#: ``SEARCH_BRANCH`` may ask for LESS, never more (ADR 0055).
 MAX_SEARCH_DEPTH: Final[int] = 2
 MAX_BRANCH_FACTOR: Final[int] = 3
 
@@ -29,11 +26,8 @@ MAX_BRANCH_FACTOR: Final[int] = 3
 BRANCH_PROBE_TOOL_CALLS: Final[int] = 1
 CHOSEN_PATH_TOOL_RESERVE: Final[int] = 1
 
-#: Score weights for plan 02 § 257's ``selector_confidence − tool_cost − token_cost −
-#: safety_risk``. Each cost term is the FRACTION of the shared ceiling the path has spent, so
-#: both are 0 at the start and sum to 0.5 at a fully spent ledger — a cost term never outranks
-#: a confident diagnosis on its own. DECLARED, not tuned: tuning them needs the paid sweep
-#: (WP-12.2) and may never be done on the holdout (plan 03 § 16).
+#: Weights for plan 02 § 257's ``selector_confidence − tool_cost − token_cost − safety_risk``.
+#: DECLARED, not tuned: tuning needs the paid sweep (WP-12.2), never on the holdout.
 TOOL_COST_WEIGHT: Final[float] = 0.25
 TOKEN_COST_WEIGHT: Final[float] = 0.25
 SAFETY_RISK_WEIGHT: Final[float] = 0.5
@@ -53,9 +47,8 @@ DUPLICATE_BRANCH_PROBE: Final[str] = "duplicate probe"
 TOOL_CEILING_RESERVED: Final[str] = "tool-call ceiling reserved for the chosen path"
 TOKEN_CEILING_RESERVED: Final[str] = "token ceiling reserved for the chosen path"
 
-#: The refusal every mode but RECORDED gets, spelled once for the strategy and the eval runner.
-#: 06 C13: in a live world the branches would read a MOVING world, so no two branches would be
-#: comparable and the whole experiment would measure the world's drift.
+#: The refusal every mode but RECORDED gets, spelled once for the strategy and the eval runner:
+#: branches of a live world read a MOVING world, so the experiment would measure its drift.
 SEARCH_IS_RECORDED_MODE_ONLY: Final[str] = (
     "search runs in RECORDED mode only. A branch gathers evidence, so in a live world "
     "each branch would read a world that had already moved and no two branches would be "
@@ -69,8 +62,8 @@ SEARCH_IS_RECORDED_MODE_ONLY: Final[str] = (
 class SearchCapExceeded(RuntimeError):
     """A walk asked for a level or a branch it had already spent.
 
-    A ``RuntimeError`` and not an ``LLMError``: the loop escalates on those, and a breached
-    bound is a defect in this module rather than an incident outcome a run should absorb.
+    A ``RuntimeError`` rather than an ``LLMError`` (which the loop escalates on): a breached
+    bound is a defect here, not an incident outcome.
     """
 
     def __init__(self, marker: str, spent: int, allowed: int) -> None:
@@ -106,8 +99,8 @@ class BranchAllowance:
 class SearchWalk:
     """One planner step's whole search budget: its levels, and each node's branches.
 
-    The bounds as objects rather than as the shape of a loop, so an edit that wrapped the
-    walk in a second loop raises here instead of exploring twice as far.
+    Bounds as objects rather than loop shape, so an edit that wrapped the walk in a second
+    loop raises here instead of exploring twice as far.
     """
 
     depth_allowed: int = MAX_SEARCH_DEPTH
@@ -115,11 +108,8 @@ class SearchWalk:
     depth_spent: int = 0
 
     def __post_init__(self) -> None:
-        """Refuse a request above the structural maximum rather than clamping it.
-
-        Clamping would run a 3-branch walk for a caller who asked for 4 and report the
-        number it asked for; the caller has to hear that the bound is the bound.
-        """
+        """Refuse a request above the structural maximum rather than clamping it: clamping
+        would run a 3-branch walk for a caller who asked for 4 and report the 4."""
         if self.depth_allowed > MAX_SEARCH_DEPTH or self.depth_allowed < 1:
             raise SearchCapExceeded(DEPTH_ABOVE_MAXIMUM, self.depth_allowed, MAX_SEARCH_DEPTH)
         if self.branch_allowed > MAX_BRANCH_FACTOR or self.branch_allowed < 1:
@@ -211,8 +201,8 @@ def _fraction(used: int, ceiling: int) -> float:
 def room_for_a_branch(budget: BudgetLedger, *, token_reserve: int) -> str | None:
     """Why the shared ledger cannot afford another branch, or ``None`` when it can.
 
-    ``token_reserve`` is the largest single call this step has already paid for — measured,
-    not guessed — held back so the chosen path can still make its own call.
+    ``token_reserve`` is the largest single call this step already paid for — measured, not
+    guessed — held back so the chosen path can still make its own call.
     """
     if budget.is_exhausted:
         return LEDGER_EXHAUSTED
@@ -234,8 +224,8 @@ def new_node_id() -> str:
 def evidence_snapshot_ref(evidence: Sequence[EvidenceEntry]) -> str:
     """A 12-hex ref for one node's evidence snapshot: the ledger's ids, in order.
 
-    A ref and not a copy — the entries themselves are in the trace already, and two branches
-    are told apart by which readings they hold.
+    A ref, not a copy — the entries are in the trace already, and two branches are told
+    apart by which readings they hold.
     """
     digest = hashlib.sha256()
     for entry in evidence:
@@ -246,11 +236,8 @@ def evidence_snapshot_ref(evidence: Sequence[EvidenceEntry]) -> str:
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class SearchNode:
-    """One node of the walk, in plan 02 § 255's own terms.
-
-    ``(hypothesis set, evidence snapshot ref, proposed probe, score, accumulated cost)``,
-    plus the ids that make it a tree and the reason a refused branch carries.
-    """
+    """One node of the walk, in plan 02 § 255's terms: hypothesis set, evidence snapshot ref,
+    proposed probe, score, accumulated cost — plus the tree ids and any refusal reason."""
 
     node_id: str
     #: ``""`` on the root, which is the step as the generator proposed it.

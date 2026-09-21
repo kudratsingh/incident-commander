@@ -1,9 +1,8 @@
-"""Charge LLM calls to the incident budget ledger (ADR 0015), and split the same
-billed work by role, token class, call and planner step (WP-2.3).
+"""Charge LLM calls to the incident budget ledger (ADR 0015), and split the same billed
+work by role, token class, call and planner step (WP-2.3).
 
-Here rather than in ``state.py``, which stays free of ``llm`` imports. Both views are
-built from the same ``LLMUsage`` objects, and ``RunAccounting.reconciles_with`` asserts
-they still agree.
+Here rather than in ``state.py``, which stays free of ``llm`` imports. Both views come from
+the same ``LLMUsage`` objects; ``RunAccounting.reconciles_with`` asserts they still agree.
 """
 
 from __future__ import annotations
@@ -30,10 +29,8 @@ from incident_commander.llm.repair import RepairedCall
 
 
 def token_volume(usage: LLMUsage) -> int:
-    """ADR 0015's token *volume* for one call: every class, discards included.
-
-    One definition for both consumers, so the split cannot drift from the total.
-    """
+    """ADR 0015's token *volume* for one call: every class, discards included. One
+    definition for both consumers, so the split cannot drift from the total."""
     return (
         usage.input_tokens
         + usage.output_tokens
@@ -58,11 +55,8 @@ def accrue_llm_usage(budget: BudgetLedger, usage: LLMUsage, model: str) -> Budge
 
 
 def accrue_llm_error(budget: BudgetLedger, err: Exception, model: str) -> BudgetLedger:
-    """Charge whatever a *failed* LLM call already billed. No-op if unknown.
-
-    A truncated response or an exhausted retry is billed work. Anything that is not
-    an ``LLMError`` carrying usage leaves the ledger untouched.
-    """
+    """Charge whatever a *failed* LLM call already billed. A truncated response or an
+    exhausted retry is billed work; anything without ``LLMError.usage`` is a no-op."""
     if not isinstance(err, LLMError) or err.usage is None:
         return budget
     return accrue_llm_usage(budget, err.usage, model)
@@ -81,10 +75,9 @@ def accrue_structured_call(
 
 
 def _elapsed_ms(seconds: float) -> int:
-    """Whole milliseconds, never negative. ``0`` is a measurement, not a gap.
+    """Whole milliseconds, never negative — ``0`` is a measurement, not a gap.
 
-    ``llm/client.py``'s own definition, reused so the two latency columns cannot
-    disagree. Timed outside the client, so it covers the canned one too.
+    ``llm/client.py``'s definition, reused so the two latency columns cannot disagree.
     """
     return elapsed_ms_of(seconds)
 
@@ -93,9 +86,8 @@ def _elapsed_ms(seconds: float) -> int:
 class LLMCallAccounting:
     """What one LLM call, made under one role, billed — and how long it took.
 
-    The four provider counters stay apart because cache creation and cache read are
-    priced differently (``llm/pricing.py``). ``tokens_used`` is ``token_volume`` and
-    ``usd_used`` is ``cost_of``'s answer, never arithmetic repeated here.
+    The provider counters stay apart because cache creation and cache read are priced
+    differently (``llm/pricing.py``).
     """
 
     role: str
@@ -164,8 +156,8 @@ class RoleTotals:
 class StepAccounting:
     """The context and branching of one planner step, as the record reported it.
 
-    Derived from ``StepRecord``, never measured again: only the strategy knows what
-    the planner was actually fed.
+    Derived from ``StepRecord``, never measured again: only the strategy knows what the
+    planner was fed.
     """
 
     iteration: int
@@ -185,9 +177,8 @@ class StepAccounting:
     #: 1 when the critique was acted on and a second planner call ran, else 0. Apart from
     #: ``critic_calls`` because a pass that cost tokens and changed nothing is its own case.
     revised: int = 0
-    #: Branches a ``search`` walk took this step, and the reads the whole walk made — the
-    #: chosen path's included, since one shared ceiling paid for all of them (WP-12.1).
-    #: 0 for every other arm.
+    #: Branches a ``search`` walk took this step, and the reads the whole walk made, the
+    #: chosen path's included: one shared ceiling paid for all of them (WP-12.1).
     search_branches: int = 0
     search_branch_tool_calls: int = 0
 
@@ -196,9 +187,8 @@ class StepAccounting:
 class MeteredLLMClient:
     """An ``LLMClientProtocol`` that records what each call billed, by role.
 
-    A wrapper because the role is the runner's fact, not the client's, and the canned
-    client has no tracer. Every billed leg arrives here — a repaired call (ADR 0035)
-    twice — forwarded untouched, and an exception is re-raised after it is recorded.
+    A wrapper because the role is the runner's fact, not the client's. Every billed leg
+    arrives here — a repaired call (ADR 0035) twice — and an exception is re-raised.
     """
 
     inner: LLMClientProtocol
@@ -308,11 +298,8 @@ class RunAccounting:
         )
 
     def step_sink(self, forward: StepSink | None = None) -> StepSink:
-        """A ``StepSink`` that accounts for each step and passes it on.
-
-        Composed, not exclusive: the trace store wants the whole ``StepRecord``,
-        this wants four numbers off it.
-        """
+        """A ``StepSink`` that accounts for each step and passes it on — composed, because
+        the trace store wants the whole ``StepRecord`` and this wants four numbers off it."""
 
         def sink(record: StepRecord) -> None:
             self.record_step(record)
@@ -424,9 +411,8 @@ class RunAccounting:
     def reconciles_with(self, budget: BudgetLedger) -> bool:
         """Does the charged split add up to what the ledger charged?
 
-        An equality, not a tolerance: both sides come from the same ``LLMUsage``
-        objects. An exhausted repair (ADR 0035) can make it false honestly — the
-        ledger's conservative single charge over-reports, which is ADR 0015's direction.
+        An equality, not a tolerance: both sides come from the same ``LLMUsage`` objects.
+        An exhausted repair (ADR 0035) can make it false honestly, by over-reporting.
         """
         return (
             self.charged_tokens_used == budget.tokens_used

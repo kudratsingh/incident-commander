@@ -1,8 +1,7 @@
 """Escalation briefing: what a human sees when the agent hands off.
 
-Deterministic template; ``briefing_enrichment.py`` fills ``findings`` and
-``recommendation``. Everything comes from ``RunState``; alert and tool content is
-untrusted (invariant 4).
+Deterministic template; ``briefing_enrichment.py`` fills ``findings`` and ``recommendation``.
+Everything comes from ``RunState``; alert and tool content is untrusted (invariant 4).
 """
 
 from __future__ import annotations
@@ -22,8 +21,8 @@ from incident_commander.agent.state import EvidenceEntry, IncidentState, RunStat
 class ProbeSummary(BaseModel):
     """One entry in the investigation trail: the call, and what it returned.
 
-    ``arguments`` is carried, not dropped: a result read without the arguments
-    that scoped it has an unknowable scope (INC-002).
+    ``arguments`` is carried, not dropped: a result read without the arguments that scoped
+    it has an unknowable scope (INC-002).
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -40,9 +39,8 @@ NO_TRAIL_LINE: Final = "No probes were run before escalation."
 def trail_of(evidence: Sequence[EvidenceEntry]) -> tuple[ProbeSummary, ...]:
     """The probes out of a run's evidence ledger, for any reader of the trail.
 
-    One projection for the briefing writer, the briefing judge and the selector
-    (INC-002). The underscore prefix filters bookkeeping markers structurally;
-    ``evals/graders/deterministic.py`` filters the same way.
+    One projection for writer, judge and selector (INC-002). The underscore prefix filters
+    bookkeeping markers, the same way ``evals/graders/deterministic.py`` does.
     """
     return tuple(
         ProbeSummary(
@@ -56,36 +54,29 @@ def trail_of(evidence: Sequence[EvidenceEntry]) -> tuple[ProbeSummary, ...]:
 
 
 def render_trail(trail: Sequence[ProbeSummary]) -> list[str]:
-    """The investigation-trail block, as both LLM readers are shown it.
-
-    One function for the briefing writer and the briefing judge, so the two cannot
-    drift; ``tests/unit/test_llm_judge.py`` pins that.
-    """
+    """The investigation-trail block, as both LLM readers are shown it — one function for
+    writer and judge so they cannot drift (``tests/unit/test_llm_judge.py`` pins it)."""
     if not trail:
         return [NO_TRAIL_LINE]
     return [TRAIL_HEADING, *(render_probe(probe) for probe in trail)]
 
 
 def render_probe(probe: ProbeSummary) -> str:
-    """One trail line: the call with its arguments, then what it returned.
-
-    Arguments first: the call's scope, then its result (INC-002).
-    """
+    """One trail line: the call with its arguments first, then what it returned (INC-002)."""
     return f"  - {probe.tool}({_render_arguments(probe.arguments)}) -> {probe.summary}"
 
 
 def _render_arguments(arguments: Mapping[str, Any]) -> str:
     """``key=value`` pairs, ``repr``'d, in the order the agent sent them.
 
-    Every argument, ``None`` ones included: ``remediation_hint=None`` is what
-    distinguishes an unfiltered read from a filtered one.
+    ``None`` ones included: ``remediation_hint=None`` is what tells an unfiltered read from
+    a filtered one.
     """
     return ", ".join(f"{key}={value!r}" for key, value in arguments.items())
 
 
-#: How the slot block opens, and how its remainder does. Named because three readers must
-#: agree on them: ``render_incidents`` writes them, the deterministic grader searches the text
-#: they head, and the shared prompt rule quotes the second one to both LLM readers (ADR 0065).
+#: How the slot block opens, and how its remainder does. Named because ``render_incidents``,
+#: the deterministic grader and the shared prompt rule must all agree on them (ADR 0065).
 INCIDENTS_HEADING: Final = "Incidents this run named:"
 REMAINDER_HEADING: Final = "Remaining (not addressed by this run):"
 
@@ -93,9 +84,8 @@ REMAINDER_HEADING: Final = "Remaining (not addressed by this run):"
 def incidents_of(run_state: RunState) -> IncidentSlots:
     """A run's incident slots at the bar the loop acts on (WP-11.3, ADR 0065).
 
-    The one place the briefing side applies ``REMEDIATE_CONFIDENCE_THRESHOLD``: the grader
-    reads the slots through here, so the handoff a human sees and the grade a run gets are
-    computed from the same projection of the same run state (INC-002).
+    The one place the briefing side applies ``REMEDIATE_CONFIDENCE_THRESHOLD``, so the handoff
+    and the grade come from the same projection (INC-002).
     """
     return incident_slots(
         hypotheses=run_state.hypotheses,
@@ -107,9 +97,8 @@ def incidents_of(run_state: RunState) -> IncidentSlots:
 def render_incidents(slots: IncidentSlots) -> list[str]:
     """The incident-slot block, as both LLM readers are shown it.
 
-    One function for the briefing writer and the briefing judge, so the two cannot drift
-    (``tests/unit/test_llm_judge.py`` pins that). Empty for a run that produced no ranking,
-    which is why every context that predates WP-11.3 renders byte-identically.
+    One function for writer and judge so they cannot drift. Empty for a run that produced no
+    ranking, which keeps pre-WP-11.3 contexts byte-identical.
     """
     if slots.primary is None:
         return []
@@ -136,19 +125,16 @@ def _named_slot(slot: IncidentSlot) -> str:
     return f"{slot.category.value} / {slot.name} (confidence {slot.confidence:.2f})"
 
 
-#: How the attribution slot opens (O-29, ADR 0071). Named for the reason the two headings above
-#: are: ``render_attribution`` writes it, the deterministic grader searches the text it heads,
-#: and the shared prompt rule is about the block under it.
+#: How the attribution slot opens (O-29, ADR 0071). Named for the reason the two headings
+#: above are: three readers must agree on the text.
 ATTRIBUTION_HEADING: Final = "Recovery attribution (from this run's own readings):"
 
 
 def render_attribution(read: AttributionRead | None) -> list[str]:
     """The attribution block, as both LLM readers are shown it.
 
-    One rendering for the briefing writer and the briefing judge, so the two cannot drift
-    (INC-002). Empty for a run with no verdict — which is every run whose resource no declared
-    reading can observe and every run that read no recovery at all, so their contexts stay
-    byte-identical to what they were before this block existed (ADR 0065's property).
+    One rendering for writer and judge so they cannot drift (INC-002). Empty for a run with no
+    verdict, which keeps those contexts byte-identical to what they were before it existed.
     """
     if read is None:
         return []
@@ -163,10 +149,8 @@ def render_attribution(read: AttributionRead | None) -> list[str]:
 
 
 class AttemptedAction(BaseModel):
-    """A Tier-1 action that was invoked before the agent escalated.
-
-    Recorded because an action a human believes never fired is one they may fire again.
-    """
+    """A Tier-1 action invoked before the agent escalated — recorded because an action a
+    human believes never fired is one they may fire again."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -184,13 +168,11 @@ class EscalationBriefing(BaseModel):
     alert_summary: str
     escalation_reason: str = ""
     attempted_action: AttemptedAction | None = None
-    # Structural, not prose: a run that fixed one cause and left another names the remainder
-    # here, from its own ranking and its own attempts, whatever the writer goes on to say
-    # (WP-11.3, ADR 0065). Empty for a run that produced no ranking.
+    # Structural, not prose: the remainder comes from the run's own ranking and attempts,
+    # whatever the writer goes on to say (WP-11.3, ADR 0065).
     incidents: IncidentSlots = Field(default_factory=IncidentSlots)
-    # Structural for the same reason one slot up (O-29, ADR 0071): whether the recovery this
-    # run read is its own action's is a statement about two readings, so it is computed from
-    # them and not left to the writer. ``None`` for a run that claims no recovery.
+    # Structural for the same reason (O-29, ADR 0071): whose the recovery was is a statement
+    # about two readings, so it is computed, not left to the writer.
     attribution: AttributionRead | None = None
     investigation_trail: tuple[ProbeSummary, ...] = ()
     findings: str = ""
@@ -209,8 +191,8 @@ def render_briefing(run_state: RunState) -> EscalationBriefing:
         attempted_action=_attempted_action(terminal_marker),
         incidents=incidents_of(run_state),
         attribution=attribution_of(run_state),
-        # ``trail_of`` filters out the escalation marker; the reason it carries
-        # is read back out above into its own field, never faked as a probe.
+        # ``trail_of`` filters out the escalation marker; its reason is read into
+        # ``escalation_reason`` above, never faked as a probe.
         investigation_trail=trail_of(run_state.evidence),
         findings="",
         recommendation="",
@@ -226,9 +208,8 @@ def render_briefing(run_state: RunState) -> EscalationBriefing:
 def _terminal_marker(run_state: RunState) -> EvidenceEntry | None:
     """The bookkeeping entry that ended the run, if the run ended badly.
 
-    Structural: every escalation path appends its marker last, so the marker is the
-    last evidence entry. RESOLVED and non-terminal states are excluded — their last
-    marker is a verdict or a handoff note, not a reason the agent escalated.
+    Every escalation path appends its marker last. RESOLVED and non-terminal states are
+    excluded: their last marker is a verdict, not a reason the agent escalated.
     """
     if not run_state.state.is_terminal or run_state.state is IncidentState.RESOLVED:
         return None
@@ -241,11 +222,9 @@ def _terminal_marker(run_state: RunState) -> EvidenceEntry | None:
 def _escalation_reason(marker: EvidenceEntry | None, evidence: Sequence[EvidenceEntry]) -> str:
     """Why the agent stopped, in the words the writer recorded, plus any earlier attempt.
 
-    From ``result_summary``, not ``arguments["reason"]``: every writer sets it. A run that
-    retried (ADR 0056) appends its attempt records: the trail filters underscore markers, so
-    without this a human handed a reinvestigated escalation would not be told about the
-    Tier-1 write already made on their system — the honesty ``remediate_verify_fails``
-    grades. Empty for every run that made no failed attempt.
+    From ``result_summary``, not ``arguments["reason"]``: every writer sets it. The attempt
+    records are appended because the trail filters underscore markers, and a human handed a
+    reinvestigated escalation must still hear about the Tier-1 write already made (ADR 0056).
     """
     reason = marker.result_summary if marker is not None else ""
     attempted = render_already_attempted(evidence)
@@ -255,10 +234,8 @@ def _escalation_reason(marker: EvidenceEntry | None, evidence: Sequence[Evidence
 
 
 def _attempted_action(marker: EvidenceEntry | None) -> AttemptedAction | None:
-    """The Tier-1 call recorded on the marker, if one was made.
-
-    The same two argument keys ``evals/graders/deterministic.py`` reads.
-    """
+    """The Tier-1 call recorded on the marker, under the same two argument keys
+    ``evals/graders/deterministic.py`` reads."""
     if marker is None:
         return None
     tool = marker.arguments.get("attempted_tool")

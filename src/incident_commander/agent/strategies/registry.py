@@ -1,8 +1,7 @@
 """The strategy registry: name → strategy, and a refusal for anything else.
 
-An unknown ``INFERENCE_STRATEGY`` is refused **at construction**, with the known names listed:
-a quiet fallback to ``baseline`` would report a number for the wrong strategy. The keys are
-exactly the ``StrategyName`` members, pinned by ``tests/unit/test_strategies.py``.
+An unknown ``INFERENCE_STRATEGY`` is refused **at construction**: a quiet fallback to
+``baseline`` would report a number for the wrong strategy.
 """
 
 from __future__ import annotations
@@ -27,10 +26,8 @@ StrategyFactory = Callable[[StrategyKnobs], InvestigationStrategy]
 
 
 class UnknownStrategyError(ValueError):
-    """``INFERENCE_STRATEGY`` named something the registry does not have.
-
-    Carries the known names: the operator who typed it needs the list.
-    """
+    """``INFERENCE_STRATEGY`` named something the registry does not have. Carries the known
+    names, because the operator who typed it needs the list."""
 
     def __init__(self, name: str, known: tuple[str, ...]) -> None:
         super().__init__(
@@ -41,10 +38,8 @@ class UnknownStrategyError(ValueError):
 
 
 class StrategyRegistry:
-    """Name → factory, with the refusal above.
-
-    Factories, not instances: a shared singleton would leak per-run state between scenarios.
-    """
+    """Name → factory, with the refusal above. Factories, not instances: a shared singleton
+    would leak per-run state between scenarios."""
 
     def __init__(self, factories: Mapping[str, StrategyFactory]) -> None:
         self._factories: dict[str, StrategyFactory] = dict(factories)
@@ -65,8 +60,8 @@ class StrategyRegistry:
             raise UnknownStrategyError(str(name), self.names)
         strategy = factory(knobs if knobs is not None else StrategyKnobs())
         if strategy.name != str(name):
-            # A factory registered under the wrong key would stamp one name in the provenance
-            # record while running another.
+            # A factory under the wrong key would stamp one name in the provenance record
+            # while running another.
             raise UnknownStrategyError(str(name), self.names)
         return strategy
 
@@ -90,8 +85,6 @@ def default_strategy() -> InvestigationStrategy:
     """The control group, for a caller with no configuration in hand.
 
     ``make_llm_investigate``'s default, resolved through the registry rather than by reading
-    ``Settings``. Pinned by ``tests/unit/test_strategies.py::TestTheDefaultIsBaseline``.
-    ``evals/runner.py`` is the edge: it resolves ``INFERENCE_STRATEGY`` through
-    ``STRATEGIES.create``.
+    ``Settings``; ``evals/runner.py`` is the edge that resolves ``INFERENCE_STRATEGY``.
     """
     return STRATEGIES.create(StrategyName.BASELINE.value)

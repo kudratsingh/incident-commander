@@ -1,12 +1,7 @@
 """``SelectionResult``, its context and the ``candidate_selector`` call (plan 02 § 12, WP-6.1).
 
-No strategy here — WP-6.2's ``strategies/candidate_selector.py`` turns a decision into an
-``InvestigationStep``. Rules are validators: ``scores`` covers the set exactly,
-``selected_candidate_id`` is set iff the decision is ``select``, scores and ``uncertainty`` are
-in ``[0, 1]``, and ``selecting_among`` binds the set fail-closed so a bad id is an ADR-0035
-repair. Evidence renders through ``briefing.render_trail``, arguments first (INC-002);
-``probe_more`` names none, so ``chosen_candidate_id`` derives the highest-scored candidate. No
-temperature is sent (decision O-24), asserted by ``tests/unit/test_selector_schema.py``.
+Rules are validators: ``scores`` covers the set exactly, ``selected_candidate_id`` is set iff
+the decision is ``select``, ``selecting_among`` binds the set. No temperature (decision O-24).
 """
 
 from __future__ import annotations
@@ -28,12 +23,11 @@ from incident_commander.llm.prompts.loader import load_prompt
 from incident_commander.llm.repair import RepairedCall, call_with_output_repair
 from incident_commander.llm.structured import StructuredOutput
 
-#: Prompt file this role is asked with. Named so the strategy, the snapshot
-#: suite and the loader all spell it once.
+#: Prompt file this role is asked with. One spelling for strategy, snapshot suite and loader.
 SELECTOR_PROMPT: Final[str] = "candidate_selector"
 
-#: Role label for the accounting split and the trace — its own role, so selection's cost
-#: is separable from ``investigation_planner``'s. ``StepAccounting.selector_calls`` counts.
+#: Role label for the accounting split and the trace, so selection's cost is separable from
+#: ``investigation_planner``'s. ``StepAccounting.selector_calls`` counts it.
 SELECTOR_ROLE: Final[str] = "candidate_selector"
 
 #: The candidate ids one ``SelectionResult`` may cite, for one selector call.
@@ -52,10 +46,7 @@ SELECT_WITHOUT_SELECTION: Final[str] = "decision is 'select' and no candidate is
 
 @contextmanager
 def selecting_among(candidates: Iterable[DiagnosisCandidate]) -> Iterator[None]:
-    """Bind the candidate set a ``SelectionResult`` is resolved against.
-
-    Re-entrant: a nested call leaves no stale set.
-    """
+    """Bind the candidate set a ``SelectionResult`` is resolved against. Re-entrant."""
     token = _CANDIDATES.set(tuple(candidate.candidate_id for candidate in candidates))
     try:
         yield
@@ -128,8 +119,8 @@ class SelectionResult(StructuredOutput):
     def _scores_cover_the_set_exactly(cls, value: dict[str, float]) -> dict[str, float]:
         """Every scored id is a candidate, and every candidate is scored.
 
-        The second half strengthens plan 02 § 12: ``scores`` is the only ranking, so a missing
-        entry is one ``probe_more`` cannot point at. Both directions name the id.
+        ``scores`` is the only ranking, so a missing entry is one ``probe_more`` cannot
+        point at (plan 02 § 12).
         """
         known = _bound_candidates("scores")
         for candidate_id in value:
@@ -159,8 +150,8 @@ class SelectionResult(StructuredOutput):
     def _a_selection_is_stated_exactly_when_there_is_one(self) -> SelectionResult:
         """``selected_candidate_id`` is ``None`` iff the decision is not ``select``.
 
-        An id on ``escalate`` is a diagnosis nobody acts on; a ``select`` with no id
-        forces an invented fallback.
+        An id on ``escalate`` is a diagnosis nobody acts on; a ``select`` with none forces
+        an invented fallback.
         """
         if self.decision is SelectionDecision.SELECT:
             if self.selected_candidate_id is None:
@@ -186,11 +177,8 @@ class SelectionResult(StructuredOutput):
 
     @property
     def chosen_candidate_id(self) -> str | None:
-        """The candidate this decision points at — one spelling, one rule.
-
-        ``select`` names it; ``probe_more`` takes the highest-scored (ties: first in
-        ``scores``); ``escalate`` nothing.
-        """
+        """The candidate this decision points at: ``select`` names it, ``probe_more`` takes the
+        highest-scored (ties go to the first in ``scores``), ``escalate`` points at nothing."""
         if self.decision is SelectionDecision.SELECT:
             return self.selected_candidate_id
         if self.decision is SelectionDecision.PROBE_MORE and self.scores:
@@ -207,9 +195,8 @@ ALERT_PREFIX: Final[str] = "Alert: "
 def format_selection_context(run_state: RunState, candidates: Sequence[DiagnosisCandidate]) -> str:
     """What the ``candidate_selector`` is shown: the alert, the trail, the set.
 
-    The trail comes from ``briefing.render_trail`` — arguments first, the INC-002 rule.
-    Nothing evaluator-side is reachable: ``ground_truth`` and ``discriminating_probes`` are
-    not arguments at all (ADR 0038, ``tests/unit/test_selector_schema.py``).
+    The trail renders arguments first (INC-002). Nothing evaluator-side is reachable —
+    ``ground_truth`` and ``discriminating_probes`` are not arguments at all (ADR 0038).
     """
     lines = [
         f"{ALERT_PREFIX}{_alert_line(run_state)}",
@@ -236,18 +223,13 @@ def _alert_line(run_state: RunState) -> str:
 
 
 def _ids(refs: Sequence[EvidenceRef]) -> str:
-    """A candidate's citations, or ``none`` — the word, so silence is visible.
-
-    Same as ``best_of_n_enumerated.citation_reasoning``.
-    """
+    """A candidate's citations, or the word ``none``, so silence is visible."""
     return ", ".join(str(ref.evidence_id) for ref in refs) or "none"
 
 
 def _probe(candidate: DiagnosisCandidate) -> str:
-    """The probe this candidate would run next, with its arguments.
-
-    Filtered and unfiltered reads share one tool name (INC-002).
-    """
+    """The probe this candidate would run next, with its arguments — filtered and unfiltered
+    reads share one tool name, so the arguments are the difference (INC-002)."""
     if candidate.next_probe is None:
         return "none"
     return (
@@ -265,10 +247,8 @@ def select_candidate(
 ) -> RepairedCall[SelectionResult]:
     """Ask the ``candidate_selector`` which candidate the run should act on.
 
-    One call through ``call_with_output_repair``, so a bad id is an ordinary output failure:
-    ADR 0035 re-asks once, ADR 0015 charges both legs, the caller accrues via
-    ``accounting.accrue_structured_call``. No temperature (decision O-24), and
-    ``selecting_among`` wraps the call so validators run inside the repair loop.
+    ``selecting_among`` wraps the call so validators run inside the repair loop: a bad id is
+    then an ordinary output failure, re-asked once (ADR 0035) with both legs charged (ADR 0015).
     """
     if not candidates:
         raise ValueError(

@@ -1,9 +1,8 @@
 """LLM-generated ``findings`` and ``recommendation`` for an EscalationBriefing.
 
-Fills the two free-form strings of ``briefing.py``'s deterministic template using the
-``briefing_writer`` prompt. **Eval-only on purpose**: ``evals/runner.py`` is the only
-caller, and a production briefing is complete without it — the load-bearing fields are
-deterministic (``tests/unit/test_briefing_enrichment.py`` pins the difference).
+Fills the two free-form strings of ``briefing.py``'s template from the ``briefing_writer``
+prompt. Eval-only on purpose: a production briefing is complete without it, since the
+load-bearing fields are deterministic.
 """
 
 from __future__ import annotations
@@ -42,8 +41,8 @@ def enrich_briefing(
 ) -> tuple[EscalationBriefing, BudgetLedger]:
     """Fill ``findings`` and ``recommendation`` by LLM; return the briefing and ledger.
 
-    One bounded repair (ADR 0035), both legs accrued. Metered as the agent's own
-    cost but never a gate (ADR 0015 § 4) — it runs after the terminal state.
+    One bounded repair (ADR 0035), both legs accrued. Metered but never a gate — it runs
+    after the terminal state (ADR 0015 § 4).
     """
     call = call_with_output_repair(
         llm_client,
@@ -62,18 +61,15 @@ def enrich_briefing(
 
 
 def _format_context(briefing: EscalationBriefing) -> str:
-    """What the briefing writer is shown.
-
-    How the run ended, why it stopped, any Tier-1 action already attempted, the causes it
-    named and the remainder it left (WP-11.3), the investigation trail, and what it spent.
-    """
+    """What the briefing writer is shown: how the run ended, any Tier-1 action already
+    attempted, the causes named and the remainder left (WP-11.3), the trail, the spend."""
     lines = [
         f"Incident {briefing.incident_id}",
         f"Final state: {briefing.final_state.value}",
         f"Alert: {briefing.alert_summary}",
     ]
-    # Deterministic fields the writer summarizes, never invents; a writer blind
-    # to the attempted action would re-recommend it.
+    # Deterministic fields the writer summarizes, never invents: a writer blind to the
+    # attempted action would re-recommend it.
     if briefing.escalation_reason:
         lines.append(f"Why the run ended: {briefing.escalation_reason}")
     if briefing.attempted_action is not None:
@@ -82,11 +78,11 @@ def _format_context(briefing: EscalationBriefing) -> str:
             f"without checking its effect first): {briefing.attempted_action.tool} "
             f"{briefing.attempted_action.arguments}"
         )
-    # The slots come before the trail: they are what the run concluded about the trail, and
-    # the remainder block is the one part of the handoff the writer may not contradict.
+    # Slots before the trail: the remainder block is the one part of the handoff the writer
+    # may not contradict.
     lines.extend(render_incidents(briefing.incidents))
-    # Beside the slots and for the same reason (ADR 0071): whose recovery this was is run
-    # state, so the writer is shown it rather than asked to infer it from the trail.
+    # Whose recovery this was is run state, so the writer is shown it rather than asked to
+    # infer it from the trail (ADR 0071).
     lines.extend(render_attribution(briefing.attribution))
     lines.extend(render_trail(briefing.investigation_trail))
     lines.append(f"Budget used: {briefing.budget_used}")

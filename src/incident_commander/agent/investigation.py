@@ -72,55 +72,40 @@ _TOOL_NAME: Final[str] = "get_consumer_lag"
 # Bookkeeping marker for a Phase-1 escalation, distinct from the tool that failed. The
 # underscore is the repo-wide marker convention `briefing._terminal_marker` reads (WO-R2-119).
 _ESCALATION_MARKER: Final[str] = "_investigate_escalate"
-# Marker for ADR 0041's refusal, distinct from `_handoff_refused` (ADR 0031/0032):
-# a run can collect one of each, naming different missing reads.
+# ADR 0041's refusal, distinct from `_handoff_refused` (ADR 0031/0032): a run can collect one
+# of each, naming different missing reads.
 _WHOLE_QUEUE_REFUSED_MARKER: Final[str] = "_handoff_refused_unlisted_queue"
-# Marker for ADR 0073's refusal, and the only one of the three that refuses a READ rather
-# than a handoff. Its own name for the reason the two above have theirs: a run can collect
-# one of each, and they name different things — a subject never read, a queue never read
-# whole, and one reading too many of a subject already read.
+# ADR 0073's refusal, and the only one of the three that refuses a READ rather than a handoff.
 _CONFIRMING_READ_REFUSED_MARKER: Final[str] = "_probe_refused_confirming_read"
 _DEFAULT_MAX_ITERATIONS: Final[int] = 5
-# The bar a hypothesis must clear before the loop will act on it. Public because three
-# other readers need the SAME number: ADR 0059's resolve gate in `remediation.py`, the
-# incident slots (`agent/incidents.py`, ADR 0065) and the diagnosis set read off them.
+# The bar a hypothesis must clear before the loop acts on it. Public because three other
+# readers need the SAME number (`remediation.py`'s resolve gate, ADR 0059; the slots, ADR 0065).
 REMEDIATE_CONFIDENCE_THRESHOLD: Final[float] = 0.7
 
-# How many remediate handoffs may be refused for never probing the alert's subject before
-# the run escalates instead. A refusal steers the planner, but a third ask would not land.
+# Remediate handoffs refusable for never probing the alert's subject before the run escalates
+# instead. A refusal steers the planner, but a third ask would not land.
 _MAX_SUBJECT_PROBE_REFUSALS: Final[int] = 2
 
-# Same, for never having read the dead-letter queue whole (ADR 0041). ONE where the sibling
-# above is two: `list_dlq_messages()` has no argument to get wrong, so a re-ask adds nothing.
+# Same, for never having read the dead-letter queue whole (ADR 0041). ONE, because
+# `list_dlq_messages()` has no argument to get wrong, so a re-ask adds nothing.
 _MAX_WHOLE_QUEUE_REFUSALS: Final[int] = 1
 
-# ADR 0073's three numbers. INC-004: five planner steps ranked `consumer_saturation` first at
-# 0.80 / 0.72 / 0.82 / 0.85 / 0.82 — above the bar, in a category with a Tier-1 fix — and every
-# one of them emitted `probe`. Two prompt rules ("re-read the alerted signal before you
-# conclude", ADR 0009; "re-read the resource immediately before you act", ADR 0071) were
-# satisfiable forever, because nothing bounded HOW MANY TIMES.
-#
-# How many readings of the alert's own subject a run may take before a further one is refused.
-# TWO: the first read IS the investigation of the alerted signal, the second is the confirming
-# re-read both rules ask for, and a third is the one no rule asks for.
+# Readings of the alert's subject allowed before a further one is refused (ADR 0073): the
+# investigation, then the confirming re-read. INC-004 is what an unbounded "re-read" cost.
 _CONFIRMING_READS_ALLOWED: Final[int] = 2
 
-# How many planner steps in a row must rank the same actionable answer first before the guard
-# arms. TWO: one step is a ranking, two in a row is a ranking that did not move — and a run
-# whose top hypothesis is still changing has a reason to read again.
+# Consecutive steps that must rank the same actionable answer first before the guard arms. TWO:
+# a ranking that did not move, where a run whose top is still changing may read again.
 _SETTLED_RANKING_STEPS: Final[int] = 2
 
-# How many further reads may be refused before the run escalates instead. Two, like
-# `_MAX_SUBJECT_PROBE_REFUSALS`: the first refusal names the two moves that remain, the second
-# allows for a planner that mis-read it, and a third ask means the steer is not landing.
+# Further reads refusable before the run escalates instead. Two, like the subject-probe sibling:
+# the first names the moves that remain, the second allows for a mis-read, a third is not landing.
 _MAX_CONFIRMING_READ_REFUSALS: Final[int] = 2
 
 
-# Single source of truth for category → Tier-1 tool routing: categories here auto-remediate
-# above the confidence threshold, categories absent always escalate. The value names the
-# common case (the remediation planner picks the specific tool) but is load-bearing — the
-# planner prompt is written FROM it, and `tests/unit/test_policies.py::TestFixMapMatchesTheSuite`
-# checks a category's steered tool is not one its scenarios forbid.
+# Single source of truth for category → Tier-1 tool routing: categories here auto-remediate above
+# the confidence threshold, absent ones always escalate. Load-bearing — the planner prompt is
+# written FROM it, and `TestFixMapMatchesTheSuite` checks each steered tool against the suite.
 FIX_MAP: Final[dict[HypothesisCategory, str]] = {
     HypothesisCategory.CONSUMER_SATURATION: "restart_consumer_group",
     HypothesisCategory.POISON_MESSAGE: "replay_dlq_by_ids",
@@ -131,29 +116,17 @@ FIX_MAP: Final[dict[HypothesisCategory, str]] = {
 }
 
 
-# Categories whose SPECIFIC tool comes from the platform's per-row `remediation_hint` rather
-# than FIX_MAP's value: `human_required` rows route to `mark_dlq_permanent`, `replay_safe`
-# ones to an immediate replay — same category, both correct.
-#
-# `RUNAWAY_SAGA` joined on 2026-09-17 (WO-R3-263, owner decision O-19, ADR 0054): a chain's
-# root is a dead-letter row like any other, and `TestFixMapMatchesTheSuite` missed the
-# disagreement while scoped to `resolved` scenarios. Pinned with `HINT_ROUTED_TOOLS` and
-# `stuck_chain_root_rule()` by `tests/unit/test_policies.py::TestStuckChainRootRule`.
+# Categories whose SPECIFIC tool comes from the platform's per-row `remediation_hint` rather than
+# FIX_MAP's value: `human_required` rows route to `mark_dlq_permanent`, `replay_safe` ones to a
+# replay. `RUNAWAY_SAGA` joined under ADR 0054, pinned by `TestStuckChainRootRule`.
 HINT_ROUTED_CATEGORIES: Final[frozenset[HypothesisCategory]] = frozenset(
     {HypothesisCategory.POISON_MESSAGE, HypothesisCategory.RUNAWAY_SAGA}
 )
 
 
-# The routing the set above defers to: per-row `remediation_hint` → the Tier-1 tools it
-# admits. The vocabulary is the alerted DLQ SLICE, named by `AlertPayload.remediation_hint`
-# or `AlertPayload.dlq_scope`; `unclassified` joined on 2026-09-08 after live run
-# `a0aa257bf865` showed a null hint IS a finding (ADR 0032). Sets, not single values,
-# because two hints genuinely admit two tools.
-#
-# NOT read at runtime — only the prompt obeys it, so this map's job is to be the single
-# source the prompt is written FROM (architecture-principles rule 2) and to be checkable by
-# `tests/unit/test_policies.py::TestHintRoutedToolsMatchTheSuite`, which also covers the
-# escalate-but-acts scenarios `TestFixMapMatchesTheSuite` cannot see (WO-R2-140, WO-R2-160).
+# The routing the set above defers to: per-row `remediation_hint` → the Tier-1 tools it admits;
+# `unclassified` is keyed on the alerted SLICE, because a null hint IS a finding (ADR 0032).
+# NOT read at runtime — the prompt is written FROM it (`TestHintRoutedToolsMatchTheSuite`).
 HINT_ROUTED_TOOLS: Final[dict[str, frozenset[str]]] = {
     "replay_safe": frozenset({"replay_dlq_by_ids", "replay_dlq_by_category"}),
     "wait_and_replay": frozenset({"replay_dlq_by_ids", "replay_dlq_by_category"}),
@@ -163,46 +136,32 @@ HINT_ROUTED_TOOLS: Final[dict[str, frozenset[str]]] = {
     "unclassified": frozenset({"mark_dlq_permanent"}),
 }
 
-# WHEN THE LABEL AND THE EVIDENCE DISAGREE, THE ROUTING ABOVE DOES NOT APPLY.
-#
-# The user's ruling (WO-R2-167, 2026-09-08): when a row's `remediation_hint` and its
-# `error_message` disagree, the ERROR wins, the row is not replayed, and the disagreement is
-# reported in the briefing. A separate constant rather than a fifth `HINT_ROUTED_TOOLS` entry
-# because the contradiction is a property of a ROW, and a per-slice map cannot hold it.
-#
-# NOT READ AT RUNTIME, by decision (ADR 0034): a plan-time refusal keyed on error text would
-# derive a control from tool output, which CLAUDE.md invariant 4 forbids. Enforcement is the
-# prompt rule this constant sources, exact grading in `dlq_mislabeled_replay_safe`, the free
-# `make world-dossier` lint, and `tests/unit/test_policies.py::TestHintRoutedToolsMatchTheSuite`.
+# WHEN THE LABEL AND THE EVIDENCE DISAGREE, THE ROUTING ABOVE DOES NOT APPLY: the ERROR wins, the
+# row is not replayed, and the briefing reports it (WO-R2-167). NOT read at runtime (ADR 0034) — a
+# refusal keyed on error text would derive a control from tool output, which invariant 4 forbids.
 CONTRADICTED_HINT_TOOLS: Final[frozenset[str]] = frozenset({"mark_dlq_permanent"})
 
 
 def stuck_chain_root_rule() -> str:
     """The stuck-chain conditional, in the words every reader of it is given.
 
-    Read from ``llm/prompts/shared_rules.py`` rather than spelled here, so a fourth copy
-    cannot drift (ADR 0054). ``HINT_ROUTED_CATEGORIES`` and ``HINT_ROUTED_TOOLS`` are its
-    structural half; ``TestStuckChainRootRule`` holds the two together.
+    Read from ``llm/prompts/shared_rules.py`` rather than spelled here, so a fourth copy cannot
+    drift (ADR 0054); ``TestStuckChainRootRule`` holds it to its structural half.
     """
     return STUCK_CHAIN_ROOT_RULE
 
 
-# The read that shows a dead-letter row, and the two arguments that narrow it. Held here
-# because `remediation.py` imports THIS module; pinned against `DLQ_ROW_SOURCE` and
-# `SOURCE_LISTING_FOR_ACTION` by `test_policies.py::TestWholeQueueReadBeforeDlqAction`.
+# The read that shows a dead-letter row, and the two arguments that narrow it. Here because
+# `remediation.py` imports this module; pinned by `TestWholeQueueReadBeforeDlqAction`.
 DLQ_LISTING_TOOL: Final[str] = "list_dlq_messages"
 
 # `limit` and `offset` are NOT here: paging a listing is not slicing it.
 DLQ_LISTING_FILTERS: Final[frozenset[str]] = frozenset({"remediation_hint", "job_type"})
 
 
-# Every Tier-1 tool that replays or fences a dead-letter row.
-#
-# Declared, not derived: `mark_dlq_permanent` is DELIBERATELY inert in
-# `SOURCE_ROW_FOR_ACTION` and `SOURCE_LISTING_FOR_ACTION` (WO-R2-144), so deriving would
-# silently drop the fence — half of what ADR 0041 is about.
-# `test_policies.py::TestWholeQueueReadBeforeDlqAction` keeps this a superset of what those
-# maps tie to the listing.
+# Every Tier-1 tool that replays or fences a dead-letter row. Declared, not derived:
+# `mark_dlq_permanent` is deliberately inert in the source maps, so deriving would silently drop
+# the fence — half of what ADR 0041 is about.
 DLQ_ACTION_TOOLS: Final[frozenset[str]] = frozenset(
     {
         "replay_dlq_by_ids",
@@ -216,10 +175,8 @@ DLQ_ACTION_TOOLS: Final[frozenset[str]] = frozenset(
 def _dlq_acting_categories() -> frozenset[HypothesisCategory]:
     """Hypothesis categories whose Tier-1 route can reach a dead-letter action.
 
-    Derived rather than hand-listed, because a handoff knows only the top hypothesis's
-    CATEGORY: the union of ``FIX_MAP[category]`` and, for a ``HINT_ROUTED_CATEGORIES``
-    member, every tool in ``HINT_ROUTED_TOOLS``. Today ``POISON_MESSAGE`` and
-    ``RUNAWAY_SAGA``; the guard stays inert on the rest, which have no queue to read.
+    Derived rather than hand-listed, because a handoff knows only the top hypothesis's CATEGORY.
+    The guard stays inert on categories with no queue to read.
     """
     hint_routed = frozenset(tool for tools in HINT_ROUTED_TOOLS.values() for tool in tools)
     acting = set()
@@ -238,12 +195,8 @@ DLQ_ACTING_CATEGORIES: Final[frozenset[HypothesisCategory]] = _dlq_acting_catego
 class SubjectMatch(StrEnum):
     """How a probe is judged to have read the subject.
 
-    ``EQUALS`` (the default) counts a probe whose argument carries the subject's exact
-    value. ``UNFILTERED`` is the inverse claim, for the one subject the platform cannot
-    express as a filter: ``ListDlqMessagesInput.remediation_hint = null`` means "every
-    category", so the whole-queue page is the only read that shows a null-hint row. The same
-    null means "nobody classified this" on a returned ROW — live run ``a0aa257bf865`` is what
-    reading the two as one fact costs.
+    ``EQUALS`` wants the subject's exact value in the argument. ``UNFILTERED`` is the inverse, for
+    a subject no filter can express: ``remediation_hint = null`` means "every category".
     """
 
     EQUALS = "equals"
@@ -270,26 +223,9 @@ class SubjectProbe(NamedTuple):
     "unclassified" by default."""
 
 
-# Single source of truth for alert-field → subject-probe routing: the value is the resource,
-# the pair is (the read tool that observes it, the argument the value belongs in).
-#
-# Keyed on the alert FIELD rather than on `fingerprint`, which is free text one family spells
-# three ways; the fields are `api/schemas.AlertPayload` plus the corpus's
-# `_NON_WEBHOOK_ALERT_FIELDS` (tests/unit/test_scenario_alert_premise.py), and the field is
-# what carries the VALUE — the 2026-08-30 live run probed the default group while the alert
-# named `unknown-consumer`, and only the value comparison catches that. Declaration order is
-# priority order: the first entry present is "the subject". The tool/argument halves stay
-# consistent with `policies.RESOURCE_ARG_FIELDS`, pinned by
-# `tests/unit/test_policies.py::TestAlertSubjectProbes`.
-#
-# TWO ENTRIES ARE NOT RESOURCES. `remediation_hint` names a SLICE, admissible because
-# `remediation.SOURCE_LISTING_FOR_ACTION`'s `ListingScope` names the same slice on both sides
-# of the read/act boundary — and because leaving it out cost `dlq_wait_and_replay_success`
-# (archive `06e14be3e7b1`): the agent read the queue unfiltered, reasoned correctly about all
-# four rows, and escalated because its scope was four rows instead of two (ADR 0008). It is
-# LAST, so a resource always outranks a slice, and the read it demands also licenses a
-# same-category replay under ADR 0028. `dlq_scope="unclassified"` is the third shape — the
-# ABSENCE of a filter, `SubjectMatch.UNFILTERED`, a separate field per ADR 0032.
+# Single source of truth for alert-field → subject-probe routing. Keyed on the alert FIELD because
+# the field carries the VALUE; declaration order is priority order, and the last two entries are
+# SLICES (ADR 0028, ADR 0032) so they rank below every resource. Pinned by `TestAlertSubjectProbes`.
 ALERT_SUBJECT_PROBES: Final[dict[str, SubjectProbe]] = {
     "consumer_group": SubjectProbe("get_consumer_lag", "consumer_group"),
     "group": SubjectProbe("get_consumer_lag", "consumer_group"),
@@ -326,30 +262,22 @@ class AlertSubject(NamedTuple):
 def alert_subject(alert: Mapping[str, Any]) -> AlertSubject | None:
     """The alert's own subject, or ``None`` when it names nothing mappable.
 
-    ``None`` is the inert case and it is legitimate — a meta-alert or a whole-queue depth
-    alert names a condition, not a probeable resource (``dlq_backlog`` and
-    ``dlq_mixed_partial`` are the corpus's witnesses). Every caller must read it as "no
-    opinion".
-
-    Looks at the top level, then one level into ``extra_data``: a real webhook alert nests
-    every resource field, while the corpus carries them at the top level
-    (``tests/unit/test_scenario_alert_premise.py::_NON_WEBHOOK_ALERT_FIELDS``). Top level
-    only would leave this guard inert in production while looking green offline.
+    ``None`` is legitimate and every caller reads it as "no opinion". Looks at the top level and
+    one level into ``extra_data``, because a real webhook nests every resource field.
     """
     for source in (alert, alert.get("extra_data")):
         if not isinstance(source, Mapping):
             continue
         for field, probe in ALERT_SUBJECT_PROBES.items():
             raw = source.get(field)
-            # str and UUID only: JSON gives strings, Python a real UUID for
-            # `job_id`/`trace_id`. Nothing else names a resource.
+            # str and UUID only: JSON gives strings, Python a real UUID for `job_id`/`trace_id`.
             if not isinstance(raw, (str, UUID)):
                 continue
             value = str(raw).strip()
             if not value:
                 continue
-            # A declared vocabulary recognises only itself; unrecognised is the inert
-            # case, not an error — the platform may name a scope before we can read it.
+            # Unrecognised is the inert case, not an error: the platform may name a scope
+            # before we can read it.
             if probe.admissible_values is not None and value not in probe.admissible_values:
                 continue
             return AlertSubject(field, probe.tool_name, probe.argument_field, value, probe.match)
@@ -359,20 +287,8 @@ def alert_subject(alert: Mapping[str, Any]) -> AlertSubject | None:
 class FaultPresentReading(NamedTuple):
     """How one read tool says "the fault this resource was paged for is present NOW".
 
-    The mirror of ``attribution.RecoveredReading`` and deliberately not the same object.
-    Three differences, each of them the reason this exists (ADR 0073):
-
-    * **Opposite direction, different risk.** A reading that says "recovered" may be a
-      measurement taken before the fault existed, which is why ``RECOVERED_READING`` declares
-      ``get_consumer_lag`` INERT (ADR 0009: a 60s-cached zero once killed a correct
-      diagnosis). A reading that says "the fault is here", taken inside its own freshness
-      window, carries no such trap — a backlog nobody measured does not report as 39.
-    * **Different question.** That map answers "may this run claim the recovery?" for a
-      briefing and a grade. This one answers "is another reading of this resource worth a
-      step?" for the loop, before anything is claimed.
-    * **Different direction of import.** ``agent/attribution.py`` imports this module, so this
-      module cannot import it back; a shared map would have to live in a third place that
-      neither the loop nor the grader owns.
+    Deliberately NOT ``attribution.RecoveredReading`` (ADR 0073): the opposite direction, where a
+    stale zero is no trap, and that module imports this one so a shared map needs a third home.
     """
 
     tool_name: str
@@ -396,17 +312,12 @@ class FaultPresentReading(NamedTuple):
     never asked to take the predicate on trust."""
 
 
-#: Single source of truth for "this reading shows the fault still present".
-#:
-#: TOTAL over every read tool ``ALERT_SUBJECT_PROBES`` names, and ``None`` is a DECLARED inert
-#: entry with its reason, never an omission — ``tests/unit/test_llm_investigation.py::
-#: TestTheFaultPresentReadingMap`` pins the totality, so a new subject probe arrives as a
-#: decision rather than as silence. One active entry today, which is the honest state: the
-#: guard fires where a reading can say the fault is here, and stays inert everywhere else.
+#: "This reading shows the fault still present". TOTAL over every read tool
+#: ``ALERT_SUBJECT_PROBES`` names; ``None`` is a DECLARED inert entry, never an omission, pinned
+#: by ``TestTheFaultPresentReadingMap``.
 FAULT_PRESENT_READING: Final[dict[str, FaultPresentReading | None]] = {
-    # The backlog is still there. `lag_known` is the guard on the measurement's existence and
-    # `age_seconds` (v0.6.7) is what makes the reading current; both are required, because
-    # "the fault is present" has to be a statement about NOW to be a reason not to look again.
+    # The backlog is still there. `lag_known` guards the measurement's existence and `age_seconds`
+    # makes it current: "present" has to be about NOW to be a reason not to look again.
     "get_consumer_lag": FaultPresentReading(
         "get_consumer_lag",
         "consumer_group",
@@ -416,41 +327,28 @@ FAULT_PRESENT_READING: Final[dict[str, FaultPresentReading | None]] = {
         "the platform reports the group's own backlog with the age of the measurement, so a "
         "non-zero lag inside its freshness window is the alerted condition happening now",
     ),
-    # INERT: a key's presence is not a fault. What makes `remediate_stale_cache_success`'s hot
-    # set stale is a missing expiry AND a miss ratio AND records it references but cannot find
-    # — a judgement over three fields and a second reading, not a field with a faulted value.
-    # An entry claiming `exists: true` means "the fault is present" would arm this guard on
-    # every healthy key in the corpus.
+    # INERT: a key's presence is not a fault. Staleness is a judgement over three fields and a
+    # second reading, and `exists: true` would arm this guard on every healthy key.
     "get_cache_key_info": None,
-    # INERT: a chain's fault is WHICH node is dead-lettered and which are waiting behind it
-    # (ADR 0070), which is a statement about a list of nodes. `get_dag_state` is also the read
-    # a stuck chain is diagnosed from rather than confirmed with — the routing read is the
-    # root's own dead-letter row (ADR 0054) — so a bound on re-reading the chain view would
-    # bind the wrong read.
+    # INERT: a chain's fault is WHICH node is dead-lettered (ADR 0070), and the routing read is
+    # the root's own dead-letter row (ADR 0054), so a bound here would bind the wrong read.
     "get_dag_state": None,
-    # INERT: a trace records work that already finished. It does not become present or absent,
-    # and reading it twice returns the same record by construction.
+    # INERT: a trace records work that already finished; two reads return the same record.
     "get_trace": None,
-    # INERT, for INC-001's and INC-002's reason: an absence from a listing proves only the page
-    # that was read, a filtered page proves only its slice, and a fenced row is still listed
-    # (ADR 0033). The queue is also the read ADR 0041 REQUIRES before a dead-letter action, so
-    # a bound here would collide with a guard that demands the read.
+    # INERT (INC-001, INC-002): an absence proves only that page, a fenced row is still listed
+    # (ADR 0033), and ADR 0041 REQUIRES this read — a bound here would collide with it.
     "list_dlq_messages": None,
 }
 
 
-#: The field a platform reading carries its own measurement age in (v0.6.7, plat #204 —
-#: WO-R3-254's root fix: "the lag reading carries time"). Named because two readers need the
-#: same spelling: the freshness test below and the refusal that quotes the number.
+#: The field a platform reading carries its own measurement age in (v0.6.7, WO-R3-254). Named
+#: because the freshness test below and the refusal that quotes the number must spell it once.
 READING_AGE_FIELD: Final[str] = "age_seconds"
 
 
 def _same_value(value: object, expected: object) -> bool:
-    """Value equality that does not let ``0`` satisfy ``False``.
-
-    The sibling of ``attribution._matches`` (S-20's lesson), spelled again here rather than
-    imported because that module imports this one.
-    """
+    """Value equality that does not let ``0`` satisfy ``False`` (S-20's lesson). Spelled again
+    rather than imported from ``attribution``, because that module imports this one."""
     if isinstance(expected, bool):
         return value is expected
     return value == expected
@@ -468,10 +366,8 @@ def _parsed_reading(entry: EvidenceEntry) -> Mapping[str, Any] | None:
 def reads_fault_present(entry: EvidenceEntry, reading: FaultPresentReading) -> bool | None:
     """Whether one reading shows the fault present. ``None`` when it cannot say.
 
-    ``None`` is the third answer and it is load-bearing in the safe direction: an unparseable
-    summary, a missing field, or a ``known_field`` that is not ``True`` all mean "this reading
-    is not evidence of anything", and the guard that reads this stays inert rather than
-    refusing a read the run may genuinely need.
+    ``None`` is load-bearing in the safe direction: an unparseable summary, a missing field or a
+    ``known_field`` that is not ``True`` all leave the guard inert rather than refusing a read.
     """
     parsed = _parsed_reading(entry)
     if parsed is None or reading.field not in parsed:
@@ -484,11 +380,8 @@ def reads_fault_present(entry: EvidenceEntry, reading: FaultPresentReading) -> b
 def reading_is_fresh(entry: EvidenceEntry, tool_name: str) -> bool:
     """Whether one reading is current enough to be acted on (ADR 0009).
 
-    A tool with no declared staleness window is measured at call time, so its reading is fresh
-    by construction. A DECLARED cached read must carry its own age and that age must sit inside
-    the window: a reading whose age the platform did not report cannot be shown to be current,
-    and this returns ``False`` there — the inert direction, because every caller uses freshness
-    to justify NOT reading again.
+    A tool with no declared staleness window is measured at call time. A cached read must carry an
+    age inside the window; an unreported age answers ``False``, the inert direction.
     """
     window = CACHED_READ_FRESHNESS_SECONDS.get(tool_name)
     if window is None:
@@ -508,14 +401,13 @@ def make_investigate(
     """Bind an MCP client to the INVESTIGATING transition function."""
 
     def transition_investigate(run_state: RunState, at: datetime) -> RunState:
+        # 1. The alerted group, accepting legacy `group` beside `consumer_group`. Read-only, so
+        #    ``wire_arguments``' default-fill is deliberate here; a remediation leg may NOT.
         spec = TOOL_REGISTRY[_TOOL_NAME]
-        # Accept legacy `group` field for backward-compat with older alert
-        # producers; platform's tool arg is `consumer_group`.
         raw = run_state.alert.get("consumer_group") or run_state.alert.get("group")
-        # One canonical serialization for every outgoing call (wire.py). Read-only, so
-        # the default-fill is deliberate; the remediation legs may NOT (ADR 0024).
         arguments = wire_arguments(spec, {"consumer_group": str(raw)} if raw else {})
 
+        # 2. One read, with transport failure and refusal named apart.
         try:
             result = mcp_client.call_tool(_TOOL_NAME, arguments)
         except MCPError as err:
@@ -524,11 +416,13 @@ def make_investigate(
         if result.is_error:
             return _escalate(run_state, at, "tool reported is_error=True", arguments)
 
+        # 3. Parse it through the tool's own output model.
         try:
             output = _parse_output(spec.output_model, result.content)
         except (ValueError, ValidationError) as err:
             return _escalate(run_state, at, f"output parse failed: {err}", arguments)
 
+        # 4. Phase 0 always escalates: one probe is the whole investigation here.
         entry = EvidenceEntry(
             tool_name=_TOOL_NAME,
             arguments=arguments,
@@ -583,11 +477,8 @@ def _escalate(
 
 
 def _control_group() -> InvestigationStrategy:
-    """``baseline``, imported at call time to keep one seam from being a cycle.
-
-    ``strategies.baseline`` imports ``_plan_next_step`` from this module, so this module
-    cannot import the strategy registry at import time.
-    """
+    """``baseline``, imported at call time: ``strategies.baseline`` imports ``_plan_next_step``
+    from this module, so a module-level import of the registry would be a cycle."""
     from incident_commander.agent.strategies.registry import default_strategy
 
     return default_strategy()
@@ -596,9 +487,8 @@ def _control_group() -> InvestigationStrategy:
 def _with_incident_slots(sink: StepSink | None, run_state: RunState) -> StepSink | None:
     """Stamp each ``StepRecord`` with the causes that step named, and the remainder (WP-11.3).
 
-    Here rather than in the five strategies: they all emit one record shape and none of them
-    learns the bar (ADR 0036). The ranking is the record's own — what THIS step asserted — and
-    the attempts are the run's ledger as it stood when the step was planned.
+    Here rather than in the five strategies, so none of them learns the bar (ADR 0036). The
+    ranking is the record's own; the attempts are the ledger as it stood when the step was planned.
     """
     if sink is None:
         return None
@@ -635,63 +525,33 @@ def make_llm_investigate(
 ) -> Callable[[RunState, datetime], RunState]:
     """Bind clients + model to the Phase 2 INVESTIGATING transition.
 
-    Each iteration the LLM ranks hypotheses and either probes or stops; budget is checked
-    before every LLM and tool call, and ``max_iterations`` guards the loop.
-
-    ``reprobe_attempts`` is the investigation-side twin of ADR 0006's verify polling
-    (ADR 0009): when a declared-cached probe (``policies.CACHED_READ_FRESHNESS_SECONDS``)
-    kills a fixable hypothesis at or above the threshold, re-read it after
-    ``reprobe_delay_seconds`` first. Default 0 keeps canned behaviour byte-identical.
-
-    ``strategy`` makes the one planner call (plan 02 § 4, WP-0.2); ``None`` is ``baseline``,
-    resolved through the registry because the eval runner wires ``INFERENCE_STRATEGY`` at the
-    edge. Everything around the call — the ``FIX_MAP`` gate, the 0.7 threshold, the
-    subject-probe refusal, the ADR-0009 re-probe, ``_execute_probe`` and its tier re-check —
-    stays here: strategies propose, this loop decides.
-
-    ``selector_llm_client`` is the ``candidate_selector`` role's client (WP-6.2) and
-    ``critic_llm_client`` the ``reflection_critic`` role's (WP-9.1), each separate so accounting
-    meters the roles apart. ``record_step`` takes each ``StepRecord``; ``None`` means nobody is
-    recording (the tracer is opt-in via ``EVAL_TRACE_DIR``), but the record is built either way.
-
-    ``branch_prober`` is how a ``search`` branch reads the world (WP-12.1, ADR 0060), wired by
-    the eval runner in RECORDED mode alone. ``None`` — every other caller and every other mode —
-    is the refusal ``search`` stops on, and no other strategy reads it.
-
-    ``planner_log`` is where each ACCEPTED ranking is written the moment the loop accepts it
-    (ADR 0075), so a watching operator sees the planner's thinking as it happens instead of in
-    one burst at the next transition. ``None`` means nobody is watching, which is every caller
-    but ``make demo-live``; it changes nothing about the run either way.
+    Each iteration the LLM ranks hypotheses and either probes or stops. ``strategy`` makes the one
+    planner call; every gate around it stays here — strategies propose, the loop decides (ADR 0036).
     """
     chosen: Final[InvestigationStrategy] = strategy if strategy is not None else _control_group()
-    # Which LLM role a console row is filed under. ``reflection``'s step is the REVISED one —
-    # the arm returns what it accepted — so naming it for the arm is naming the call that
-    # produced the ranking. Every other arm's planner call is the planner's.
+    # Which LLM role a console row is filed under. ``reflection``'s step is the REVISED one, so
+    # naming it for the arm names the call that produced the ranking.
     thinking_tool: Final[str] = (
         REFLECTION_TOOL if chosen.name == StrategyName.REFLECTION.value else PLANNER_TOOL
     )
 
     def transition_llm_investigate(run_state: RunState, at: datetime) -> RunState:
+        # 1. Per-run bookkeeping: the alert's subject, and one budget per refusal guard.
         last_probe: ProbeAction | None = None
         reprobes_spent: dict[str, int] = {}
         subject = alert_subject(run_state.alert)
         refusals_spent = 0
         whole_queue_refusals_spent = 0
         confirming_refusals_spent = 0
-        # How many planner steps in a row have ranked the same actionable answer first
-        # (ADR 0073). Reset by any step that does not, so the count is a streak and never a
-        # total: a run whose ranking moved has earned another reading.
+        # A streak, never a total: a run whose ranking moved has earned another reading (ADR 0073).
         settled_steps = 0
         for iteration in range(max_iterations):
+            # 2. Out of budget mid-investigation.
             if run_state.budget.is_exhausted:
                 return _escalate_investigation(run_state, at, "budget exhausted mid-investigation")
 
-            # ADR 0074, and BEFORE the call rather than after it: once the ranking has settled
-            # on an actionable answer and the alerted resource's own newest reading is fresh
-            # and shows the fault, no further reading is worth a step — so the planner is not
-            # offered one. The refusal is recorded FIRST, so this call's own context carries
-            # the reason its choice is narrower than it was: a choice that shrinks without
-            # saying why leaves a model guessing, and guessing for five steps is INC-004.
+            # 3. Withdraw the probe BEFORE the call (ADR 0074), so this call's own context
+            #    carries the reason its choice is narrower than it was.
             withdrawn = (
                 _probe_withdrawn(run_state, subject, settled_steps) if subject is not None else None
             )
@@ -700,10 +560,10 @@ def make_llm_investigate(
                     run_state, at, subject, *withdrawn, settled_steps
                 )
 
+            # 4. Ask the planner. The third value is the ``StepRecord``, which the loop never
+            #    reads: research data must not change the run.
             prior_hypotheses = run_state.hypotheses
             try:
-                # Third value is the ``StepRecord``, already written to ``record_step``.
-                # The loop never reads it: research data must not change the run.
                 run_state, step, _ = chosen.plan_next_step(
                     run_state,
                     at,
@@ -716,21 +576,17 @@ def make_llm_investigate(
                         selector_llm_client=selector_llm_client,
                         critic_llm_client=critic_llm_client,
                         branch_prober=branch_prober,
-                        # The narrowing reaches every strategy's planner call through the
-                        # context, and no strategy decides anything (ADR 0036).
+                        # The narrowing reaches every arm through the context; no arm decides it.
                         offer_probe=withdrawn is None,
                     ),
                 )
             except (ValueError, ValidationError, LLMError) as err:
-                # ``_plan_next_step`` accrues on the way out, so a raising call
-                # accrued nothing. Charge what it billed (ADR 0015).
+                # 5. A failed planner call is still a billed one (ADR 0015).
                 run_state = run_state.model_copy(
                     update={"budget": accrue_llm_error(run_state.budget, err, model)}
                 )
-                # The planner asked for the probe the narrowed schema withdrew (ADR 0074).
-                # Neither an unreadable output nor a reason to escalate: the refusal is already
-                # on the trail, the state stays INVESTIGATING, and the planner keeps its turn —
-                # ADR 0032/0033's shape, under the same cap as ADR 0073's own refusal.
+                # 6. It asked for the probe the narrowed schema withdrew (ADR 0074): not a reason
+                #    to escalate, so it keeps its turn under ADR 0073's own cap.
                 if (
                     isinstance(err, OutputNotOffered)
                     and withdrawn is not None
@@ -750,12 +606,8 @@ def make_llm_investigate(
                     run_state, at, f"{INVESTIGATION_PLANNER_INVALID}: {err}"
                 )
 
-            # ADR 0075, and the ONE place a ranking is accepted: every strategy proposes
-            # through this return, including the two that assemble their step in Python and
-            # the one that revises its own. Written before the loop's own guards look at the
-            # step, because the fact being recorded is what the planner decided — a refusal is
-            # its own row on the evidence trail, and a refused proposal is still thinking a
-            # person watching should see.
+            # 7. Report the accepted ranking, the ONE place one is accepted (ADR 0075). Before the
+            #    guards below, because a refused proposal is still thinking worth watching.
             if planner_log is not None:
                 planner_log.ranking(
                     tool=thinking_tool,
@@ -764,15 +616,17 @@ def make_llm_investigate(
                     reason=_action_reason(step.next_action),
                 )
 
+            # 8. Update the settled-ranking streak.
             settled_steps = settled_steps + 1 if _ranks_an_actionable_answer(step.hypotheses) else 0
 
+            # 9. An actionable hypothesis died on a possibly-stale sensor: re-read it first
+            #    (ADR 0009), before taking the contradiction as a finding.
             killed = _cached_probe_contradiction(prior_hypotheses, step.hypotheses, last_probe)
             if (
                 killed is not None
                 and last_probe is not None
                 and reprobes_spent.get(last_probe.tool_name, 0) < reprobe_attempts
             ):
-                # The hypothesis died on a possibly-stale sensor: re-read it first.
                 reprobes_spent[last_probe.tool_name] = (
                     reprobes_spent.get(last_probe.tool_name, 0) + 1
                 )
@@ -790,11 +644,12 @@ def make_llm_investigate(
                 continue
 
             action = step.next_action
+            # 10. `stop` — hand off with the planner's own reason.
             if isinstance(action, StopAction):
                 return _finalize(run_state, at, action.reason)
+            # 11. `remediate` — four gates, in priority order, before PLANNING sees it.
             if isinstance(action, RemediateAction):
-                # Structural guard before handing off to PLANNING: the category must be
-                # a key in FIX_MAP and confidence must clear the threshold, or escalate.
+                # 11a. The category has a Tier-1 fix, and the confidence clears the bar.
                 top = step.hypotheses[0]
                 if top.category not in FIX_MAP:
                     return _finalize(
@@ -816,8 +671,8 @@ def make_llm_investigate(
                             f"{REMEDIATE_CONFIDENCE_THRESHOLD}; escalating"
                         ),
                     )
-                # Third guard: no remediation of an incident whose alerted signal nobody
-                # has read. REFUSES rather than escalates — the planner gets another turn.
+                # 11b. Nobody has read the alerted signal (ADR 0032). REFUSES rather than
+                #      escalates, so the planner gets another turn.
                 if subject is not None and not _alert_subject_probed(run_state, subject):
                     if refusals_spent >= _MAX_SUBJECT_PROBE_REFUSALS:
                         return _finalize(
@@ -834,11 +689,8 @@ def make_llm_investigate(
                     refusals_spent += 1
                     run_state = _refuse_handoff(run_state, at, subject)
                     continue
-                # Fourth guard, the mirror of the third (ADR 0041): no replaying or fencing
-                # PART of a dead-letter queue nobody has read WHOLE. After the subject check,
-                # so a run missing both reads hears about its own incident first. Refuses
-                # rather than escalates, and this is the only place it can be made — PLANNING
-                # proposes actions and never probes.
+                # 11c. Nobody has read the dead-letter queue WHOLE (ADR 0041). Here, not in
+                #      PLANNING, which never probes.
                 if top.category in DLQ_ACTING_CATEGORIES and not _whole_queue_listed(run_state):
                     if whole_queue_refusals_spent >= _MAX_WHOLE_QUEUE_REFUSALS:
                         return _finalize(
@@ -856,30 +708,18 @@ def make_llm_investigate(
                     whole_queue_refusals_spent += 1
                     run_state = _refuse_whole_queue_handoff(run_state, at, top.category)
                     continue
+                # 11d. Every gate cleared.
                 return _handoff_to_planning(run_state, at, action.reason)
 
-            # ProbeAction — tool_name is Literal-validated at schema time; this check
-            # catches a registry that drifted after startup.
+            # 12. `probe` — the schema's Literal already checked the name; this catches a
+            #     registry that drifted after startup.
             if action.tool_name not in TOOL_REGISTRY:
                 return _escalate_investigation(
                     run_state, at, f"planner proposed unknown tool: {action.tool_name}"
                 )
 
-            # Fifth guard, and the only one that refuses a READ (ADR 0073, INC-004): a
-            # confirming re-read of the alerted subject is bounded. Two prompt rules ask for
-            # one, and a model can satisfy "re-read before you conclude" forever — so the
-            # bound is here, where the reads are counted, and not in the prompt. Refuses
-            # rather than escalating, in ADR 0032/0033's shape: the planner keeps its turn
-            # and is offered the two moves that remain.
-            #
-            # TWO ways a probe arrives here while the loop has withdrawn it (ADR 0074), and
-            # both are met by the same refusal. ``withdrawn`` is this step's narrowing, so a
-            # probe that reached the loop anyway came from a planner whose output does not go
-            # through the schema — a strategy that assembles its step in Python
-            # (``candidate_selector``, ``search``) or a client that ignores the model it was
-            # handed. ``_confirming_read_exhausted`` is ADR 0073's own condition, still
-            # reachable on the step where the streak COMPLETES: the narrowing is computed
-            # before the call and the streak is updated by it.
+            # 13. Refuse a confirming re-read (ADR 0073), the only guard here that refuses a READ.
+            #     The bound is here, where the reads are counted; a prompt rule cannot hold it.
             confirming = withdrawn or (
                 _confirming_read_exhausted(run_state, subject, action, settled_steps)
                 if subject is not None
@@ -894,23 +734,22 @@ def make_llm_investigate(
                     )
                 confirming_refusals_spent += 1
                 if withdrawn is None:
-                    # ADR 0073's path: the refusal is written now, because the loop learned
-                    # only from the proposal that it had one to make. The narrowed path wrote
-                    # its own before the call, and writing a second would say it twice.
+                    # Only the proposal revealed it; step 3's path already wrote its own.
                     run_state = _refuse_confirming_read(
                         run_state, at, subject, *confirming, settled_steps
                     )
                 continue
 
+            # 14. Run the probe. A failure has already escalated with its reason.
             if run_state.budget.is_exhausted:
                 return _escalate_investigation(run_state, at, "budget exhausted before probe")
 
             run_state = _execute_probe(run_state, at, mcp_client, action)
             if run_state.state is IncidentState.ESCALATED:
-                # Probe failed; already escalated with the reason.
                 return run_state
             last_probe = action
 
+        # 15. Out of iterations, with the ranking the run ran out holding (ADR 0073).
         return _escalate_investigation(
             run_state, at, _iterations_exhausted_reason(run_state, max_iterations)
         )
@@ -919,11 +758,8 @@ def make_llm_investigate(
 
 
 def _thinking_action(action: ProbeAction | RemediateAction | StopAction) -> ThinkingAction:
-    """The planner's move, in the two fields a console thinking row draws (ADR 0075).
-
-    ``kind`` is the schema's own discriminator rather than a second vocabulary, so a move this
-    module has never seen still renders as the word the planner used.
-    """
+    """The planner's move, in the two fields a console thinking row draws (ADR 0075). ``kind`` is
+    the schema's own discriminator, so a move this module never saw still renders."""
     tool = action.tool_name if isinstance(action, ProbeAction) else None
     return ThinkingAction(kind=action.kind, tool=tool)
 
@@ -941,22 +777,13 @@ def _plan_next_step(
     model: str,
     output_model: type[InvestigationStep] = InvestigationStep,
 ) -> tuple[RunState, InvestigationStep, PlannerCall]:
-    """One planner LLM call — plus one bounded repair if it does not parse.
+    """One planner LLM call — plus one bounded repair if it does not parse (ADR 0035).
 
-    ADR 0035: a ``record_output`` payload the schema rejects is a harness event. Both legs
-    accrue; a second failure raises ``OutputRepairExhausted``.
-
-    ``output_model`` is the step schema for THIS call and defaults to the whole of it. The loop
-    passes a narrowed one — ``hypothesis.without_probe(InvestigationStep)`` — on a step where it
-    has withdrawn the probe (ADR 0074), and a ``probe`` under that schema raises
-    ``OutputNotOffered`` with no re-ask.
-
-    The third return value is the call's own measurements (tokens, trace-record id, context
-    size, elapsed time — WP-2.1, WO-R3-260). The loop never reads it.
+    ``output_model`` is the step schema for THIS call; where the loop withdrew the probe, a
+    ``probe`` under it raises ``OutputNotOffered`` with no re-ask (ADR 0074).
     """
     system_prompt = load_prompt("investigation_planner")
-    # A local, not inline: the step record measures what was sent, and a second
-    # render could differ from the string the model saw.
+    # A local, not inline: the step record measures the string that was SENT.
     user_message = format_planner_context(run_state)
     call = call_with_output_repair(
         llm_client,
@@ -981,12 +808,10 @@ def _plan_next_step(
         cache_read_tokens=result.cache_read_tokens,
         cache_creation_tokens=result.cache_creation_tokens,
         context_chars=len(system_prompt) + len(user_message),
-        # The client's own measurement — a stopwatch here would also time
-        # the accrual below and call it model time.
+        # The client's own measurement: a stopwatch here would time the accrual as model time.
         elapsed_ms=result.elapsed_ms,
-        # Every leg this call billed. Unread by ``baseline``; a strategy that makes a
-        # SECOND call in the same step needs it, or the first call's bill is charged to
-        # nobody when the second fails (ADR 0015, ADR 0045).
+        # Every leg this call billed. A strategy making a SECOND call in the same step needs it,
+        # or the first call's bill goes uncharged when the second fails (ADR 0045).
         billed_usage=sum_usage(*(usage_of(err) for err in call.failures), result),
     )
     return updated, result.output, measured
@@ -1000,8 +825,8 @@ def _execute_probe(
 ) -> RunState:
     """Call the tool the planner picked. On any failure, escalate with the reason."""
     spec = TOOL_REGISTRY[action.tool_name]
-    # Runtime tier guard (B-06): only tier_of() catches a READ→TIER_1 reclassification made
-    # after the Literal was hand-listed. Here, so both call sites are covered (ADR 0009).
+    # 1. Runtime tier guard (B-06): only ``tier_of`` catches a READ→TIER_1 reclassification made
+    #    after the Literal was hand-listed.
     if tier_of(action.tool_name) is not Tier.READ:
         return _escalate_investigation(
             run_state,
@@ -1009,14 +834,15 @@ def _execute_probe(
             f"planner proposed non-read tool as probe: {action.tool_name} "
             f"(tier={tier_of(action.tool_name).value})",
         )
+    # 2. Wire the arguments, through the same serialization the remediation legs use.
     try:
-        # Same canonical serialization the remediation legs use — no second copy.
         arguments = wire_arguments(spec, action.arguments)
     except ValidationError as err:
         return _escalate_investigation(
             run_state, at, f"probe arguments invalid for {action.tool_name}: {err}"
         )
 
+    # 3. Call the platform, and read a transport failure and a tool-level refusal apart.
     try:
         result = mcp_client.call_tool(action.tool_name, arguments)
     except MCPError as err:
@@ -1027,6 +853,7 @@ def _execute_probe(
             run_state, at, f"tool reported is_error=True ({action.tool_name})"
         )
 
+    # 4. Parse the response through the tool's own output model.
     try:
         summary = _summarize_probe(spec.output_model, result)
     except (ValueError, ValidationError) as err:
@@ -1034,6 +861,7 @@ def _execute_probe(
             run_state, at, f"output parse failed ({action.tool_name}): {err}"
         )
 
+    # 5. Append the reading and charge the tool call.
     entry = EvidenceEntry(
         tool_name=action.tool_name,
         arguments=arguments,
@@ -1064,19 +892,17 @@ BRANCH_PROBE_UNPARSED: Final[str] = "output parse failed"
 def make_branch_prober(mcp_client: MCPClientProtocol) -> BranchProber:
     """The read-only prober a search branch gathers evidence through (WP-12.1, ADR 0060).
 
-    Built HERE, so the tier re-check, the wire serialization, the client and the ledger accrual
-    stay in the loop: a strategy is handed this, never a client. Refuses instead of escalating —
-    a branch is explored, and the run's state is the chosen path's business.
+    Built HERE, so the tier re-check, the wire, the client and the accrual stay in the loop: a
+    strategy is handed this, never a client. Refuses instead of escalating.
     """
 
     def probe(run_state: RunState, action: ProbeAction) -> BranchProbeOutcome:
+        # 1. The tool exists.
         spec = TOOL_REGISTRY.get(action.tool_name)
         if spec is None:
             return BranchProbeOutcome(run_state=run_state, refused=BRANCH_PROBE_UNKNOWN_TOOL)
-        # The same runtime guard `_execute_probe` makes (B-06), and the reason a branch can
-        # never act: a tool reclassified READ → TIER_1 after the Literal was hand-listed is
-        # refused here as well, so "no world-changing action inside a branch" is not a promise
-        # about what the planner proposes (plan 02 § 14, § 18).
+        # 2. The same runtime tier guard `_execute_probe` makes, and the reason a branch can
+        #    never act however a strategy proposes it (B-06).
         if tier_of(action.tool_name) is not Tier.READ:
             return BranchProbeOutcome(
                 run_state=run_state,
@@ -1087,12 +913,14 @@ def make_branch_prober(mcp_client: MCPClientProtocol) -> BranchProber:
                     "audit log to grade the change from (invariant 6)"
                 ),
             )
+        # 3. Wire the arguments.
         try:
             arguments = wire_arguments(spec, action.arguments)
         except ValidationError as err:
             return BranchProbeOutcome(
                 run_state=run_state, refused=f"{BRANCH_PROBE_BAD_ARGUMENTS} ({err})"
             )
+        # 4. Call the platform; a transport failure and a refusal are named apart.
         try:
             result = mcp_client.call_tool(action.tool_name, arguments)
         except MCPError as err:
@@ -1103,20 +931,21 @@ def make_branch_prober(mcp_client: MCPClientProtocol) -> BranchProber:
             return BranchProbeOutcome(
                 run_state=run_state, refused=f"{BRANCH_PROBE_TOOL_ERROR}: is_error=True"
             )
+        # 5. Parse the response.
         try:
             summary = _summarize_probe(spec.output_model, result)
         except (ValueError, ValidationError) as err:
             return BranchProbeOutcome(
                 run_state=run_state, refused=f"{BRANCH_PROBE_UNPARSED}: {err}"
             )
+        # 6. Append the reading and charge the run's OWN ledger — the shared ceiling is what
+        #    makes exploring a trade-off.
         entry = EvidenceEntry(
             tool_name=action.tool_name,
             arguments=arguments,
             result_summary=summary,
             timestamp=run_state.updated_at,
         )
-        # The read is charged to the run's OWN ledger, the one the chosen path spends from:
-        # that shared ceiling is what makes exploring a trade-off (plan 02 § 8).
         return BranchProbeOutcome(
             run_state=run_state.model_copy(
                 update={
@@ -1201,21 +1030,8 @@ def _alert_subject_probed(run_state: RunState, subject: AlertSubject) -> bool:
 def subject_reads(run_state: RunState, subject: AlertSubject) -> tuple[EvidenceEntry, ...]:
     """Every entry in the trail that read the alert's subject, in ledger order.
 
-    Matching is on the tool AND the argument value, never the tool alone: on 2026-08-30 the
-    agent answered a ``group="unknown-consumer"`` alert with ``get_consumer_lag`` and no
-    group, which ``wire_arguments`` default-fills to ``worker-dispatcher``. Evidence records
-    the WIRED arguments, so the fill is visible here. Values compare exactly after
-    ``strip()`` — the campaign's own failure values are substrings of the true ones
-    (``remediation._unsourced_resource_args``).
-
-    Under ``SubjectMatch.UNFILTERED`` the comparison inverts: the qualifying probe is the one
-    that did NOT narrow. Absent key, explicit ``null``, non-string and whitespace all read as
-    unfiltered, the same collapse ``remediation._scope_value`` makes for ADR 0028.
-
-    The SET rather than the boolean, because two guards ask different questions of it: ADR
-    0032's asks whether it is empty, and ADR 0073's asks how many there are and what the last
-    one says. One matching rule for both, or the second guard would count reads the first does
-    not accept.
+    On the tool AND the WIRED argument value, never the tool alone, because an omitted
+    ``consumer_group`` is default-filled. A SET: ADR 0032 asks if it is empty, ADR 0073 counts it.
     """
     return tuple(
         entry
@@ -1236,12 +1052,8 @@ def _names_the_subject(arguments: Mapping[str, Any], subject: AlertSubject) -> b
 def _probe_would_read_the_subject(action: ProbeAction, subject: AlertSubject) -> bool:
     """Whether the probe the planner just proposed would read the alert's subject again.
 
-    Judged on the WIRED arguments — the same bytes ``subject_reads`` reads back off the
-    ledger — because the fill is the whole point: ``get_consumer_lag`` with no
-    ``consumer_group`` default-fills to the alerted group, so omitting the argument is not a
-    different read and must not be a way past the bound. Invalid arguments answer ``False``:
-    such a call never reaches the platform (``_execute_probe`` escalates on it), so it is not
-    a reading of anything.
+    Judged on the WIRED arguments, so omitting ``consumer_group`` is not a way past the bound.
+    Invalid arguments answer ``False``: such a call never reaches the platform.
     """
     if action.tool_name != subject.tool_name:
         return False
@@ -1258,10 +1070,8 @@ def _probe_would_read_the_subject(action: ProbeAction, subject: AlertSubject) ->
 def _ranks_an_actionable_answer(hypotheses: Sequence[Hypothesis]) -> bool:
     """Whether this step's top hypothesis is one the loop would act on.
 
-    The remediate gate's own two conditions, asked of a step that did not emit ``remediate``:
-    a ``FIX_MAP`` category at or above the threshold. Read with ``>=``, which is the gate's
-    own comparison (``top.confidence < REMEDIATE_CONFIDENCE_THRESHOLD`` escalates), so the
-    streak counts exactly the steps on which a ``remediate`` would have been let through.
+    The remediate gate's own two conditions, in its own comparison, so the streak counts exactly
+    the steps on which a ``remediate`` would have been let through.
     """
     if not hypotheses:
         return False
@@ -1276,35 +1086,13 @@ def _probe_withdrawn(
 ) -> tuple[EvidenceEntry, FaultPresentReading] | None:
     """The reading that makes ANY further read pointless this step, or ``None`` (ADR 0074).
 
-    Asked BEFORE the planner call, so it names only facts that hold before one: the ranking
-    and the readings already on the trail. Three clauses, and each is ADR 0073's own:
-
-    1. ``settled_steps >= _SETTLED_RANKING_STEPS`` — the top hypothesis has been the same
-       actionable answer for two planner steps running. One step is a ranking; two is a
-       ranking that did not move.
-    2. A DECLARED reading of the alert's subject can say the fault is present
-       (``FAULT_PRESENT_READING``), and this run has taken at least one.
-    3. The NEWEST of those readings says so (``reads_fault_present``) and is FRESH
-       (``reading_is_fresh``, ADR 0009's own window).
-
-    What ADR 0073 asked for and this does not is a COUNT of readings. That bound refused the
-    third reading of the subject, which left "probe a different tool" open — and the third live
-    take spent two steps taking it. The count is gone because the prompt clause ADR 0073 itself
-    added is the true rule: **one fresh reading that shows the fault is the whole demand**. One
-    such reading satisfies ADR 0009's re-read (the conclusion rests on a current measurement)
-    and ADR 0071's pre-action read (the reading immediately behind the action shows the fault),
-    so a run holding one has everything either rule asks for.
-
-    Every "cannot say" answers ``None`` and leaves the choice whole: a reading that shows the
-    fault gone, one whose age the platform did not report, one outside its window, an
-    unparseable summary, a subject no map entry covers, a ranking that moved or never cleared
-    the bar. The guard withdraws a read that is certainly redundant; it does not ration reads.
+    The ranking held one actionable answer for ``_SETTLED_RANKING_STEPS`` and the subject's NEWEST
+    declared reading shows the fault and is fresh — ADR 0009 and ADR 0071 satisfied at once.
     """
     if settled_steps < _SETTLED_RANKING_STEPS:
         return None
     reading = FAULT_PRESENT_READING.get(subject.tool_name)
-    # The map is keyed by tool; the entry must describe a reading of THIS subject's
-    # resource, the same equality `attribution.alerted_subject` makes.
+    # Keyed by tool, so the entry must also describe a reading of THIS subject's resource.
     if reading is None or reading.argument_field != subject.argument_field:
         return None
     reads = subject_reads(run_state, subject)
@@ -1324,21 +1112,10 @@ def _confirming_read_exhausted(
     action: ProbeAction,
     settled_steps: int,
 ) -> tuple[EvidenceEntry, FaultPresentReading] | None:
-    """The reading that makes a further read of the subject pointless, or ``None``.
+    """The reading that makes a further read of the subject pointless, or ``None`` (ADR 0073).
 
-    ADR 0073's trigger: ``_probe_withdrawn``'s three clauses plus the two that can only be
-    judged once the planner has proposed something —
-
-    2a. The proposed probe would read THE ALERT'S OWN SUBJECT again — the same tool with the
-        same value, judged on the WIRED arguments. Any other read is a different question.
-    3a. The run has already taken ``_CONFIRMING_READS_ALLOWED`` readings of it, so the refused
-        one is the THIRD. Never a first (that read is the investigation) and never a second
-        (that one is what ADR 0009 and ADR 0071 ask for).
-
-    Still reachable with ADR 0074's narrowing in place, on exactly one kind of step: the one
-    where the streak COMPLETES. The narrowing is computed before the planner call and the
-    streak is updated by it, so a step that takes the ranking from one settled step to two can
-    propose a third reading that no narrowed schema ever refused.
+    ``_probe_withdrawn``'s clauses plus two only a proposal can answer: it would read the alert's
+    OWN subject again, and ``_CONFIRMING_READS_ALLOWED`` readings are already in hand.
     """
     withdrawn = _probe_withdrawn(run_state, subject, settled_steps)
     if withdrawn is None:
@@ -1360,16 +1137,8 @@ def _refuse_confirming_read(
 ) -> RunState:
     """Refuse a further reading and narrow the planner's choice to the two moves left.
 
-    NOT a terminal transition, and the same shape as the two refusals above: the state stays
-    INVESTIGATING, the reason is rendered into the planner context, and the marker is
-    underscore-prefixed so the briefing trail and the grader's tool set exclude it. What it
-    adds to their shape is the narrowed choice — a refusal that only said "not that read"
-    would leave the planner to guess, and guessing is what spent five steps in INC-004.
-
-    Written by both of ADR 0074's paths, in the same words on purpose. On the narrowed path it
-    is written BEFORE the call it explains, so the model reads the reason in the same turn its
-    schema lost the probe; on ADR 0073's own path it is written after the proposal that earned
-    it. One text either way: the trail should not say a refusal two ways.
+    NOT terminal: the state stays INVESTIGATING, under an underscore marker. It names the remaining
+    moves, because a refusal that only said "not that read" cost five steps in INC-004.
     """
     taken = len(subject_reads(run_state, subject))
     age = (_parsed_reading(newest) or {}).get(READING_AGE_FIELD)
@@ -1418,12 +1187,8 @@ def _refusals_exhausted_reason(
 ) -> str:
     """Why a run that was offered ``remediate`` or ``stop`` twice is handed off instead.
 
-    One text for both of ADR 0074's paths — the planner that asked for a withdrawn probe and
-    the one ADR 0073's guard refused — because a reader should not have to learn which internal
-    path counted the asks. It opens with the words the corpus matches on
-    (``N times after being refused``) and then says what the run concluded and what it read,
-    which is INC-004's second half: an escalation reason that names no cause is one a briefing
-    writer fills in.
+    One text for both of ADR 0074's paths, opening with the words the corpus matches on
+    (``N times after being refused``): a reason that names no cause is one a writer fills in.
     """
     return (
         f"planner asked to re-read {subject.alert_field}={subject.value!r} "
@@ -1437,11 +1202,8 @@ def _refusals_exhausted_reason(
 def _ranking_sentence(run_state: RunState) -> str:
     """What this run ranked first, and whether it was something the loop could have acted on.
 
-    One sentence, written once, for the two escalations that must not leave a reader guessing
-    what the run concluded (ADR 0073): an exhausted iteration budget and a refused confirming
-    read. INC-004's briefing recommended checking an SMTP relay because the escalation reason
-    it was handed said only "max iterations (5) exceeded" — true, and silent about the
-    `consumer_saturation` the run had ranked first at every one of those five steps.
+    One sentence for the two escalations that must not leave a reader guessing (ADR 0073): INC-004's
+    reason said only "max iterations (5) exceeded" and the briefing recommended something else.
     """
     if not run_state.hypotheses:
         return "this run produced no ranking, so it names no cause"
@@ -1462,11 +1224,8 @@ def _ranking_sentence(run_state: RunState) -> str:
 
 
 def _reads_taken_sentence(evidence: Sequence[EvidenceEntry]) -> str:
-    """The reads this run spent its steps on, counted per tool.
-
-    Bookkeeping markers are excluded the way every other reader of the trail excludes them
-    (the underscore prefix), so this counts calls the platform actually answered.
-    """
+    """The reads this run spent its steps on, counted per tool. Underscore markers are excluded
+    as everywhere else, so this counts calls the platform actually answered."""
     counted = Counter(entry.tool_name for entry in evidence if not entry.tool_name.startswith("_"))
     if not counted:
         return "no read was taken"
@@ -1479,11 +1238,8 @@ def _reads_taken_sentence(evidence: Sequence[EvidenceEntry]) -> str:
 def _iterations_exhausted_reason(run_state: RunState, max_iterations: int) -> str:
     """Why the loop ran out of steps, with the ranking it ran out holding (ADR 0073).
 
-    Opens with the words it has always opened with, because archives, reports and one test
-    match on them; what follows is the part INC-004 showed was missing. The last sentence is
-    the one the briefing writer needs: the ranking is this run's conclusion, and a cause that
-    is not in it is not a finding of this run (ADR 0065's slots carry the same claim
-    structurally).
+    Opens with the words archives, reports and one test match on; what follows is what INC-004
+    showed was missing — the ranking is this run's conclusion, and a cause outside it is not.
     """
     return (
         f"max iterations ({max_iterations}) exceeded with no action taken: "
@@ -1496,11 +1252,8 @@ def _iterations_exhausted_reason(run_state: RunState, max_iterations: int) -> st
 def _whole_queue_listed(run_state: RunState) -> bool:
     """True when this run read the dead-letter queue with no slice filter on it.
 
-    ADR 0041's whole check, and deliberately a statement about the CALL rather than the rows:
-    a probe that failed never reaches the ledger, and the rule is about what the agent looked
-    at. "Unfiltered" is judged exactly as ``remediation._scope_value`` judges it — missing
-    key, explicit ``null``, non-string or whitespace. Paging is not narrowing (``limit`` and
-    ``offset`` are not in ``DLQ_LISTING_FILTERS``), so a page-at-a-time walk has read it whole.
+    ADR 0041's check, and about the CALL rather than the rows: the rule is what the agent looked
+    at. Paging is not narrowing, so a page-at-a-time walk has read it whole.
     """
     for entry in run_state.evidence:
         if entry.tool_name != DLQ_LISTING_TOOL:
@@ -1522,10 +1275,8 @@ def _refuse_whole_queue_handoff(
 ) -> RunState:
     """Refuse a dead-letter handoff and steer the planner at the whole-queue read.
 
-    Same shape as ``_refuse_handoff``: the state stays INVESTIGATING and the reason is
-    rendered into the next planner context. It names the call and what the read is FOR —
-    "read the queue" alone makes a planner re-read the page it has (ADR 0031).
-    Underscore-prefixed, so the briefing trail and the grader's tool set exclude it.
+    Same shape as ``_refuse_handoff``. It names the call and what the read is FOR — "read the
+    queue" alone makes a planner re-read the page it already has (ADR 0031).
     """
     reason = (
         f"handoff refused: this run is about to take a dead-letter action "
@@ -1561,9 +1312,8 @@ def _refuse_whole_queue_handoff(
 def _refuse_handoff(run_state: RunState, at: datetime, subject: AlertSubject) -> RunState:
     """Refuse a remediate handoff and steer the planner at the probe it skipped.
 
-    NOT a terminal transition: the state stays INVESTIGATING and the refusal is rendered
-    into the next planner context, mirroring ``remediation.make_llm_plan``'s plan guards.
-    Underscore-prefixed, so the briefing trail and the grader's tool set exclude it.
+    NOT terminal: the state stays INVESTIGATING and the refusal is rendered into the next planner
+    context under an underscore marker, so the briefing trail and the grader exclude it.
     """
     if subject.match is SubjectMatch.UNFILTERED:
         instruction = (

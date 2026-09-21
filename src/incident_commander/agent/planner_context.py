@@ -1,9 +1,7 @@
-"""What an investigation planner is shown — one renderer, every strategy.
+"""What an investigation planner is shown — one renderer for every strategy, no execution policy.
 
-Moved out of ``agent/investigation.py`` by WP-5.2 so the loop and every strategy share one
-rendering and no execution policy lives here. Read-tier tools only, pinned by
-``tests/unit/test_planner_context.py``. ``show_evidence_ids`` defaults off, keeping
-``baseline``'s prompt byte-identical; the best-of-N arm's id column is ADR 0042 / ADR 0044.
+Read-tier tools only, pinned by ``tests/unit/test_planner_context.py``. ``show_evidence_ids``
+defaults off so ``baseline``'s prompt bytes hold (ADR 0042 / ADR 0044).
 """
 
 from __future__ import annotations
@@ -19,22 +17,16 @@ from incident_commander.tools.registry import TOOL_REGISTRY, description_of
 #: How an evidence line opens when ids are rendered. Named so prompt and test agree.
 EVIDENCE_ID_PREFIX: Final[str] = "evidence_id="
 
-#: The ledger entry ``agent/remediation.py`` writes for an attempt that did not end the
-#: incident (ADR 0056). Named HERE, in the lower module, because both planner contexts —
-#: this one and the remediation planner's — must pull it out of the evidence dump and
-#: render it whole, and a second spelling of the name is how one of them stops matching.
+#: Ledger entry for an attempt that did not end the incident (ADR 0056). Named here, in the
+#: lower module, because a second spelling is how one of its readers stops matching.
 ATTEMPT_FAILED_MARKER: Final[str] = "_remediation_attempt_failed"
 
-#: The ledger entry ``agent/remediation.py`` writes when a plan clears its guards, carrying the
-#: cause that plan targets. Named here for the same reason as the marker above: ``agent/
-#: incidents.py`` reads both to tell a cause this run acted on from one it only named.
+#: Ledger entry for a plan that cleared its guards, carrying the cause it targets. Read with
+#: the marker above to tell a cause this run acted on from one it only named.
 PLAN_MARKER: Final[str] = "_planner_plan"
 
-#: The ledger entry ``agent/remediation.py`` writes for one verify poll's verdict, as
-#: ``"<verdict>: <reasoning>"`` with ``{attempt, of}`` on its arguments. Named here with the
-#: other two because it now has three readers — the transition that writes it,
-#: ``evals/runner.py``'s not-verified count, and ``agent/run_reporting.py``'s verification
-#: report — and a spelling in three places is a rename that breaks two of them silently.
+#: Ledger entry for one verify poll's verdict, ``"<verdict>: <reasoning>"`` with
+#: ``{attempt, of}`` on its arguments. Three readers, so one spelling.
 VERIFY_JUDGE_MARKER: Final[str] = "_verify_judge"
 
 #: How that block is headed, in the words the model reads.
@@ -44,10 +36,8 @@ ALREADY_ATTEMPTED_HEADING: Final[str] = "Already attempted in this incident — 
 def render_already_attempted(evidence: Sequence[EvidenceEntry]) -> str:
     """The "Already attempted" block, or ``""`` when nothing has been attempted.
 
-    Rendered LAST and never truncated, for the same reason a plan refusal is: it is an
-    instruction about this run's own earlier decision, and a cut sentence is worse than
-    none. Empty for every run that has made no failed attempt, which is why adding this
-    left every pre-ADR-0056 prompt byte-identical.
+    Rendered last and never truncated: it is an instruction about this run's own earlier
+    decision, and a cut sentence is worse than none.
     """
     attempts = [entry for entry in evidence if entry.tool_name == ATTEMPT_FAILED_MARKER]
     if not attempts:
@@ -72,12 +62,10 @@ def format_planner_context(run_state: RunState, *, show_evidence_ids: bool = Fal
     if run_state.evidence:
         lines.append("Evidence so far:")
         for entry in run_state.evidence:
-            # Attempt records are pulled out and rendered whole at the end, like the
-            # remediation planner's refusal block.
+            # Attempt records are pulled out and rendered whole at the end.
             if entry.tool_name == ATTEMPT_FAILED_MARKER:
                 continue
-            # The id goes first, so a model scanning for something to cite finds it
-            # at a fixed offset on every line.
+            # Id first, so a model scanning for something to cite finds it at a fixed offset.
             cited = f"{EVIDENCE_ID_PREFIX}{entry.evidence_id} " if show_evidence_ids else ""
             lines.append(f"  - {cited}[{entry.tool_name}] {entry.result_summary}")
     else:

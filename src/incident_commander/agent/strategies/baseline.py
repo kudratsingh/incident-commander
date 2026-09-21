@@ -1,10 +1,8 @@
 """``baseline`` — the current behaviour, behind the seam and otherwise untouched.
 
-``plan_next_step`` calls the private ``investigation._plan_next_step`` **verbatim** — one
-planner call, wrapped by ``call_with_output_repair`` (ADR 0035) and accrued by
-``accrue_structured_call`` (ADR 0015) — rather than copying it: the control group's whole value
-is that it is not a re-implementation, and the canned suite comes out byte-identical (plan 04
-working rule 5).
+``plan_next_step`` calls ``investigation._plan_next_step`` **verbatim** rather than copying it:
+the control group's whole value is that it is not a re-implementation, and the canned suite
+comes out byte-identical.
 """
 
 from __future__ import annotations
@@ -43,27 +41,20 @@ class BaselineStrategy:
     config: Mapping[str, Any] = _NO_CONFIG
 
     def __init__(self, knobs: StrategyKnobs | None = None) -> None:
-        """Takes the inference block every registry factory is handed, and reads nothing.
-
-        The parameter exists so ``StrategyRegistry`` has one factory shape; ``baseline`` has no
-        knob, since one that changed it would make it a different arm.
-        """
+        """Takes the inference block every registry factory is handed, and reads nothing: one
+        factory shape for ``StrategyRegistry``. A knob here would make it a different arm."""
 
     def plan_next_step(
         self, run_state: RunState, at: datetime, ctx: StrategyContext
     ) -> tuple[RunState, InvestigationStep, StepRecord]:
-        """One planner call, plus the record of it.
-
-        Exceptions propagate as before the seam: the loop's ``except`` arm charges what the
-        failed call billed and escalates (ADR 0015, ADR 0035).
-        """
+        """One planner call, plus the record of it. Exceptions propagate: the loop's ``except``
+        arm charges what the failed call billed and escalates (ADR 0015)."""
         updated, step, call = _plan_next_step(
             run_state,
             at,
             ctx.llm_client,
             ctx.model,
-            # The step schema THIS call is made with. Whole unless the loop withdrew the
-            # probe for this step (ADR 0074); the arm itself decides nothing.
+            # Whole unless the loop withdrew this step's probe (ADR 0074); the arm decides nothing.
             ctx.step_model(InvestigationStep),
         )
         record = self._record(run_state, updated, step, call, ctx)
@@ -79,11 +70,8 @@ class BaselineStrategy:
         call: PlannerCall,
         ctx: StrategyContext,
     ) -> StepRecord:
-        """Build the step's ``StepRecord``.
-
-        One candidate — the planner's top hypothesis, the whole of what ``baseline``
-        considered; the rest of the ranking is ``hypothesis_state_after``.
-        """
+        """Build the step's ``StepRecord``: one candidate, the top hypothesis — the whole of
+        what ``baseline`` considered. The rest of the ranking is ``hypothesis_state_after``."""
         action = step.next_action
         top = step.hypotheses[0]
         candidate = CandidateRecord(
@@ -100,8 +88,7 @@ class BaselineStrategy:
             strategy=self.name,
             model=ctx.model,
             candidate_set=(candidate,),
-            # No selector: with one candidate there is nothing to select
-            # between (plan 02 § 7 — "null for baseline").
+            # No selector: with one candidate there is nothing to select between.
             selector=None,
             emitted_step=step,
             hypothesis_state_before=before.hypotheses,

@@ -853,7 +853,7 @@ class RunReporter:
             # The ranking this call produced, in both fields a console panel reads.
             payload["hypotheses"] = ranked_of(thinking.hypotheses)
             payload["current_hypothesis"] = top_of(thinking.hypotheses)
-            self._deliver(payload, narrow_retry=False)
+            self._deliver(payload, narrow_retry=False, may_narrow=False)
         except Exception as err:  # noqa: BLE001 - telemetry may never fail a transition
             self._note(f"{REPORT_RUN_TOOL}: reporting the run's thinking failed: {err}")
         return True
@@ -1028,12 +1028,22 @@ class RunReporter:
 
     # -- sending it ---------------------------------------------------------
 
-    def _deliver(self, payload: dict[str, Any], *, narrow_retry: bool) -> None:
+    def _deliver(
+        self, payload: dict[str, Any], *, narrow_retry: bool, may_narrow: bool = True
+    ) -> None:
         """Send one report, narrowing once if this platform does not know the new fields.
 
         ``narrow_retry`` says whether the narrow form of THIS report is worth sending after
         a refusal. False for an intermediate step report: the narrow form would carry only
         the state, which the report at the end of the same call is about to send anyway.
+
+        ``may_narrow`` says whether a refusal of THIS report is evidence about the PLATFORM.
+        False for a thinking report (ADR 0075), and the reasoning is the narrowing's own: the
+        latch means "this platform does not declare the widened input", and an older platform
+        has already proved that by refusing the run's first transition report, which carries
+        `hypotheses` and `budget`. So a refusal that arrives here, on a platform that accepted
+        those, is about this one ``report``-kind step — and latching on it would cost the rest
+        of the run every widened field to punish one telemetry row. Noted and dropped instead.
         """
         if self._widened:
             body = self._validated(payload)
@@ -1046,8 +1056,12 @@ class RunReporter:
                     # A transport failure, a scope refusal or a run-level one. Already
                     # logged, and none of them is helped by sending fewer fields.
                     return
+                if not may_narrow:
+                    return
                 self._narrow(f"the platform refused the widened report: {delivery.refusal}")
             else:
+                if not may_narrow:
+                    return
                 self._narrow("the reporter's own widened payload failed local validation")
             if not narrow_retry:
                 return

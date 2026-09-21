@@ -1763,6 +1763,18 @@ def run_scenario(
             # sequence instead.
             if (timing := temporal_timing_refusal(scenario, settings)) is not None:
                 raise ChaosSetupFailed(timing)
+            if world_already_faulted and chaos_plan.self_recovering:
+                # A temporal template's evaluator timeline (WP-14.1, ADR 0062) is read off the
+                # SEEDING record's own ``expires_at``, and a run that seeded nothing has none —
+                # so the grade would silently lose the one dimension the family exists to
+                # measure. Refused rather than degraded, and refused as a SETUP failure so the
+                # row is ungraded rather than scored against a timeline nobody recorded.
+                raise ChaosSetupFailed(
+                    f"scenario {scenario.name!r} declares a derived TTL, and "
+                    f"{WORLD_ALREADY_FAULTED_FLAG} skips the seeding its expiry is read "
+                    "from. A self-expiring fault has to be fired by the run that grades "
+                    "it, or the recovery clock is a number nobody measured."
+                )
             if world_already_faulted:
                 # ADR 0075: the hooks fired before this call, so firing them again would put a
                 # second `chaos.tool_invoked` row in the take and give every audit-anchored
@@ -2105,9 +2117,18 @@ def run_scenario(
         else:
             # ``chaos_records`` holds the SETUP hooks here (teardown runs after
             # grading); a canned run seeded nothing and is in the label's world anyway.
+            #
+            # ``or world_already_faulted`` because INC-003's rule asks whether the world was
+            # MANUFACTURED, and its "live but nothing seeded" case is the smoke pass — a run
+            # against a healthy world. This mode is the opposite: the fault exists, somebody
+            # else fired the hook, and the precondition probes above are what make that a
+            # verified fact rather than a claim (an unmet premise abandons the run before any
+            # model call). Without this, the demo's own rehearsal would hold back its
+            # ROOT_CAUSE grade saying "a live run that seeded no fault" — which would be
+            # false, and would make the flag quietly change what the run measures.
             world_matches_ground_truth = label_describes_this_world(
                 live_mcp=live_mcp_available,
-                chaos_seeded=seeded_chaos(chaos_records),
+                chaos_seeded=seeded_chaos(chaos_records) or world_already_faulted,
             )
         report = grade(
             final,
@@ -3638,12 +3659,16 @@ def main() -> int:
         # what is real, what is not, and what the row may therefore be used for. The last
         # sentence is the one that matters on a day somebody finds this report in six
         # months (ADR 0069).
+        seeding = (
+            "somebody else seeded the fault and this run leaves the hooks alone"
+            if world_already_faulted
+            else "this seeds a fault, acts on the world and resets it"
+        )
         print(
-            f"mode: {REHEARSAL_MODE} — the platform is REAL (this seeds a fault, acts on "
-            "the world and resets it) and the planner is the scenario's scripted one. "
-            "Nothing is spent. Every row is stamped degraded=True with a rehearsal "
-            "provenance flag: this report measures the DEMO, never the agent, and no "
-            "phase-close or research report will count it."
+            f"mode: {REHEARSAL_MODE} — the platform is REAL ({seeding}) and the planner is "
+            "the scenario's scripted one. Nothing is spent. Every row is stamped "
+            "degraded=True with a rehearsal provenance flag: this report measures the DEMO, "
+            "never the agent, and no phase-close or research report will count it."
         )
     offline_mcp = _is_offline_placeholder(str(settings.platform_mcp_url))
     offline_llm = _is_offline_api_key(settings.anthropic_api_key.get_secret_value())

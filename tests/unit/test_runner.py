@@ -28,6 +28,7 @@ from evals.graders.deterministic import (
     GradeReport,
     ScenarioExpectation,
 )
+from evals.graders.root_cause import is_not_graded_detail
 from evals.runner import (
     _SCENARIOS_DIR,
     EXTERNAL_CHAOS_SEEDER,
@@ -59,6 +60,7 @@ from evals.scenarios.schema import (
     PreconditionProbe,
     Scenario,
     ScenarioDifficulty,
+    TtlFromWindows,
 )
 from incident_commander.agent import factory
 from incident_commander.agent.briefing import EscalationBriefing
@@ -4546,6 +4548,50 @@ class TestTheWorldMayAlreadyBeFaulted:
 
         with pytest.raises(PreconditionNotMet):
             run_scenario(self._scenario(), settings, world_already_faulted=True)
+
+    def test_the_root_cause_label_still_describes_this_world(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """INC-003's "live but nothing seeded" case is the SMOKE pass, not this one.
+
+        Read off the grade rather than off the predicate: a run whose ROOT_CAUSE came back
+        "not graded — a live run that seeded no fault" would be saying something false, and the
+        flag would quietly change what the run measures instead of who fired the hook. The
+        premise probes are what make it a verified fact (an unmet premise abandons the run).
+        """
+        self._no_chaos_may_fire(monkeypatch)
+        self._live_client(monkeypatch)
+        settings = _test_settings(platform_mcp_url="http://real.host:8001/mcp")
+
+        result = run_scenario(self._scenario(), settings, world_already_faulted=True)
+
+        root_cause = next(
+            d for d in result.outcome.report.dimensions if d.dimension is GradeDimension.ROOT_CAUSE
+        )
+        assert not is_not_graded_detail(root_cause.detail), root_cause.detail
+
+    def test_a_self_expiring_fault_may_not_be_seeded_elsewhere(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A temporal template's recovery clock is read off the seeding it would skip."""
+        self._no_chaos_may_fire(monkeypatch)
+        self._live_client(monkeypatch)
+        temporal = self._scenario().model_copy(
+            update={
+                "chaos_setup": ChaosHook(
+                    name="kill_consumer",
+                    arguments={"consumer_group": "billing"},
+                    ttl_from_windows=TtlFromWindows(
+                        floor_seconds=60,
+                        floor_reason="the lag metric refreshes on a 60-second interval",
+                    ),
+                )
+            }
+        )
+        settings = _test_settings(platform_mcp_url="http://real.host:8001/mcp")
+
+        with pytest.raises(ChaosSetupFailed, match="derived TTL"):
+            run_scenario(temporal, settings, world_already_faulted=True)
 
     def test_the_flag_is_refused_with_a_recorded_run(
         self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]

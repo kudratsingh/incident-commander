@@ -147,7 +147,17 @@ safe: it is safe for the WORLD — measured, and `kill_consumer` genuinely re-ar
 the RECORD, which is the half that sentence left out.
 
 **The premise is still checked, deliberately.** Whether the fault is there is the one question
-this flag does not get to answer; all it says is who manufactured it.
+this flag does not get to answer; all it says is who manufactured it. And because the premise IS
+checked, the flag counts as `chaos_seeded` for INC-003's rule
+(`root_cause.label_describes_this_world`): that rule asks whether the world was MANUFACTURED, and
+its "live but nothing seeded" case is the smoke pass — a run against a healthy world. Without
+that, the demo's own rehearsal would hold back its ROOT_CAUSE grade saying "a live run that seeded
+no fault", which would be false and would make the flag quietly change what the run measures.
+
+**A self-expiring fault may not be seeded elsewhere.** A temporal template's evaluator timeline
+(WP-14.1, ADR 0062) is read off the seeding record's own `expires_at`, so a run that seeded
+nothing has none. Refused as a SETUP failure rather than degraded, so the row is ungraded instead
+of scored against a recovery clock nobody measured.
 
 **Teardown is skipped with the seeding, for symmetry.** A compensator undoes what its setup hook
 did, and this run's setup did nothing. Firing them anyway would put a SUCCESSFUL
@@ -235,9 +245,10 @@ Negative:
   `_thinking_action`/`_action_reason` in `agent/investigation.py`; the verdict write in
   `agent/remediation.py`; `probe_label` in `evals/preconditions.py`; `_precondition_reader`,
   `--world-already-faulted`, `EXTERNAL_CHAOS_SEEDER` and `RunProvenance.chaos_seeded_by` in
-  `evals/runner.py`; `_ABSENCE_IS_AN_ANSWER` in `evals/baseline_report.py`; the step-5 flag and
-  the rewritten docstring in `scripts/demo_live.py`; `WORLD_ALREADY_FAULTED` in the `eval-live`
-  recipe.
+  `evals/runner.py` (plus the `or world_already_faulted` on INC-003's
+  `label_describes_this_world` call and the derived-TTL refusal beside the skip);
+  `_ABSENCE_IS_AN_ANSWER` in `evals/baseline_report.py`; the step-5 flag and the rewritten
+  docstring in `scripts/demo_live.py`; `WORLD_ALREADY_FAULTED` in the `eval-live` recipe.
 * Red-before/green-after, offline and free: `tests/unit/test_loop.py::
   TestAStatesTimestampIsTheMomentItWasEntered` (4 of its 5 red on `main`),
   `tests/unit/test_run_reporting.py::TestThePlannersThinkingIsReportedAsItHappens`,
@@ -249,6 +260,13 @@ Negative:
 * The take this is written from is run `1f14d3f6-768c-5f5a-8409-eb13cd414103`, archive
   `6f657c6ca613`, and the coordinator's reading of its audit stream in
   `audit-ws/.coordination/briefs/brief-demo-v4.md`.
+* Measured on the v0.6.17 stack, free, `AUTO=1`, both demo modes: each take's audit stream holds
+  exactly ONE fault row (`chaos.tool_invoked`, `outcome: success`, no `lab_probe_reason`) —
+  `kill_consumer` at 04:16:32 and `poison_message` at 04:19:15 — with the principal guards'
+  `inject_latency` rows carrying their label beside them, and every world-audit and premise read
+  arriving as `lab.probe`. `phase_history` on `5baf113c` runs triage → investigating → planning
+  at .248 / .268 / .310 while the two planner rankings report at .278 and .302: PLANNING is
+  stamped AFTER the last planner call, which is the claim, and before ADR 0075 it carried .268.
 * No platform change: the step enum has carried `report` since v0.6.16, and the lab-probe field
   and header since v0.6.17. `tools/list` is unchanged.
 * Not done here and not needed for the fix: no live or paid run. The owner's fifth take is what

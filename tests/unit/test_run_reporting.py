@@ -1949,6 +1949,49 @@ class TestThePlannersThinkingIsReportedAsItHappens:
         assert reporter.thinking_sent == 0
         assert log.dropped == 1
 
+    def test_a_refused_thinking_row_does_not_thin_the_rest_of_the_run(
+        self, run_state: RunState, now: datetime
+    ) -> None:
+        """A platform that took the widened transition report is not an older platform.
+
+        The narrowing latch means "this platform does not declare the widened input", which an
+        older one proves by refusing the FIRST transition report. A refusal here is about this
+        one ``report``-kind step, and latching on it would cost the rest of the run every
+        widened field to punish one telemetry row.
+        """
+
+        class _RefusesOnlyThinking(_RecordingClient):
+            def call_tool(
+                self,
+                name: str,
+                arguments: Mapping[str, Any],
+                *,
+                timeout_seconds: float | None = None,
+            ) -> ToolResult:
+                step = arguments.get("step")
+                if isinstance(step, Mapping) and step.get("kind") == "report":
+                    raise MCPError(-32602, "invalid tool arguments", {"detail": "step.kind"})
+                return super().call_tool(name, arguments, timeout_seconds=timeout_seconds)
+
+        client = _RefusesOnlyThinking()
+        log = PlannerLog()
+        reporter = _reporter(client, planner_log=log)
+        reporter.report(_with(run_state, state=IncidentState.INVESTIGATING))
+
+        log.ranking(
+            tool=PLANNER_TOOL,
+            hypotheses=self._rank(0.8, "saturation"),
+            next_action=ThinkingAction(kind="remediate"),
+            reason="act on it",
+        )
+        reporter.report(_with(run_state, state=IncidentState.PLANNING))
+
+        assert reporter.widened, "one refused thinking row narrowed the whole run"
+        assert reporter.narrowed_because is None
+        assert reporter.failures, "the refusal was swallowed without being recorded"
+        # And the later transition report still carries the widened fields.
+        assert "hypotheses" in client.arguments_for(REPORT_RUN_TOOL)[-1]
+
     def test_a_raising_sink_never_escapes_the_log(self, now: datetime) -> None:
         """``observe`` runs inside a transition, between an LLM call and the loop's decision."""
         log = PlannerLog()

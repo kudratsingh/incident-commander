@@ -52,6 +52,7 @@ from incident_commander.agent.state import (
     IncidentState,
     RunState,
 )
+from incident_commander.agent.thinking import ObservedThinking, PlannerLog
 from incident_commander.config import DEFAULT_MAX_REMEDIATION_ATTEMPTS
 from incident_commander.llm.client import LLMError, LLMResult, LLMUsage
 from incident_commander.llm.fakes import CannedLLMClient, CannedUsage
@@ -4864,3 +4865,64 @@ class TestTheSecondCauseGate:
         assert _GROUP_ALERT["consumer_group"], "the fixture alert must name a subject"
         run = self._run((HypothesisCategory.STALE_CACHE, "stale_lag_sensor", 0.8))
         assert self._verify()(run, _now()).state is IncidentState.INVESTIGATING
+
+
+def _appends_to(seen: list[ObservedThinking]) -> Callable[[ObservedThinking], bool]:
+    """A ``PlannerLog`` sink that keeps every observation and always answers "sent"."""
+
+    def sink(thinking: ObservedThinking) -> bool:
+        seen.append(thinking)
+        return True
+
+    return sink
+
+
+class TestTheVerifyVerdictIsReportedWhenTheJudgeReturns:
+    """ADR 0075: a verify leg polls for minutes, and until now every verdict arrived at the end.
+
+    ``phase_history`` gave the whole leg one stamp, and the verdicts reached a watching
+    operator only when it ended — so a run polling four times against the platform's 60-second
+    lag clock showed nothing at all while it worked.
+    """
+
+    def test_each_poll_writes_its_verdict_with_its_ordinals(self) -> None:
+        log = PlannerLog()
+        seen: list[ObservedThinking] = []
+        log.subscribe(_appends_to(seen))
+        llm = CannedLLMClient(
+            [
+                {"verdict": "not_verified", "reasoning": "lag still 50k"},
+                {"verdict": "verified", "reasoning": "lag drained to 0"},
+            ]
+        )
+        transition = make_llm_verify(
+            _lag_mcp(0),
+            llm,
+            model=_MODEL,
+            probe_attempts=2,
+            planner_log=log,
+        )
+        run = _run_state(state=IncidentState.VERIFYING, remediation_plan=_plan_dict())
+
+        result = transition(run, _now())
+
+        assert result.state is IncidentState.RESOLVED
+        assert [t.tool for t in seen] == ["verify_judge", "verify_judge"]
+        assert [t.headline for t in seen] == ["verify 1/2 not_verified", "verify 2/2 verified"]
+        assert [t.reason for t in seen] == ["lag still 50k", "lag drained to 0"]
+        # A verdict judges the action; it does not choose a next move.
+        assert [t.next_action for t in seen] == [None, None]
+
+    def test_no_log_changes_nothing_about_the_leg(self) -> None:
+        def build(log: PlannerLog | None) -> RunState:
+            llm = CannedLLMClient([{"verdict": "verified", "reasoning": "lag=0 after restart"}])
+            transition = make_llm_verify(_lag_mcp(0), llm, model=_MODEL, planner_log=log)
+            run = _run_state(state=IncidentState.VERIFYING, remediation_plan=_plan_dict())
+            return transition(run, _now())
+
+        watched = PlannerLog()
+        watched.subscribe(lambda _thinking: True)
+        bare, observed = build(None), build(watched)
+        assert bare.state is observed.state
+        assert [e.tool_name for e in bare.evidence] == [e.tool_name for e in observed.evidence]
+        assert bare.budget == observed.budget

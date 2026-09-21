@@ -72,6 +72,47 @@ def _accrue_wall_time(run_state: RunState, now: datetime) -> RunState:
     )
 
 
+def _stamp_entered(
+    run_state: RunState, *, dispatched_at: datetime, entered: datetime, evidence_before: int
+) -> RunState:
+    """Stamp the state a transition produced with the moment it was ENTERED (ADR 0075).
+
+    ``dispatch`` is handed the iteration's START time, and every transition stamps the state
+    it returns with that reading — so the owner's fourth take reported "investigating · 10 ms"
+    for an investigation that ran for 22 seconds and three planner calls, and gave PLANNING
+    the timestamp of the moment INVESTIGATING began. Every transition stamp was the time the
+    transition function was ENTERED rather than the time the new state was.
+
+    **Structural, and in the loop rather than in the twenty call sites that write the stamp.**
+    The alternative the work order offered — pass ``clock`` into the transitions and read it at
+    the point of decision — was rejected for two reasons. It would change the ``Transition``
+    signature and every function that implements it, when the fact being recorded is not a
+    transition's fact at all: "the moment the new state was entered" is the moment control
+    came back to the loop, which only the loop can observe. And a stamp each transition took
+    for itself is a stamp twenty functions can drift on, which is the shape of the bug being
+    fixed. So the loop owns it, unconditionally: ``ALLOWED_TRANSITIONS`` has no self-loop, so a
+    dispatch that returned always produced a state that was entered exactly now.
+
+    ``entered`` is the reading ``_accrue_wall_time`` already takes after the transition, so the
+    honest stamp costs no extra clock read — the two facts were always meant to be the same
+    one.
+
+    The transition's own evidence entry is restamped with it too, under three conditions that
+    keep it to the row the transition wrote to record its exit: the entry was APPENDED by this
+    dispatch, it still carries the iteration's start time, and it is an underscore-prefixed
+    bookkeeping marker (the repo-wide convention for a row that is the loop talking rather than
+    a call the platform answered). A real tool entry is left alone on purpose — its timestamp
+    is about the read, not about the transition.
+    """
+    entries = run_state.evidence
+    update: dict[str, object] = {"updated_at": entered}
+    if len(entries) > evidence_before:
+        last = entries[-1]
+        if last.timestamp == dispatched_at and last.tool_name.startswith("_"):
+            update["evidence"] = (*entries[:-1], last.model_copy(update={"timestamp": entered}))
+    return run_state.model_copy(update=update)
+
+
 def run_to_completion(
     run_state: RunState,
     clock: Callable[[], datetime],
@@ -98,8 +139,9 @@ def run_to_completion(
     while not run_state.state.is_terminal:
         if steps >= max_steps:
             raise MaxStepsExceededError(f"run did not terminate within {max_steps} steps")
-        # One clock read per iteration, shared by the wall meter and the
-        # transition stamp — the meter costs no extra reads.
+        # The moment this iteration STARTED. Handed to the transition, which is what its
+        # own reads and refusals are stamped with; the state it produces is stamped with
+        # the second reading below instead (ADR 0075).
         now = clock()
         run_state = _accrue_wall_time(run_state, now)
         # Both exemptions cover wall/USD exhaustion too, not just tool calls,
@@ -108,6 +150,7 @@ def run_to_completion(
         if run_state.budget.is_exhausted and exemption is None:
             run_state = _escalate(run_state, "budget exhausted", now)
         else:
+            evidence_before = len(run_state.evidence)
             try:
                 run_state = dispatch(run_state, now, transitions=transitions)
             except BaseException:
@@ -116,8 +159,17 @@ def run_to_completion(
                 if checkpointer is not None:
                     checkpointer.write(run_state)
                 raise
-            # Read again so a terminal transition records its own duration.
-            run_state = _accrue_wall_time(run_state, clock())
+            # Read again so a terminal transition records its own duration — and so the
+            # state it produced is stamped with the moment it was ENTERED (ADR 0075).
+            # ONE read, shared by the meter and the stamp: they are the same fact.
+            entered = clock()
+            run_state = _stamp_entered(
+                run_state,
+                dispatched_at=now,
+                entered=entered,
+                evidence_before=evidence_before,
+            )
+            run_state = _accrue_wall_time(run_state, entered)
         if checkpointer is not None:
             checkpointer.write(run_state)
         steps += 1

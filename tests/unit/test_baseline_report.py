@@ -173,6 +173,11 @@ def test_every_provenance_field_is_stamped_and_answered(tmp_path: Path) -> None:
         if field in baseline._PER_SCENARIO:
             continue
         assert field in stamp, field
+        if field in baseline._ABSENCE_IS_AN_ANSWER:
+            # Stamped, and ``None`` is the answer: the offline suite seeds its own worlds,
+            # so nobody external fired a hook (ADR 0075). The field is still asserted
+            # PRESENT above — the claim is about a missing value, not a missing field.
+            continue
         assert str(stamp[field]).strip().lower() not in baseline._PLACEHOLDERS, field
     # The seeded and used budgets are kept per scenario, not collapsed.
     assert {row["scenario"] for row in stamp["budgets_seeded_and_used"]} == {

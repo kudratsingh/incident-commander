@@ -47,6 +47,14 @@ the shape of this module rather than details of it:
   hook fires on it, and that is where the report goes out. A transition still reports at the
   transition — the checkpoint seam is immediate already — and the only batching left is the
   one the platform forces: a terminal state closes the run, so the terminal report goes LAST.
+* **And so does the thinking between them** (ADR 0075). A tool call has a client seam; a
+  planner ranking has none, so the fourth take's three rankings — decided over 22 seconds —
+  reached the platform together at the end, and the page showed the agent considering nothing
+  for the whole investigation. ``PlannerLog`` (``agent/thinking.py``) is the seam for the
+  reasoning, this module subscribes to it in the constructor beside ``ToolCallLog``, and each
+  accepted ranking leaves as one report carrying that ranking and one ``report``-kind step. A
+  ``report`` step is not a call: it counts against no budget, it is not the run's ``last_step``,
+  and the platform's step enum has had the kind since v0.6.16, so nothing changes there.
 
 **Forward compatibility is deliberate.** The widened fields are additive and optional, and
 the platform's input model forbids unknown ones, so a commander built against v0.6.16 and
@@ -70,12 +78,14 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from incident_commander.agent.briefing import EscalationBriefing
+from incident_commander.agent.hypothesis import Hypothesis
 from incident_commander.agent.orchestrator import Checkpointer
 from incident_commander.agent.planner_context import (
     ATTEMPT_FAILED_MARKER,
     VERIFY_JUDGE_MARKER,
 )
 from incident_commander.agent.state import EvidenceEntry, RunState
+from incident_commander.agent.thinking import ObservedThinking, PlannerLog
 from incident_commander.tools.mcp_client import MCPClientProtocol, MCPError
 from incident_commander.tools.policies import Tier, tier_of
 
@@ -213,9 +223,10 @@ class _Step(BaseModel):
 
     #: The contract's bound is ``>= 0``; this reporter's own first step is 1.
     seq: int = Field(ge=0)
-    # ``report`` is in the platform's enum and this module never sends one: a report step
-    # could only describe filing the briefing, which happens after the terminal report has
-    # closed the run. Accepted here so the mirror matches the contract it mirrors.
+    # ``report`` is the platform's own word for a row that is the agent TELLING the operator
+    # something rather than a call it made, and since ADR 0075 this module sends them: one per
+    # accepted planner ranking and one per verify verdict. It counts against no budget and is
+    # never the run's ``last_step`` (whose own kind has no such member).
     kind: Literal["read", "action", "report"]
     tool: str = Field(max_length=128)
     arguments: dict[str, Any] = Field(default_factory=dict)
@@ -477,9 +488,19 @@ def top_hypothesis(run_state: RunState) -> dict[str, Any] | None:
     the console shows the hypothesis the run is actually acting on. ``None`` before the
     first investigation step, which the tool reads as "no explanation yet".
     """
-    if not run_state.hypotheses:
+    return top_of(run_state.hypotheses)
+
+
+def top_of(hypotheses: Sequence[Hypothesis]) -> dict[str, Any] | None:
+    """``top_hypothesis`` over a ranking that is not (yet) the run state's.
+
+    Split out for ADR 0075: a thinking report goes out mid-transition, so the ranking it
+    carries is the one the planner call just produced rather than the one the last
+    checkpoint holds. One renderer either way, or the two would cap differently.
+    """
+    if not hypotheses:
         return None
-    top = run_state.hypotheses[0]
+    top = hypotheses[0]
     return {
         "name": _capped(top.name, _MAX_NAME_CHARS),
         "category": _capped(top.category.value, _MAX_CATEGORY_CHARS),
@@ -501,7 +522,12 @@ def ranked_hypotheses(run_state: RunState) -> list[dict[str, Any]] | None:
     "it considered nothing", a claim no run makes: hypotheses carry over across a
     reinvestigation (ADR 0056), so a run that has a ranking never goes back to having none.
     """
-    if not run_state.hypotheses:
+    return ranked_of(run_state.hypotheses)
+
+
+def ranked_of(hypotheses: Sequence[Hypothesis]) -> list[dict[str, Any]] | None:
+    """``ranked_hypotheses`` over a ranking that is not (yet) the run state's (ADR 0075)."""
+    if not hypotheses:
         return None
     return [
         {
@@ -510,7 +536,7 @@ def ranked_hypotheses(run_state: RunState) -> list[dict[str, Any]] | None:
             "confidence": hypothesis.confidence,
             "reasoning_excerpt": _excerpt(hypothesis.reasoning, _MAX_EXCERPT_CHARS),
         }
-        for hypothesis in run_state.hypotheses
+        for hypothesis in hypotheses
     ]
 
 
@@ -670,6 +696,7 @@ class RunReporter:
         run_label: str | None = None,
         alert_id: UUID | None = None,
         tool_log: ToolCallLog | None = None,
+        planner_log: PlannerLog | None = None,
     ) -> None:
         self._client = client
         self._run_id = str(run_id)
@@ -708,6 +735,7 @@ class RunReporter:
         self.narrowed_because: str | None = None
         self.reports_sent = 0
         self.steps_sent = 0
+        self.thinking_sent = 0
         self.verifications_sent = 0
         self.briefing_sent = False
         if tool_log is not None:
@@ -715,6 +743,10 @@ class RunReporter:
             # reported. Subscribed here rather than wired by the runner, so nobody can build a
             # reporter with a log and get the old queued behaviour by omission.
             tool_log.subscribe(self._report_call)
+        if planner_log is not None:
+            # ADR 0075, and here for the same reason: the loop writes a ranking the moment it
+            # accepts one, and a reporter handed the log cannot end up queueing them.
+            planner_log.subscribe(self._report_thinking)
 
     @property
     def run_id(self) -> str:
@@ -796,6 +828,36 @@ class RunReporter:
             self._note(f"{REPORT_RUN_TOOL}: reporting a live step failed: {err}")
         return True
 
+    def _report_thinking(self, thinking: ObservedThinking) -> bool:
+        """Report one accepted ranking or verdict as its own ``report`` step, now (ADR 0075).
+
+        The ranking on the payload is the observation's OWN, not the last checkpoint's: the
+        report leaves mid-transition, and ``_last_state`` still holds the ranking the run had
+        before this call. That stale number is exactly what the owner's fourth take showed —
+        three rankings, one of them visible.
+
+        ``False`` means "nobody sent it": before the first transition report there is no state
+        to stamp a report with, and on a narrowed platform there is no step field to carry one.
+        The ranking still reaches the console at the next transition report, which has carried
+        ``hypotheses`` since WO-R3-329.
+
+        Never raises. It is called from inside a transition, between the LLM call and the loop's
+        decision about it.
+        """
+        state = self._last_state
+        if state is None or not self._widened:
+            return False
+        try:
+            item = self._thinking_step(thinking)
+            payload = self._payload(state, item=item, final=False)
+            # The ranking this call produced, in both fields a console panel reads.
+            payload["hypotheses"] = ranked_of(thinking.hypotheses)
+            payload["current_hypothesis"] = top_of(thinking.hypotheses)
+            self._deliver(payload, narrow_retry=False, may_narrow=False)
+        except Exception as err:  # noqa: BLE001 - telemetry may never fail a transition
+            self._note(f"{REPORT_RUN_TOOL}: reporting the run's thinking failed: {err}")
+        return True
+
     # -- assembling one report ----------------------------------------------
 
     def _pending(self, run_state: RunState) -> list[_Pending]:
@@ -860,6 +922,28 @@ class RunReporter:
             at=call.at,
         )
 
+    def _thinking_step(self, thinking: ObservedThinking) -> _Pending:
+        """One accepted ranking or verdict as a ``report``-kind step (ADR 0075).
+
+        ``seq`` comes from the same counter the tool steps use, so the ledger's order is the
+        order the run made its moves in — a ranking, the probe it chose, the next ranking.
+        ``latency_ms`` is deliberately absent: the planner call's own elapsed time is on the
+        strategy's ``StepRecord``, which is research data the loop does not read.
+        """
+        return self._new_step(
+            tool=thinking.tool,
+            arguments={
+                "ranking": thinking.ranking(),
+                "next_action": thinking.action(),
+                "reason": thinking.reason,
+            },
+            result_excerpt=_excerpt(thinking.sentence(), _MAX_RESULT_EXCERPT_CHARS),
+            outcome="ok",
+            latency_ms=None,
+            at=thinking.at,
+            kind="report",
+        )
+
     def _new_step(
         self,
         *,
@@ -869,6 +953,7 @@ class RunReporter:
         outcome: str,
         latency_ms: int | None,
         at: datetime,
+        kind: str | None = None,
     ) -> _Pending:
         self._seq += 1
         return _Pending(
@@ -877,7 +962,7 @@ class RunReporter:
                     # Monotonic across the run, and the platform treats a REPEATED seq as a
                     # no-op (plat #230) — so a retried report cannot double a row.
                     "seq": self._seq,
-                    "kind": _step_kind(tool),
+                    "kind": _step_kind(tool) if kind is None else kind,
                     "tool": _capped(tool, _MAX_NAME_CHARS),
                     "arguments": arguments,
                     "result_excerpt": result_excerpt,
@@ -917,7 +1002,11 @@ class RunReporter:
         if item is not None:
             payload.update(item.payload)
             step = item.payload.get("step")
-            if step is not None:
+            # A ``report`` step is not a call the run made, so it never becomes its
+            # ``last_step`` — and could not: v0.6.15's ``last_step.kind`` has two members and
+            # ``report`` is not one of them, so writing it there would refuse the whole report
+            # and narrow every later one (ADR 0075).
+            if step is not None and step["kind"] != "report":
                 # The old field walks forward with the new one, so an operator reading
                 # either sees the same call.
                 payload["last_step"] = {
@@ -939,12 +1028,22 @@ class RunReporter:
 
     # -- sending it ---------------------------------------------------------
 
-    def _deliver(self, payload: dict[str, Any], *, narrow_retry: bool) -> None:
+    def _deliver(
+        self, payload: dict[str, Any], *, narrow_retry: bool, may_narrow: bool = True
+    ) -> None:
         """Send one report, narrowing once if this platform does not know the new fields.
 
         ``narrow_retry`` says whether the narrow form of THIS report is worth sending after
         a refusal. False for an intermediate step report: the narrow form would carry only
         the state, which the report at the end of the same call is about to send anyway.
+
+        ``may_narrow`` says whether a refusal of THIS report is evidence about the PLATFORM.
+        False for a thinking report (ADR 0075), and the reasoning is the narrowing's own: the
+        latch means "this platform does not declare the widened input", and an older platform
+        has already proved that by refusing the run's first transition report, which carries
+        `hypotheses` and `budget`. So a refusal that arrives here, on a platform that accepted
+        those, is about this one ``report``-kind step — and latching on it would cost the rest
+        of the run every widened field to punish one telemetry row. Noted and dropped instead.
         """
         if self._widened:
             body = self._validated(payload)
@@ -957,8 +1056,12 @@ class RunReporter:
                     # A transport failure, a scope refusal or a run-level one. Already
                     # logged, and none of them is helped by sending fewer fields.
                     return
+                if not may_narrow:
+                    return
                 self._narrow(f"the platform refused the widened report: {delivery.refusal}")
             else:
+                if not may_narrow:
+                    return
                 self._narrow("the reporter's own widened payload failed local validation")
             if not narrow_retry:
                 return
@@ -986,8 +1089,15 @@ class RunReporter:
         """Book what the platform accepted, so the summary line is about what landed."""
         self.reports_sent += 1
         self._state_reported = str(body["state"])
-        if "step" in body:
-            self.steps_sent += 1
+        step = body.get("step")
+        if isinstance(step, Mapping):
+            # Counted apart, because "N steps reported" is compared against the platform's own
+            # ``agent.tool_invoked`` rows for this run, and a thinking row is not a call
+            # (WO-R3-336's counts line). One counter each, so neither number needs a caveat.
+            if step.get("kind") == "report":
+                self.thinking_sent += 1
+            else:
+                self.steps_sent += 1
         if "verification" in body:
             self.verifications_sent += 1
         plan = body.get("plan")
@@ -1145,6 +1255,7 @@ def summarize(reporter: RunReporter | None) -> str:
         f"agent-run reporting: run {reporter.run_id}",
         f"{reporter.reports_sent} report(s) accepted",
         f"{reporter.steps_sent} step(s)",
+        f"{reporter.thinking_sent} thinking step(s)",
         f"{reporter.verifications_sent} verification(s)",
         f"briefing {'sent' if reporter.briefing_sent else 'NOT sent'}",
     ]

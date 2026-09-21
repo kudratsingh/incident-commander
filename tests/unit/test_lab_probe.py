@@ -16,12 +16,14 @@ import json
 from collections.abc import Mapping
 from datetime import UTC, datetime
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, Final
 
 import httpx
 import pytest
 from pydantic import SecretStr
 
+from evals import runner
 from evals import world_audit as audit
 from evals.guards import (
     _CHAOS_PROBE_TOOL,
@@ -33,7 +35,10 @@ from evals.guards import (
     assert_read_only_principal,
     assert_write_capable_principal,
 )
+from evals.preconditions import probe_label
 from evals.runner import _eval_defaults, _lab_probe_credential
+from evals.scenarios.loader import load_scenarios
+from evals.scenarios.schema import Scenario
 from incident_commander.tools.mcp_client import (
     LAB_PRINCIPAL_HEADER,
     LAB_PROBE_PARAM,
@@ -46,7 +51,8 @@ from incident_commander.tools.mcp_client import (
     ToolResult,
 )
 
-_SRC: Final[Path] = Path(__file__).resolve().parents[2] / "src" / "incident_commander"
+_REPO_ROOT: Final[Path] = Path(__file__).resolve().parents[2]
+_SRC: Final[Path] = _REPO_ROOT / "src" / "incident_commander"
 
 #: The lab credential the fake platform will honour, and one it will not.
 _LAB_TOKEN: Final[str] = "chaos-or-smoke-token"
@@ -491,3 +497,96 @@ class TestTheRunnersCredential:
     def test_an_unset_or_blank_token_means_no_label(self, value: SecretStr | None) -> None:
         settings = _eval_defaults().model_copy(update={"platform_chaos_token": value})
         assert _lab_probe_credential(settings) is None
+
+
+class TestThePremiseReadsAreTheLabs:
+    """ADR 0075 (the fourth take's false warning): the precondition probes are the lab's.
+
+    They go out on the AGENT's token on purpose — the premise has to be true of the world the
+    agent will see — so without a label the platform writes them as ``agent.tool_invoked``. The
+    console counted one such row against the four steps the run reported and printed "4 steps
+    reported · 5 calls the platform recorded — the two do not agree". The fifth call was this.
+    """
+
+    @staticmethod
+    def _scenario() -> Scenario:
+        return next(
+            s
+            for s in load_scenarios(_REPO_ROOT / "evals" / "scenarios")
+            if s.name == "remediate_consumer_lag_success"
+        )
+
+    @staticmethod
+    def _lag(lag: int) -> ToolResult:
+        return ToolResult(
+            content=[
+                {
+                    "type": "text",
+                    "text": json.dumps(
+                        {
+                            "consumer_group": "worker-dispatcher",
+                            "lag": lag,
+                            "lag_known": True,
+                            "source": "live",
+                            "age_seconds": 3,
+                        }
+                    ),
+                }
+            ]
+        )
+
+    def test_every_premise_read_carries_the_labs_reason_and_credential(self) -> None:
+        scenario = self._scenario()
+        client = _Recorder(self._lag(15_000))
+
+        runner._assert_preconditions(scenario, client, None, lab_principal_token=_LAB_TOKEN)
+
+        assert client.labels, "no premise read was made"
+        for reason, token in client.labels:
+            assert token == _LAB_TOKEN
+            assert reason is not None
+            assert reason.startswith("precondition: ")
+            assert 1 <= len(reason) <= LAB_PROBE_REASON_MAX_CHARS
+
+    def test_the_reason_names_what_the_probe_proves(self) -> None:
+        probe = next(
+            p for p in self._scenario().expected_precondition if p.tool == "get_consumer_lag"
+        )
+        reason = probe_label(probe)
+        assert reason.startswith("precondition: get_consumer_lag proves ")
+        # From the probe's own expectations, never a written description that could drift.
+        assert probe.expect[0].path in reason
+
+    def test_a_reason_longer_than_the_platform_takes_is_cut_not_refused(self) -> None:
+        probe = self._scenario().expected_precondition[0]
+        wide = probe.model_copy(
+            update={
+                "expect": tuple(
+                    field.model_copy(update={"path": field.path + "x" * 400})
+                    for field in probe.expect
+                )
+            }
+        )
+        reason = probe_label(wide)
+        assert len(reason) == LAB_PROBE_REASON_MAX_CHARS
+        assert reason.endswith("…")
+
+    def test_without_the_credential_the_reads_go_out_unlabelled_as_before(self) -> None:
+        client = _Recorder(self._lag(15_000))
+
+        runner._assert_preconditions(self._scenario(), client, None)
+
+        assert client.labels == [(None, None)] * len(client.calls)
+
+    def test_a_label_changes_nothing_about_whether_the_premise_holds(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # A healthy world still fails the premise, labelled or not. The shipped probe polls
+        # ten times fifteen seconds apart, so the wait is stubbed the way
+        # ``test_polling_window`` stubs it — the claim here is about the verdict.
+        monkeypatch.setattr(runner, "time", SimpleNamespace(sleep=lambda _seconds: None))
+        client = _Recorder(self._lag(0))
+        with pytest.raises(runner.PreconditionNotMet):
+            runner._assert_preconditions(
+                self._scenario(), client, None, lab_principal_token=_LAB_TOKEN
+            )

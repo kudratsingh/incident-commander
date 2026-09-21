@@ -1,8 +1,7 @@
 """Constant-time HMAC verification for platform webhooks.
 
-Two schemes (ADR 0023): nonce-bound over ``{timestamp}.{nonce}.{body}``, selected
-by the presence of ``X-Alert-Nonce`` and preferred; and legacy body-only. Both
-carry the digest as ``sha256=<hex>``, so the prefix cannot tell them apart.
+Two schemes (ADR 0023): nonce-bound over ``{timestamp}.{nonce}.{body}``, selected by
+``X-Alert-Nonce``; and legacy body-only. Both carry ``sha256=<hex>``, so the prefix cannot tell.
 """
 
 from __future__ import annotations
@@ -31,8 +30,7 @@ def verify(body: bytes, signature_header: str, secret: str) -> bool:
 def signed_material(timestamp: str, nonce: str, body: bytes) -> bytes:
     """The exact bytes the nonce-bound signature covers: ``{timestamp}.{nonce}.{body}``.
 
-    Transcribed from the emitter's ``alerts.signed_material`` — two ends that
-    disagree verify nothing.
+    Transcribed from the emitter's ``alerts.signed_material``.
     """
     return f"{timestamp}.{nonce}.".encode() + body
 
@@ -57,8 +55,7 @@ def verify_delivery(
 ) -> bool:
     """True iff ``signature_header`` is a valid MAC over timestamp, nonce and body.
 
-    Constant-time, like ``verify``. The timestamp inside the MAC is what bounds
-    replay.
+    Constant-time, like ``verify``. The timestamp inside the MAC is what bounds replay.
     """
     return _matches(signature_header, signed_material(timestamp_header, nonce_header, body), secret)
 

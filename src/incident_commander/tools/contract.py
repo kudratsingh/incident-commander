@@ -1,9 +1,7 @@
 """Contract snapshot comparison.
 
-``contracts/platform-tools.snapshot.json`` holds the platform's ``tools/list``
-response for the pinned image; ``compare`` reports ``added`` / ``removed`` /
-``changed`` over description, inputSchema, outputSchema, ``required_scope`` and
-``is_idempotent`` (WO-R2-130). Pure functions; regenerate with ``make snapshot``.
+``contracts/platform-tools.snapshot.json`` holds the platform's ``tools/list`` for the pinned
+image; ``compare`` reports ``added``/``removed``/``changed`` (WO-R2-130). See ``make snapshot``.
 """
 
 from __future__ import annotations

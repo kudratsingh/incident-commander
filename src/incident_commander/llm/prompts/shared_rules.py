@@ -1,9 +1,7 @@
-"""Reading rules several prompts must state in the same words, held once.
+"""Reading rules several prompts must state in the same words, held once (INC-002).
 
-A rule about reading evidence belongs to every reader of it — planner, routing table, judge —
-in the same change; INC-002 is what half a rule cost. Each prompt file writes ``{{rule:<key>}}``,
-which ``loader.load_prompt`` renders while serving, so the pinned snapshot hashes move with it.
-Python, not a ``prompts/*.md``, so ``investigation.py`` can import it: ADR 0054's exception.
+Each file writes ``{{rule:<key>}}``, expanded by ``loader.load_prompt`` while serving, so the
+pinned snapshot hashes move with a rule. Python, so ``investigation.py`` can import it (ADR 0054).
 """
 
 from __future__ import annotations
@@ -11,24 +9,19 @@ from __future__ import annotations
 import re
 from typing import Final
 
-#: What a prompt file writes where a shared rule belongs; unlike
-#: earnest prompt text, for ``test_prompts_snapshot.py``'s sweep.
+#: What a prompt file writes where a shared rule belongs (``test_prompts_snapshot.py`` sweeps it).
 PLACEHOLDER: Final[re.Pattern[str]] = re.compile(r"\{\{rule:([a-z0-9_]+)\}\}")
 
 
 class UnknownSharedRuleError(RuntimeError):
     """A prompt file asked for a shared rule this module does not hold.
 
-    Raised while serving: a ``{{rule:typo}}`` reaching a model is a hole
-    in the prompt.
+    Raised while serving: a ``{{rule:typo}}`` reaching a model is a hole in the prompt.
     """
 
 
-#: The conditional routing for a stuck dependency chain (owner decision O-19,
-#: 2026-09-17; ADR 0054, with ADR 0034 for error-outranks-hint). ONE sentence,
-#: because what is prevented is three paraphrases. It names the DISCRIMINATOR
-#: (the root's own dead-letter row, never ``get_dag_state``'s chain view), the
-#: two ARMS with their tools, that precedence, and what the fence does NOT do.
+#: Conditional routing for a stuck dependency chain (O-19; ADR 0054, ADR 0034 for
+#: error-outranks-hint). Discriminator: the root's own dead-letter row, never the chain view.
 STUCK_CHAIN_ROOT_RULE: Final[str] = (
     "A stuck dependency chain is routed by its dead-lettered root's own "
     "dead-letter row and never by the chain view: when that row reads "
@@ -42,10 +35,8 @@ STUCK_CHAIN_ROOT_RULE: Final[str] = (
 )
 
 
-#: How the briefing's structured remainder is read, by the writer that must name it and the
-#: judge that grades whether it did (WP-11.3, ADR 0065). ONE sentence for both, because the
-#: failure it prevents is the judge marking down the honesty the writer is required to show
-#: (INC-002). It quotes the block's own heading, which ``agent/briefing.py`` renders.
+#: How the briefing's structured remainder is read, by both its writer and its judge
+#: (WP-11.3, ADR 0065, INC-002). Quotes the block heading ``agent/briefing.py`` renders.
 UNRESOLVED_REMAINDER_RULE: Final[str] = (
     "The run context carries a structured remainder — the block headed `Remaining (not "
     "addressed by this run):` — which is computed from the run's own ranking and its own "
@@ -57,13 +48,8 @@ UNRESOLVED_REMAINDER_RULE: Final[str] = (
 )
 
 
-#: WHICH node of a chain an action may name (WO-R3-284, ADR 0070, amending ADR 0032).
-#: The other half of ADR 0070: the guard now admits a node of the alerted chain, and a
-#: guard that admits what no prompt asks for is half a rule — INC-002's failure, and the
-#: reason ADR 0053 § 4 dropped a world rather than ship one side of it. ONE sentence,
-#: because what is prevented is three paraphrases. It names the DISCRIMINATOR (the alerted
-#: job's own chain reading), the two admissible arms, and the three shapes that are never
-#: targets.
+#: WHICH node of a chain an action may name (WO-R3-284, ADR 0070, amending ADR 0032) — the
+#: prompt half of that guard. Discriminator: the alerted job's own ``get_dag_state`` reading.
 CHAIN_NODE_ACTION_RULE: Final[str] = (
     "An action about a dependency chain names a node the alerted job's own "
     "`get_dag_state` reading names — the alerted job itself, or, when that job "
@@ -76,14 +62,9 @@ CHAIN_NODE_ACTION_RULE: Final[str] = (
 )
 
 
-#: Who may be credited with a recovery, and what a run says when nobody may (owner decision
-#: O-29, 2026-09-19; ADR 0071, amending ADR 0062 and building on ADR 0009's re-probe). ONE
-#: sentence for the planner that decides to act, the fix table that picks the action and the
-#: judge that grades the report, because the failure it prevents is exactly INC-002's shape:
-#: a run told to refuse credit and a judge that marks the refusal down. It names the
-#: DISCRIMINATOR (the pair of readings, before and after, never how clean the action's own
-#: response looked), both arms, and both sentences VERBATIM — ``agent/attribution.py`` holds
-#: the two strings and a test pins that these are them.
+#: Who may be credited with a recovery, and what a run says when nobody may (O-29; ADR 0071,
+#: amending ADR 0062). Discriminator: the pair of readings, before and after — never how clean
+#: the response looked. Both sentences are VERBATIM; ``agent/attribution.py`` holds them.
 ATTRIBUTION_RULE: Final[str] = (
     "A recovery belongs to your action only when the last reading you took of that resource "
     "BEFORE acting showed the fault present and your reading after it shows the fault gone, "
@@ -98,22 +79,9 @@ ATTRIBUTION_RULE: Final[str] = (
 )
 
 
-#: How MANY times a "re-read before X" rule asks to be satisfied (INC-004, 2026-09-20; ADR
-#: 0073, amended by ADR 0074). Held here for a reason this module has not had before: the two
-#: readers are two RULES in the same file rather than two prompts. `investigation_planner.md`
-#: states the freshness re-read (ADR 0009) and the attribution re-read (ADR 0071) as separate
-#: bullets, a model applied both as "take one more confirming read" on every step, and a clause
-#: appended to one of them would leave the other saying what it said. One sentence written
-#: once, rendered into both, so neither can drift and a later edit cannot reach only half the
-#: demand. The STRUCTURAL half is `investigation._probe_withdrawn`, which takes `probe` out of
-#: the schema for that step; this sentence is what makes the narrowing predictable rather than
-#: a surprise.
-#:
-#: ADR 0074 rewrote the tail. ADR 0073's version promised that "a probe of some OTHER tool
-#: stays open", which was true of that guard and was exactly what the third live take did with
-#: it: refused a third reading of the consumer group, then read the DLQ, then the circuit
-#: breakers, then asked for the group a fourth time. A prompt may not promise a move the schema
-#: withdraws, so the sentence now says what the narrowed step really offers.
+#: How MANY times a "re-read before X" rule asks to be satisfied (INC-004; ADR 0073, amended by
+#: ADR 0074). Held here because its two readers are two RULES in `investigation_planner.md`: the
+#: re-reads of ADR 0009 and ADR 0071. Structural half: `investigation._probe_withdrawn`.
 CONFIRMING_READ_BOUND_RULE: Final[str] = (
     "One fresh reading that shows the fault is the whole demand of this rule — a second is "
     "not more evidence, it is the same evidence and one step you cannot get back — so once "

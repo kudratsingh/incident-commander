@@ -1,9 +1,7 @@
-"""Pinned per-model token prices for the USD budget meter (ADR 0015).
+"""Pinned per-model token prices for the USD budget meter (ADR 0015, ADR 0011).
 
-Pinned per ADR 0011: verify against docs.claude.com when AGENT_MODEL, JUDGE_MODEL,
-DEVELOPMENT_MODEL or BENCHMARK_MODEL change, and add the four rates in the same change —
-``config.py::_configured_models_are_priced`` refuses an unpriced id at startup. A committed
-constant, not a runtime lookup. USD per million tokens; cache write 1.25x, cache read 0.1x.
+USD per million tokens. Add four rates, verified against docs.claude.com, for any new
+AGENT_MODEL / JUDGE_MODEL / DEVELOPMENT_MODEL / BENCHMARK_MODEL; startup refuses an unpriced id.
 """
 
 from __future__ import annotations
@@ -15,15 +13,13 @@ from decimal import ROUND_HALF_UP, Decimal
 from typing import TYPE_CHECKING, Final
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
-    # Type-only: a runtime import would drag the Anthropic SDK into every
-    # module that needs a price row (WO-R2-118).
+    # Type-only: a runtime import would drag the Anthropic SDK in (WO-R2-118).
     from incident_commander.llm.client import LLMUsage
 
 _LOG: Final = logging.getLogger(__name__)
 
 _TOKENS_PER_MILLION: Final[Decimal] = Decimal(1_000_000)
-# Sub-cent resolution: cents would make the meter read zero for a
-# whole investigation.
+# Sub-cent resolution: cents would read zero for a whole investigation.
 _USD_QUANTUM: Final[Decimal] = Decimal("0.000001")
 
 

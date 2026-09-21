@@ -61,9 +61,8 @@ class PostgresCheckpointer:
                     )
                 return
             except IntegrityError:
-                # Concurrent writer took our version. Retry with a fresh one.
-                # Still required: a double-delivery's two ingress writes happen
-                # OUTSIDE the single-flight lease (ADR 0016) and do collide.
+                # Concurrent writer took our version; retry. A double delivery's two
+                # ingress writes happen OUTSIDE the lease and do collide (ADR 0016).
                 if attempt == 2:
                     raise
 

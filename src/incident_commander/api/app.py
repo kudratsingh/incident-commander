@@ -37,16 +37,13 @@ from incident_commander.tools.mcp_client import make_client
 
 RunTask = Callable[[RunState, Settings, Checkpointer], None]
 
-# Named rather than a bool: the two refusals mean different things to an
-# operator — duplicate delivery versus a full agent.
+# Named rather than a bool: duplicate delivery and a full agent are different refusals.
 Admission = Literal["admitted", "at_capacity", "lease_lost"]
 
 _log = logging.getLogger(__name__)
 
-# Replay suppression (ADR 0014, ADR 0023). Two caches: a repeated legacy
-# signature is indistinguishable from honest redelivery (suppressed quietly),
-# while a repeated nonce is unambiguously a replay (refused). Process-local and
-# lost on restart — durable dedupe is the ADR-0002 lease work (finding B-05).
+# Replay suppression (ADR 0014, ADR 0023). A repeated legacy signature may be honest
+# redelivery (suppressed quietly); a repeated nonce is a replay (refused). Process-local.
 _REPLAY_CACHE_MAX_ENTRIES: Final[int] = 1024
 _replay_cache: dict[str, float] = {}
 _nonce_cache: dict[str, float] = {}
@@ -71,10 +68,8 @@ class _BodyTooLargeError(Exception):
 class BodySizeLimitMiddleware:
     """Refuse an over-length request body ahead of every route (WO-R2-86).
 
-    ``/alerts`` must buffer before it can authenticate (the HMAC covers the
-    body), so the cap belongs ahead of the route. Two gates: a declared
-    ``Content-Length``, and a streamed body counted as it arrives. 413, so the
-    platform emitter retries.
+    ``/alerts`` must buffer before it can authenticate, so the cap belongs ahead of the
+    route. Two gates: a declared ``Content-Length``, and a streamed body counted as it comes.
     """
 
     def __init__(self, app: ASGIApp, max_bytes: int) -> None:
@@ -134,8 +129,7 @@ class BodySizeLimitMiddleware:
 def _declared_content_length(scope: Scope) -> int | None:
     """The request's declared body size, or ``None`` if absent or unparseable.
 
-    ``None`` is the safe answer for a malformed header: it only means this
-    gate abstains, and the streaming count below still holds the line.
+    ``None`` only means this gate abstains; the streaming count below still holds the line.
     """
     for name, value in scope.get("headers", ()):
         if name == b"content-length":
@@ -146,8 +140,7 @@ def _declared_content_length(scope: Scope) -> int | None:
     return None
 
 
-# An id no run will ever carry, so the probe reads and finds nothing rather
-# than depending on the contents of the store.
+# An id no run will ever carry, so the probe does not depend on the store's contents.
 _HEALTH_PROBE_INCIDENT_ID: Final[UUID] = UUID("00000000-0000-0000-0000-000000000000")
 
 
@@ -184,8 +177,7 @@ def create_app(
     if checkpointer is None:
         engine = create_pooled_engine(resolved_settings)
         resolved_checkpointer: Checkpointer = PostgresCheckpointer(engine)
-        # Admission bound (ADR 0022), sized from the pool: more live runs than
-        # the pool can serve is a deadlock, not merely slow. One per app.
+        # Admission bound (ADR 0022): more live runs than the pool can serve is a deadlock.
         slots = RunSlots(resolved_settings.max_concurrent_runs)
     else:
         resolved_checkpointer = checkpointer
@@ -201,8 +193,7 @@ def create_app(
     app.state.checkpointer = resolved_checkpointer
     app.state.engine = engine
     app.state.run_slots = slots
-    # Outermost of the app's own middleware, so the cap is enforced before any
-    # per-request machinery runs on a body this process has decided not to read.
+    # Outermost middleware, so the cap is enforced before any per-request machinery runs.
     app.add_middleware(BodySizeLimitMiddleware, max_bytes=resolved_settings.webhook_max_body_bytes)
 
     @app.get("/health", response_model=HealthResponse)
@@ -257,25 +248,21 @@ def create_app(
                 )
             if not verify_delivery(body, timestamp_header, nonce_header, signature, secret):
                 raise HTTPException(status.HTTP_401_UNAUTHORIZED, "invalid or missing signature")
-            # Signed timestamp, so this genuinely bounds replay rather than
-            # merely bounding the honest case.
+            # Signed timestamp, so this genuinely bounds replay, not just the honest case.
             _reject_unless_within_skew(timestamp_header, now, skew_seconds)
-            # Twice the skew window: acceptance spans [stamp - skew, stamp + skew],
-            # so one window would reopen a replay gap at the end of the range.
-            # After the MAC, so an unauthenticated caller cannot poison the cache.
+            # Twice the skew window: acceptance spans [stamp - skew, stamp + skew]. After the
+            # MAC, so an unauthenticated caller cannot poison the cache.
             if _is_replay(_nonce_cache, nonce_header, now, float(skew_seconds) * 2):
                 _log.warning(
                     "refused replayed webhook delivery (nonce %s); no run spawned",
                     nonce_header[:16],
                 )
-                # 401, unlike the legacy path: a fresh nonce is minted per
-                # delivery, so a repeat is a replay, not honest redelivery.
+                # 401, unlike the legacy path: a nonce is per delivery, so a repeat is a replay.
                 raise HTTPException(
                     status.HTTP_401_UNAUTHORIZED, "replayed delivery: nonce already seen"
                 )
         else:
-            # Legacy body-only scheme: the pinned platform image until the
-            # wave-9 re-pin, plus pre-fix tooling.
+            # Legacy body-only scheme: the pinned platform image, plus pre-fix tooling.
             if not verify(body, signature, secret):
                 raise HTTPException(status.HTTP_401_UNAUTHORIZED, "invalid or missing signature")
 
@@ -302,12 +289,9 @@ def create_app(
             ) from err
 
         alert = payload.model_dump()
-        # Durable identity (ADR 0016): a redelivery of the same
-        # (source, fingerprint) resolves to the same incident id and joins the
-        # live run. Fail-open — a store that is down degrades to a fresh id.
-        # ``run_in_threadpool`` because ``derive_incident_id`` does up to 64
-        # blocking loads, each able to wait ``DB_POOL_TIMEOUT_SECONDS``; on the
-        # event loop that would stop /health answering (ADR 0022).
+        # Durable identity (ADR 0016): a redelivery of the same (source, fingerprint) joins
+        # the live run; fail-open to a fresh id. In the threadpool because the derivation does
+        # up to 64 blocking loads, which on the event loop would stop /health (ADR 0022).
         try:
             incident_id = await run_in_threadpool(derive_incident_id, alert, resolved_checkpointer)
         except Exception:
@@ -319,15 +303,9 @@ def create_app(
 
         run = start_run(alert, resolved_settings, datetime.now(UTC), incident_id=incident_id)
 
-        # Durability before acknowledgement (finding B-04): the TRIAGE row exists
-        # before the 202, so a death before the background task still leaves a
-        # record. Conditional on there being no snapshot yet, and that is
-        # correctness (ADR 0016): ``run_snapshots`` is append-only and ``load``
-        # returns the highest version, so a fresh TRIAGE row on top of an
-        # in-flight run would hand the resume path a state stripped of evidence.
-        # Fail-open: a failed load or write is logged, never a 5xx — ingestion
-        # must not fail during the incident that took the store down. Off the
-        # event loop for the same reason as the derivation above.
+        # Durability before acknowledgement (B-04): the TRIAGE row exists before the 202.
+        # Conditional on there being no snapshot yet — a fresh TRIAGE row on top of an
+        # in-flight run would hand the resume path a state stripped of evidence (ADR 0016).
         try:
             await run_in_threadpool(_write_ingress_checkpoint, resolved_checkpointer, run)
         except Exception:
@@ -347,8 +325,7 @@ def create_app(
             )
             return IngestResponse(incident_id=run.incident_id)
 
-        # Every accepted delivery spawns a task; the lease, not the ingress,
-        # decides who actually runs — only the lock knows what is live.
+        # Every accepted delivery spawns a task; the lease, not the ingress, decides who runs.
         background_tasks.add_task(task, run, resolved_settings, resolved_checkpointer)
         return IngestResponse(incident_id=run.incident_id)
 
@@ -358,9 +335,8 @@ def create_app(
 def _reject_unless_within_skew(header: str, now: float, max_skew_seconds: int) -> None:
     """401 unless ``header`` (epoch MILLISECONDS) is inside the skew window.
 
-    Integer milliseconds, no float division: ``10**400`` used to raise
-    ``OverflowError`` outside the ``except ValueError``, a 500 from one header.
-    Hence the guard spans the parse AND the compare.
+    Integer milliseconds, and the guard spans the parse AND the compare: ``10**400`` raises
+    ``OverflowError``, which outside the guard was a 500 from one header.
     """
     try:
         timestamp_ms = int(header)
@@ -450,8 +426,7 @@ def _run_investigation(
                 )
                 return
 
-            # Past this line the lease is ours — the window in which a crash is
-            # ours to record.
+            # Past this line the lease is ours — a crash here is ours to record.
             held_lease = True
             latest = checkpointer.load(run.incident_id)
             if latest is None:
@@ -504,9 +479,8 @@ def _run_investigation(
 def _shed_at_capacity(run: RunState, slots: RunSlots | None) -> None:
     """Log an alert the agent is too busy to investigate. Do not queue it, do not fail it.
 
-    Invariant 5: the emitter retries anything >= 400, so a refusal would storm a
-    full agent, and the platform pages a human off the alert regardless. No
-    checkpoint write — that needs a connection just when they are scarce.
+    Invariant 5: a refusal would storm a full agent (the emitter retries anything >= 400) and
+    the platform pages a human regardless. No checkpoint write — that needs a connection.
     """
     _log.warning(
         "at capacity (%s concurrent runs): incident %s is recorded in TRIAGE but will "
@@ -523,9 +497,8 @@ def _record_run_failure(
 ) -> None:
     """Best-effort terminal FAILED checkpoint for a crashed run.
 
-    ``held_lease`` is the safety argument: FAILED is non-resumable (ADR 0016), so
-    writing it unleased abandons another worker's live run. A crash rail, not a
-    transition, so it writes via ``checkpointer.write`` rather than ``dispatch``.
+    ``held_lease`` is the safety argument: FAILED is non-resumable (ADR 0016), so writing it
+    unleased abandons another worker's live run. A crash rail, so it writes, never dispatches.
     """
     if not held_lease:
         _log.warning(
@@ -569,8 +542,7 @@ def _record_run_failure(
 def _log_briefing(final: RunState) -> None:
     """Emit the invariant-7 handoff artifact on the service path.
 
-    ``render_briefing`` had only ``evals/runner.py`` as a caller, so real
-    incidents never produced one. A failure here is logged, never propagated.
+    A failure here is logged, never propagated.
     """
     try:
         _log.info(

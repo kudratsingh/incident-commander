@@ -1,10 +1,7 @@
 """Serialize tool arguments to the exact bytes sent over the wire.
 
-The platform hashes a ``tools/call`` body for idempotency (same key + different
-body = 409), so ``model_dump`` options here are a load-bearing contract, not a
-refactor. ``wire_arguments`` is the one canonical producer of those bytes — every
-outgoing call and the wire-contract tests share it (WO-R2-83). It default-fills and
-never refuses an omitted argument; that refusal is ``remediation``'s (ADR 0024).
+The platform hashes a ``tools/call`` body for idempotency, so the ``model_dump`` options here
+are a contract (WO-R2-83). ``wire_arguments`` default-fills and refuses nothing (ADR 0024).
 """
 
 from __future__ import annotations

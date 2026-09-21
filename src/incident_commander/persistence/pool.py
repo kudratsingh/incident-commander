@@ -1,9 +1,7 @@
 """Connection-pool sizing and the run-admission bound (ADR 0022).
 
-Neither is correct alone: the lease (ADR 0016) pins a connection for a whole run
-that then checkpoints against the same pool — hold-and-wait. So size the pool,
-and above ``Settings.max_concurrent_runs`` refuse rather than queue; invariant 5
-(the platform pages humans regardless) is what makes refusing the safe answer.
+The lease (ADR 0016) pins a connection for a whole run that then checkpoints against the same
+pool — hold-and-wait. So above ``Settings.max_concurrent_runs``, refuse rather than queue.
 """
 
 from __future__ import annotations
@@ -20,7 +18,6 @@ from incident_commander.config import Settings
 def create_pooled_engine(settings: Settings) -> Engine:
     """The agent's engine, with every pool parameter stated rather than defaulted.
 
-    The defaults nobody chose sit right where an incident burst wedges the lease.
     ``pool_pre_ping`` because a lease connection idles for a whole investigation.
     """
     return create_engine(
@@ -33,11 +30,10 @@ def create_pooled_engine(settings: Settings) -> Engine:
 
 
 class RunSlots:
-    """Bounded admission for concurrent investigation runs: one slot is one
-    run's worth of pool capacity.
+    """Bounded admission for concurrent runs: one slot is one run's worth of pool capacity.
 
-    Acquisition is non-blocking (see the module docstring). Thread-safe: runs
-    execute in Starlette's background-task threadpool, hence ``threading``.
+    Acquisition is non-blocking. Thread-safe: runs execute in Starlette's background-task
+    threadpool, hence ``threading``.
     """
 
     def __init__(self, ceiling: int) -> None:
@@ -55,8 +51,7 @@ class RunSlots:
     def acquire(self) -> Iterator[bool]:
         """Yield True iff a slot was free; release it on the way out.
 
-        Mirrors ``incident_lease``: a refusal is the caller's to handle, never
-        an exception.
+        Mirrors ``incident_lease``: a refusal is the caller's to handle, never an exception.
         """
         admitted = self._semaphore.acquire(blocking=False)
         try:

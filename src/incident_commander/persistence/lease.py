@@ -1,8 +1,7 @@
 """Single-flight lease per incident: one live run, enforced by Postgres.
 
-ADR 0002 named it, ADR 0016 pinned it: a session-scoped ``pg_try_advisory_lock`` held on ONE
-pinned connection for the whole run — a lock on a connection handed back to the pool is
-silently released.
+ADR 0016: a session-scoped ``pg_try_advisory_lock`` held on ONE pinned connection for the whole
+run — a lock on a connection handed back to the pool is silently released.
 """
 
 from __future__ import annotations

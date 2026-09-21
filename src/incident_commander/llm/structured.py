@@ -1,8 +1,7 @@
 """Decoding rules for the agent's OWN structured output (ADR 0035).
 
 Every ``record_output`` model inherits :class:`StructuredOutput`, whose ``mode="before"``
-validator decodes a nested object or array that arrived as a JSON string (paid run
-``779b19a287a7``). It substitutes only on a type match, and never sees tool output.
+validator decodes a container sent as a JSON string — on a type match, and never tool output.
 """
 
 from __future__ import annotations
@@ -100,8 +99,7 @@ class StructuredOutput(BaseModel):
         """Whether this failure is the SCHEMA refusing a move, not a payload it cannot read.
 
         ADR 0074's hook: a narrowed model (``hypothesis.without_probe``) rejects the withdrawn
-        move at validation, not the malformation ADR 0035's re-ask exists for. ``False`` by
-        default, so a model that narrows nothing keeps ADR 0035 exactly.
+        move at validation, which is not what ADR 0035's re-ask is for. ``False`` by default.
         """
         return False
 

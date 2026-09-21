@@ -1,8 +1,7 @@
 """Connection-pool sizing and the run-admission bound (ADR 0022).
 
-Neither is correct alone: the lease (ADR 0016) pins a connection for a whole run that then
-checkpoints against the same pool — hold-and-wait. So size the pool, and above
-``Settings.max_concurrent_runs`` refuse rather than queue (invariant 5 makes that safe).
+The lease (ADR 0016) pins a connection for a whole run that then checkpoints against the same
+pool — hold-and-wait. So above ``Settings.max_concurrent_runs``, refuse rather than queue.
 """
 
 from __future__ import annotations

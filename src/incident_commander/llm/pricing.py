@@ -1,8 +1,7 @@
 """Pinned per-model token prices for the USD budget meter (ADR 0015, ADR 0011).
 
-USD per million tokens; verify against docs.claude.com when AGENT_MODEL, JUDGE_MODEL,
-DEVELOPMENT_MODEL or BENCHMARK_MODEL changes, adding the four rates in the same change —
-``config.py::_configured_models_are_priced`` refuses an unpriced id at startup.
+USD per million tokens. Add four rates, verified against docs.claude.com, for any new
+AGENT_MODEL / JUDGE_MODEL / DEVELOPMENT_MODEL / BENCHMARK_MODEL; startup refuses an unpriced id.
 """
 
 from __future__ import annotations

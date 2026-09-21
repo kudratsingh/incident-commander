@@ -1,8 +1,7 @@
 """Constant-time HMAC verification for platform webhooks.
 
-Two schemes (ADR 0023): nonce-bound over ``{timestamp}.{nonce}.{body}``, selected
-by the presence of ``X-Alert-Nonce`` and preferred; and legacy body-only. Both
-carry the digest as ``sha256=<hex>``, so the prefix cannot tell them apart.
+Two schemes (ADR 0023): nonce-bound over ``{timestamp}.{nonce}.{body}``, selected by
+``X-Alert-Nonce``; and legacy body-only. Both carry ``sha256=<hex>``, so the prefix cannot tell.
 """
 
 from __future__ import annotations

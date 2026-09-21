@@ -1,8 +1,7 @@
 """One bounded re-ask when the agent's own structured output does not parse.
 
-ADR 0035: a rejected payload is a harness event, not a reason to escalate, so it
-gets one re-ask carrying the validation error; both calls are accrued (ADR 0015).
-Only an **output** failure is repairable, never a transport error.
+ADR 0035: a rejected payload is a harness event, not a reason to escalate; both calls are
+accrued (ADR 0015). Only an **output** failure is repairable, never a transport error.
 """
 
 from __future__ import annotations
@@ -56,9 +55,8 @@ _REPAIRABLE: Final[tuple[type[Exception], ...]] = (
 class OutputNotOffered(LLMError):
     """The model asked for a move its own output schema did not offer (ADR 0074).
 
-    Raised INSTEAD of re-asking: the payload was readable, so a second billed call would
-    only hear the same answer. An ``LLMError``, so anything that escalated still
-    escalates; a caller that means to steer catches this type first.
+    Raised INSTEAD of re-asking: the payload was readable, so a second billed call would hear
+    the same answer. An ``LLMError``, so a caller that means to steer catches this type first.
     """
 
     def __init__(self, failure: Exception) -> None:
@@ -110,9 +108,8 @@ def call_with_output_repair[T: BaseModel](
 ) -> RepairedCall[T]:
     """Call ``llm_client``; on an output-shape failure, re-ask once.
 
-    Raises ``OutputRepairExhausted`` when the repair fails too; a transport ``LLMError``
-    passes through. A payload ``output_model`` reads as a REFUSED move
-    (``StructuredOutput.output_refused``, ADR 0074) raises ``OutputNotOffered`` instead.
+    Raises ``OutputRepairExhausted`` when the repair fails too; a transport ``LLMError`` passes
+    through, and a REFUSED move (``StructuredOutput.output_refused``) raises ``OutputNotOffered``.
     """
     failures: list[Exception] = []
     message = user_message

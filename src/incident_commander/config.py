@@ -234,9 +234,8 @@ class Settings(BaseSettings):
     def investigation_reprobe_window_seconds(self) -> float:
         """Wall-clock the ADR 0009 re-probes add: 0.0 at the defaults, 75.0 live.
 
-        ``attempts * delay``, NOT ``polling_window_seconds``: a re-probe is an EXTRA probe
-        each preceded by its own sleep, so one attempt costs a whole delay where a verify
-        attempt costs none. WP-14.1's TTL derivation is the first reader.
+        ``attempts * delay``, NOT ``polling_window_seconds``: a re-probe is an EXTRA probe with
+        its own sleep, so one costs a whole delay where a verify attempt costs none (WP-14.1).
         """
         return self.investigate_reprobe_attempts * self.investigate_reprobe_delay_seconds
 
@@ -293,9 +292,8 @@ class Settings(BaseSettings):
     def require_smoke_token(self) -> str:
         """The read-only principal's token, or refuse in one line.
 
-        ``require_chaos_token``'s twin: blank counts as unset and there is no fall back to
-        ``platform_token``, because a read under the agent's token lands in the audit log as
-        the AGENT's and buries the reads the agent actually made (F3).
+        ``require_chaos_token``'s twin: blank counts as unset, and there is no fall back to
+        ``platform_token`` — a read under the agent's token is logged as the AGENT's (F3).
         """
         token = self.platform_smoke_token
         if token is None or not token.get_secret_value().strip():

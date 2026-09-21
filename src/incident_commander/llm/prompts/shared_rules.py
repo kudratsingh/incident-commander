@@ -1,8 +1,7 @@
 """Reading rules several prompts must state in the same words, held once (INC-002).
 
-Each prompt file writes ``{{rule:<key>}}``, which ``loader.load_prompt`` expands while
-serving, so the pinned snapshot hashes move with a rule. Python, not a ``prompts/*.md``,
-so ``investigation.py`` can import it: ADR 0054's exception.
+Each file writes ``{{rule:<key>}}``, expanded by ``loader.load_prompt`` while serving, so the
+pinned snapshot hashes move with a rule. Python, so ``investigation.py`` can import it (ADR 0054).
 """
 
 from __future__ import annotations

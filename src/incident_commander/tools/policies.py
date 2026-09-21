@@ -1,8 +1,7 @@
 """Tier policy: which tools the agent may call in which state.
 
-``READ`` is safe any time; ``TIER_1`` mutates with a bounded, reversible blast radius the
-remediation planner may execute directly; ``TIER_2`` needs propose → approve → execute and
-is not populated yet. The agent-side first filter — the platform decides (invariant 2).
+``READ`` is safe any time; ``TIER_1`` mutates within a bounded, reversible blast radius;
+``TIER_2`` needs propose → approve → execute and is unpopulated. FIRST filter only (invariant 2).
 """
 
 from __future__ import annotations

@@ -497,9 +497,8 @@ def _record_run_failure(
 ) -> None:
     """Best-effort terminal FAILED checkpoint for a crashed run.
 
-    ``held_lease`` is the safety argument: FAILED is non-resumable (ADR 0016), so
-    writing it unleased abandons another worker's live run. A crash rail, not a
-    transition, so it writes via ``checkpointer.write`` rather than ``dispatch``.
+    ``held_lease`` is the safety argument: FAILED is non-resumable (ADR 0016), so writing it
+    unleased abandons another worker's live run. A crash rail, so it writes, never dispatches.
     """
     if not held_lease:
         _log.warning(

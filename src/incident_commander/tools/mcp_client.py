@@ -183,9 +183,8 @@ class MCPClient:
     ) -> ToolResult:
         """Invoke one platform tool and return its result; the call is traced either way.
 
-        ``lab_probe`` makes the platform write ``lab.probe`` instead of ``agent.tool_invoked``,
-        and is honoured only with ``lab_principal_token``. The agent's own path passes
-        neither — ``MCPClientProtocol`` has no such parameter.
+        ``lab_probe`` makes the platform write ``lab.probe`` instead of ``agent.tool_invoked``
+        and needs ``lab_principal_token``; ``MCPClientProtocol`` offers neither to the agent.
         """
         started = time.monotonic()
         args_dict = dict(arguments)
@@ -344,9 +343,8 @@ class LabProbeCapableClient(Protocol):
 class LabProbeClient:
     """A client whose every call is labelled as the lab's, with one reason.
 
-    It satisfies ``MCPClientProtocol``, so a shared read walk (``evals/world_audit.py``'s
-    probe set) labels every call without threading the credential through five signatures.
-    The pair is validated at construction, not on the first read.
+    It satisfies ``MCPClientProtocol``, so a shared read walk (``evals/world_audit.py``) labels
+    every call without threading the credential through five signatures. Validated at init.
     """
 
     def __init__(self, inner: LabProbeCapableClient, *, reason: str, principal_token: str) -> None:

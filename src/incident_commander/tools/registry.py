@@ -1,8 +1,7 @@
 """Typed schemas for every platform MCP tool the agent uses.
 
-Mirrors the platform's Pydantic models tool-for-tool; drift is caught by
-``contracts/platform-tools.snapshot.json`` + the contract diff test. Tier-1
-write actions are registered here but gated by tier policy in ``policies.py``.
+Mirrors the platform's Pydantic models tool-for-tool; drift is caught against
+``contracts/platform-tools.snapshot.json``. Tier-1 writes are gated by ``policies.py``.
 """
 
 from __future__ import annotations
@@ -754,9 +753,8 @@ def mirrored_in_registry(description: str) -> bool:
 def _load_snapshot_descriptions(path: Path = _SNAPSHOT_PATH) -> dict[str, str]:
     """Tool descriptions, mirrored verbatim from the committed contract snapshot.
 
-    Load-bearing — the remediation planner authors its verify expectation from
-    them — so a missing or unreadable snapshot raises at import, never ``{}``. A
-    packaged deployment must ship the snapshot as package data.
+    Load-bearing (the remediation planner authors its verify expectation from them), so a
+    missing or unreadable snapshot raises at import, never ``{}``. Ship it as package data.
     """
     try:
         raw = json.loads(path.read_text())

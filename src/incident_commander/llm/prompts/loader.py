@@ -1,8 +1,7 @@
 """Read prompts from ``src/incident_commander/llm/prompts/<name>.md``.
 
 A file may write ``{{rule:<key>}}`` for a rule from ``shared_rules.py``; expanding it here
-means no caller opts in or out (ADR 0054, INC-002). ``tests/unit/test_prompts_snapshot.py``
-gates drift.
+means no caller opts in or out (ADR 0054, INC-002). ``test_prompts_snapshot.py`` gates drift.
 """
 
 from __future__ import annotations

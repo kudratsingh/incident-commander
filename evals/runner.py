@@ -16,7 +16,7 @@ from decimal import Decimal
 from enum import StrEnum
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, Final, TypedDict
+from typing import Any, Final, TypedDict, cast
 from urllib.parse import urlparse
 
 import yaml
@@ -59,10 +59,16 @@ from evals.guards import (
     assert_read_only_principal,
     assert_write_capable_principal,
 )
-from evals.preconditions import unmet
+from evals.preconditions import probe_label, unmet
 from evals.recorded_client import RecordedMCPClient, matching_recordings
 from evals.scenarios.loader import load_scenarios
-from evals.scenarios.schema import TTL_ARGUMENT, ChaosHook, ChaosPlan, Scenario
+from evals.scenarios.schema import (
+    TTL_ARGUMENT,
+    ChaosHook,
+    ChaosPlan,
+    PreconditionProbe,
+    Scenario,
+)
 from evals.tracing import JsonlTracer, TraceKind, tracer_for
 from incident_commander.agent.accounting import RunAccounting, accrue_llm_error
 from incident_commander.agent.briefing import EscalationBriefing, render_briefing
@@ -98,6 +104,7 @@ from incident_commander.agent.strategies.names import StrategyName
 from incident_commander.agent.strategies.protocol import InvestigationStrategy
 from incident_commander.agent.strategies.records import StepRecord, StepSink
 from incident_commander.agent.strategies.registry import STRATEGIES
+from incident_commander.agent.thinking import PlannerLog
 from incident_commander.config import ChaosTokenNotConfigured, ModelRole, Settings
 from incident_commander.llm.client import LLMClient, LLMClientProtocol, LLMError, preflight_auth
 from incident_commander.llm.fakes import CannedLLMClient
@@ -107,6 +114,8 @@ from incident_commander.llm.repair import (
 )
 from incident_commander.persistence.memory import InMemoryCheckpointer
 from incident_commander.tools.mcp_client import (
+    LabProbeCapableClient,
+    LabProbeClient,
     LabProbeRefused,
     MCPClient,
     MCPClientProtocol,
@@ -178,6 +187,13 @@ class ExecutionMode(StrEnum):
     REHEARSAL = "rehearsal"
 
 
+#: Who seeded the fault when this runner did not (``--world-already-faulted``, ADR 0075).
+#: One value today and named rather than written twice, because the archive field and the
+#: line the runner prints must say the same thing, and a grader reading the archive back has
+#: to match on something.
+EXTERNAL_CHAOS_SEEDER: Final[str] = "demo_live"
+
+
 class RunProvenance(BaseModel):
     """Exactly what produced one run: code, world, models, role, budgets.
 
@@ -212,6 +228,12 @@ class RunProvenance(BaseModel):
     # the mode — a boolean they can assert on is cheaper to add than a fourth branch in
     # every mode comparison, and the default keeps every archived report parsing.
     rehearsal: bool = False
+    # Who manufactured the fault, when it was NOT this runner (ADR 0075). ``None`` is the
+    # normal case — ``_seed_chaos_plan`` fired the scenario's own hooks — and ``"demo_live"``
+    # says the demo runner had already fired them before the agent was started, so the
+    # world's single ``chaos.tool_invoked`` row sits before this run rather than inside it.
+    # Optional with a ``None`` default so every archived report still parses.
+    chaos_seeded_by: str | None = None
     # The run's OWN ledger: ``max_*`` are the budgets actually seeded, not the
     # documented defaults (ADR 0019's per-scenario cap, and the paid-run protocol's
     # .env-only ceilings), and ``*_used`` are ADR 0015's four meters.
@@ -342,6 +364,7 @@ def build_provenance(
     recorded_at: datetime | None = None,
     strategy: InvestigationStrategy | None = None,
     rehearsal: bool = False,
+    chaos_seeded_by: str | None = None,
 ) -> RunProvenance:
     """Assemble one run's provenance record from the run's own inputs.
 
@@ -373,6 +396,9 @@ def build_provenance(
         # the two cannot disagree, and a caller that passes the flag without the mode
         # (or the reverse) still produces a row that names itself a rehearsal.
         rehearsal=rehearsal or execution_mode is ExecutionMode.REHEARSAL,
+        # Taken on trust, unlike ``rehearsal``: nothing in this function can see whether a
+        # hook fired, and the caller that skipped the seeding is the only honest witness.
+        chaos_seeded_by=chaos_seeded_by,
         budget=budget,
     )
 
@@ -852,13 +878,48 @@ class PreconditionUnverifiable(PreconditionFailure):
     """
 
 
+def _precondition_reader(
+    client: MCPClientProtocol,
+    probe: PreconditionProbe,
+    lab_principal_token: str | None,
+) -> MCPClientProtocol:
+    """``client``, with this probe's reads labelled as the lab's own (ADR 0075).
+
+    One wrapper per probe, because the label says what THIS probe proves and
+    ``LabProbeClient`` carries one reason. ``None`` for the credential returns the client
+    untouched — the premise still gets checked, its rows still read as the agent's, and
+    ``_lab_probe_note`` is what says so out loud.
+
+    The cast is the honest shape of the seam: the live call site passes the ``MCPClient``
+    this repo's only labelling transport, and a caller that hands in something else together
+    with a credential fails at the first read rather than silently writing the label nowhere.
+    ``MCPClientProtocol`` deliberately has no lab parameter (that is what keeps the AGENT's
+    own path unable to relabel its reads), so the narrowing cannot be expressed in the type.
+    """
+    if lab_principal_token is None:
+        return client
+    return LabProbeClient(
+        cast("LabProbeCapableClient", client),
+        reason=probe_label(probe),
+        principal_token=lab_principal_token,
+    )
+
+
 def _assert_preconditions(
     scenario: Scenario,
     client: MCPClientProtocol,
     tracer: JsonlTracer | None,
+    *,
+    lab_principal_token: str | None = None,
 ) -> None:
-    """Probe the world for the scenario's premise, polling where declared."""
+    """Probe the world for the scenario's premise, polling where declared.
+
+    ``lab_principal_token`` is the evaluator's own credential, without which the platform
+    will not relabel a row (platform ADR 0038). ``None`` keeps the pre-ADR-0075 behaviour,
+    which every offline caller and every test that drives this directly takes.
+    """
     for probe in scenario.expected_precondition:
+        reader = _precondition_reader(client, probe, lab_principal_token)
         # Only the DECISIVE attempt speaks for the world: `reading` is its verdict when
         # readable (empty list = met), `None` otherwise. Latching "did any attempt ever
         # answer" let a dead platform report as "the fault was never manufactured".
@@ -871,7 +932,7 @@ def _assert_preconditions(
             if attempt:
                 time.sleep(probe.delay_seconds)
             try:
-                result = client.call_tool(probe.tool, dict(probe.arguments))
+                result = reader.call_tool(probe.tool, dict(probe.arguments))
             except MCPError as err:
                 reading, unreadable = None, [f"{probe.tool}: probe failed: {err}"]
                 continue
@@ -1480,6 +1541,7 @@ def run_scenario(
     model_role: ModelRole = ModelRole.DEVELOPMENT,
     recorded_world: Path | None = None,
     rehearsal: bool = False,
+    world_already_faulted: bool = False,
 ) -> ScenarioResult:
     """Drive one scenario end-to-end and grade the result.
 
@@ -1497,6 +1559,15 @@ def run_scenario(
     row's mode is ``REHEARSAL`` — so the world this run makes and the action it takes are
     the ones a live run would make and take. That is the point: it is the demo's dress
     rehearsal, and a dress rehearsal that skipped the fault would rehearse nothing.
+
+    ``world_already_faulted`` says somebody else fired the scenario's setup hooks before this
+    call (ADR 0075). The demo runner does, in its own step 3, because the fault has to break
+    on camera before the agent is started — and then this runner fired the same hooks again, a
+    second ``chaos.tool_invoked`` row 1 m 43 s after the real one, which is what the console
+    anchored the fourth take's whole timeline on. Safe for the world (both demo hooks re-arm)
+    and wrong for the record. In this mode nothing is seeded and nothing is settled; the
+    PRECONDITIONS still run, because whether the premise holds is the question this flag does
+    not get to answer; and the provenance record names who seeded instead.
     """
     tick = clock or (lambda: datetime.now(UTC))
     now = tick()
@@ -1625,6 +1696,14 @@ def run_scenario(
         nonlocal chaos_records
         if not live_mcp_available:
             return None
+        if world_already_faulted:
+            # Symmetry with the seeding this mode skipped (ADR 0075): a compensator undoes
+            # what its setup hook did, and this run's setup did nothing. Firing them anyway
+            # would put a SUCCESSFUL `chaos.tool_invoked` row in the take for a hook nobody
+            # asked for — and a console that reads a successful chaos row as a fault
+            # (WO-R3-336 item 7) would draw it as one. The demo owns the world it broke and
+            # puts it back in its own wind-down step.
+            return None
         records, error = _teardown_chaos_plan(scenario, chaos_plan, settings, tracer)
         chaos_records += records
         if error is not None:
@@ -1640,6 +1719,9 @@ def run_scenario(
     # outcome and the raw first content block exist at the client seam and nowhere else.
     # Built only when reporting is on, so a graded run's tracer is byte-identical to today's.
     tool_log: ToolCallLog | None = None
+    # And where the run's own REASONING is observed (ADR 0075): a planner ranking has no client
+    # seam, so without this the console sees a ranking only when the run next transitions.
+    planner_log: PlannerLog | None = None
     if recorded_world is not None:
         # The replay clock is the run's OWN clock, so every age the agent computes is
         # the one the recorder observed (ADR 0044). Built first, so a recording that
@@ -1681,17 +1763,31 @@ def run_scenario(
             # sequence instead.
             if (timing := temporal_timing_refusal(scenario, settings)) is not None:
                 raise ChaosSetupFailed(timing)
-            chaos_records = _seed_chaos_plan(scenario, chaos_plan, settings, tracer)
-            # One wait for the whole plan, ahead of the preconditions' per-probe
-            # polling: a cascade's second-order effect is not visible instantly.
-            if chaos_plan.settle_seconds:
-                time.sleep(chaos_plan.settle_seconds)
+            if world_already_faulted:
+                # ADR 0075: the hooks fired before this call, so firing them again would put a
+                # second `chaos.tool_invoked` row in the take and give every audit-anchored
+                # reader the wrong moment for the fault. Nothing is settled either — the
+                # settle wait is for a fault that has just landed, and this one landed
+                # minutes ago; the preconditions below still decide whether it is there.
+                print(
+                    f"  chaos: NOT seeded — --world-already-faulted "
+                    f"({EXTERNAL_CHAOS_SEEDER} fired "
+                    f"{', '.join(hook.name for hook in chaos_plan.setup) or 'no hook'} "
+                    f"already); the premise is still checked"
+                )
+            else:
+                chaos_records = _seed_chaos_plan(scenario, chaos_plan, settings, tracer)
+                # One wait for the whole plan, ahead of the preconditions' per-probe
+                # polling: a cascade's second-order effect is not visible instantly.
+                if chaos_plan.settle_seconds:
+                    time.sleep(chaos_plan.settle_seconds)
             mcp_hook = tracer.mcp_hook() if tracer else None
             if settings.agent_run_reporting:
                 tool_log = ToolCallLog()
                 # Beside the JSONL tracer, never instead of it: the trace is the run's own
                 # append-only record and telemetry does not get to displace it.
                 mcp_hook = tool_log.tee(mcp_hook)
+                planner_log = PlannerLog()
             live_mcp_client = make_client(
                 settings,
                 tracer=mcp_hook,
@@ -1703,7 +1799,17 @@ def run_scenario(
             # (`bb1fa70abb4c` paid for this lesson).
             if scenario.expected_precondition:
                 try:
-                    _assert_preconditions(scenario, live_mcp_client, tracer)
+                    # Labelled as the lab's own (ADR 0075, platform ADR 0038): these reads go
+                    # out on the AGENT's token — the premise must be true of the world the
+                    # agent will see — and the fourth take's page counted the fifth of them as
+                    # a call the agent made and never reported, then printed "the two do not
+                    # agree". They are the evaluator's, and now they say so.
+                    _assert_preconditions(
+                        scenario,
+                        live_mcp_client,
+                        tracer,
+                        lab_principal_token=_lab_probe_credential(settings),
+                    )
                 except PreconditionFailure:
                     live_mcp_client.close()
                     live_mcp_client = None
@@ -1835,6 +1941,9 @@ def run_scenario(
             if settings.max_iterations_override is None
             else settings.max_iterations_override
         ),
+        # Where the loop writes each ranking it accepts (ADR 0075). ``None`` unless reporting
+        # is on, so a graded run's behaviour and its records are byte-identical to today's.
+        planner_log=planner_log,
     )
     # Phase 6 remediation loop: PLANNING → REMEDIATING → VERIFYING. A client per role,
     # so canned queues stay partitioned and tracer records label each call.
@@ -1868,6 +1977,8 @@ def run_scenario(
         # with when it happened rather than reusing the transition's entry read.
         clock=tick,
         max_attempts=settings.max_remediation_attempts,
+        # Each poll's verdict, the moment the judge returns (ADR 0075).
+        planner_log=planner_log,
     )
     # RECORDED mode stops where the plan is made (04:117). AFTER the two transitions it
     # replaces, and over BOTH: an approval against a recording is as meaningless as an
@@ -1909,6 +2020,9 @@ def run_scenario(
             # Where the per-call steps come from. `None` on a run whose client was built
             # before reporting was asked for, which reports everything except the steps.
             tool_log=tool_log,
+            # And where the RANKINGS come from (ADR 0075). Subscribed in the constructor,
+            # so a reporter built with the log cannot end up queueing them to a transition.
+            planner_log=planner_log,
         )
         if tool_log is not None:
             # The scenario's precondition probes went through the agent's own client above,
@@ -2118,6 +2232,10 @@ def run_scenario(
             recorded_at=tick(),
             # The strategy object the loop above actually ran with.
             strategy=strategy,
+            # Who fired the fault, when it was not this runner (ADR 0075). A grader that
+            # counts the scenario's chaos rows needs this to know the one row it finds sits
+            # before the run rather than that a hook went missing.
+            chaos_seeded_by=EXTERNAL_CHAOS_SEEDER if world_already_faulted else None,
         ),
         # What it cost, by role and by step, reconciled against the SAME ledger the
         # provenance carries (WP-2.3): the charged split includes ``briefing_writer``,
@@ -2232,6 +2350,7 @@ def _crashed_result(
     model_role: ModelRole = ModelRole.DEVELOPMENT,
     recorded: bool = False,
     rehearsal: bool = False,
+    world_already_faulted: bool = False,
 ) -> ScenarioResult:
     """Synthesize a failed ScenarioResult when run_scenario raises.
 
@@ -2354,6 +2473,9 @@ def _crashed_result(
                         max_tool_calls=scenario.expectation.max_tool_calls,
                     ).budget
                 ),
+                # The caller's instruction, like ``rehearsal`` above: a crash cannot undo
+                # the fact that this process was handed a world it did not break.
+                chaos_seeded_by=EXTERNAL_CHAOS_SEEDER if world_already_faulted else None,
             )
         ),
         accounting=accounting,
@@ -2388,6 +2510,7 @@ def run_all(
     model_role: ModelRole = ModelRole.DEVELOPMENT,
     recorded_worlds: Mapping[str, Path] | None = None,
     rehearsal: bool = False,
+    world_already_faulted: bool = False,
 ) -> tuple[RunReport, tuple[Trajectory, ...], tuple[EscalationBriefing, ...]]:
     """Run every scenario and assemble the report.
 
@@ -2395,6 +2518,9 @@ def run_all(
     which is per scenario: the model leg is a property of the process, not of one
     scenario's world, and a suite half of whose rows were rehearsed is a report nobody
     can read.
+
+    ``world_already_faulted`` applies to the whole invocation for the same reason: it says
+    what the process was handed, which is a world somebody else broke (ADR 0075).
 
     ``recorded_worlds`` maps a scenario name to the recording to replay it
     against (WP-3.3). A scenario absent from the mapping runs in whatever mode it
@@ -2441,6 +2567,7 @@ def run_all(
                 model_role=model_role,
                 recorded_world=recorded_world,
                 rehearsal=rehearsal,
+                world_already_faulted=world_already_faulted,
             )
         except ChaosSetupFailed as exc:
             # NOT a graded row (plan 01 § 4): the world was never built, so a
@@ -2458,6 +2585,7 @@ def run_all(
                 model_role=model_role,
                 recorded=recorded_world is not None,
                 rehearsal=rehearsal,
+                world_already_faulted=world_already_faulted,
             )
         results.append(result)
         if on_result is not None:
@@ -2961,6 +3089,10 @@ def _parse_model_role(argv: Sequence[str]) -> tuple[ModelRole | None, str]:
 #: second thing that could disagree with the first.
 RECORDED_MODE: Final[str] = "recorded"
 REHEARSAL_MODE: Final[str] = "rehearsal"
+#: The flag that says the fault is already in the world (ADR 0075). Named, because
+#: ``scripts/demo_live.py`` passes it and ``tests/unit/test_demo_live.py`` asserts that it
+#: does — a string in three places is a string that goes stale in one of them.
+WORLD_ALREADY_FAULTED_FLAG: Final[str] = "--world-already-faulted"
 _MODES: Final[tuple[str, ...]] = (RECORDED_MODE, REHEARSAL_MODE)
 
 
@@ -3165,6 +3297,18 @@ def main() -> int:
         )
         print("no scenarios ran, nothing was spent")
         return 10
+    # ADR 0075: somebody else already fired this scenario's setup hooks, so this run must
+    # not fire them again. Parsed here, beside the other mode flags, because it is a
+    # statement about the WORLD this invocation was handed.
+    world_already_faulted = WORLD_ALREADY_FAULTED_FLAG in sys.argv[1:]
+    if world_already_faulted and recorded:
+        print(
+            f"MODE FAIL: {WORLD_ALREADY_FAULTED_FLAG} cannot be combined with --mode "
+            f"{RECORDED_MODE}. A recorded run replays a world from a file and seeds "
+            "nothing, so there is no seeding for the flag to skip."
+        )
+        print("no scenarios ran, nothing was spent")
+        return 2
     world = _parse_world(sys.argv[1:])
     if world is not None and not recorded:
         print(
@@ -3710,6 +3854,7 @@ def main() -> int:
             model_role=model_role,
             recorded_worlds=recorded_worlds,
             rehearsal=rehearsal,
+            world_already_faulted=world_already_faulted,
         )
     finally:
         if scan_client is not None:

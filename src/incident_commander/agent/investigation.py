@@ -34,6 +34,7 @@ from incident_commander.agent.state import (
     IncidentState,
     RunState,
 )
+from incident_commander.agent.strategies.names import StrategyName
 from incident_commander.agent.strategies.protocol import (
     BranchProbeOutcome,
     BranchProber,
@@ -41,6 +42,12 @@ from incident_commander.agent.strategies.protocol import (
     StrategyContext,
 )
 from incident_commander.agent.strategies.records import PlannerCall, StepRecord, StepSink
+from incident_commander.agent.thinking import (
+    PLANNER_TOOL,
+    REFLECTION_TOOL,
+    PlannerLog,
+    ThinkingAction,
+)
 from incident_commander.llm.client import LLMClientProtocol, LLMError
 from incident_commander.llm.prompts.loader import load_prompt
 from incident_commander.llm.prompts.shared_rules import STUCK_CHAIN_ROOT_RULE
@@ -624,6 +631,7 @@ def make_llm_investigate(
     selector_llm_client: LLMClientProtocol | None = None,
     critic_llm_client: LLMClientProtocol | None = None,
     branch_prober: BranchProber | None = None,
+    planner_log: PlannerLog | None = None,
 ) -> Callable[[RunState, datetime], RunState]:
     """Bind clients + model to the Phase 2 INVESTIGATING transition.
 
@@ -649,8 +657,19 @@ def make_llm_investigate(
     ``branch_prober`` is how a ``search`` branch reads the world (WP-12.1, ADR 0060), wired by
     the eval runner in RECORDED mode alone. ``None`` — every other caller and every other mode —
     is the refusal ``search`` stops on, and no other strategy reads it.
+
+    ``planner_log`` is where each ACCEPTED ranking is written the moment the loop accepts it
+    (ADR 0075), so a watching operator sees the planner's thinking as it happens instead of in
+    one burst at the next transition. ``None`` means nobody is watching, which is every caller
+    but ``make demo-live``; it changes nothing about the run either way.
     """
     chosen: Final[InvestigationStrategy] = strategy if strategy is not None else _control_group()
+    # Which LLM role a console row is filed under. ``reflection``'s step is the REVISED one —
+    # the arm returns what it accepted — so naming it for the arm is naming the call that
+    # produced the ranking. Every other arm's planner call is the planner's.
+    thinking_tool: Final[str] = (
+        REFLECTION_TOOL if chosen.name == StrategyName.REFLECTION.value else PLANNER_TOOL
+    )
 
     def transition_llm_investigate(run_state: RunState, at: datetime) -> RunState:
         last_probe: ProbeAction | None = None
@@ -729,6 +748,20 @@ def make_llm_investigate(
                     continue
                 return _escalate_investigation(
                     run_state, at, f"{INVESTIGATION_PLANNER_INVALID}: {err}"
+                )
+
+            # ADR 0075, and the ONE place a ranking is accepted: every strategy proposes
+            # through this return, including the two that assemble their step in Python and
+            # the one that revises its own. Written before the loop's own guards look at the
+            # step, because the fact being recorded is what the planner decided — a refusal is
+            # its own row on the evidence trail, and a refused proposal is still thinking a
+            # person watching should see.
+            if planner_log is not None:
+                planner_log.ranking(
+                    tool=thinking_tool,
+                    hypotheses=tuple(step.hypotheses),
+                    next_action=_thinking_action(step.next_action),
+                    reason=_action_reason(step.next_action),
                 )
 
             settled_steps = settled_steps + 1 if _ranks_an_actionable_answer(step.hypotheses) else 0
@@ -883,6 +916,22 @@ def make_llm_investigate(
         )
 
     return transition_llm_investigate
+
+
+def _thinking_action(action: ProbeAction | RemediateAction | StopAction) -> ThinkingAction:
+    """The planner's move, in the two fields a console thinking row draws (ADR 0075).
+
+    ``kind`` is the schema's own discriminator rather than a second vocabulary, so a move this
+    module has never seen still renders as the word the planner used.
+    """
+    tool = action.tool_name if isinstance(action, ProbeAction) else None
+    return ThinkingAction(kind=action.kind, tool=tool)
+
+
+def _action_reason(action: ProbeAction | RemediateAction | StopAction) -> str | None:
+    """Why the planner chose that move. ``None`` for a probe, which carries no reason field."""
+    reason = getattr(action, "reason", None)
+    return reason if isinstance(reason, str) else None
 
 
 def _plan_next_step(

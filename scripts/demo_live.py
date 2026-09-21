@@ -8,15 +8,22 @@ has to break **while somebody is watching**, in an order they can narrate, with 
 console showing each phase before the next one starts. `make eval-live` seeds and runs in
 one breath, which is correct for a measurement and useless on camera.
 
-So the fault is fired HERE, in step 3, and the agent is started separately in step 5. That
-means the scenario's own hooks fire twice — once from this script and once from the runner's
-own ``_seed_chaos_plan``. That is safe for both demo scenarios and it was MEASURED rather
-than assumed (2026-09-19, platform v0.6.13): ``poison_message`` is idempotent by
-``fixture_name`` and answers the repeat with ``created: false`` and the same deterministic
-``dlq_job_id``, so the queue holds one poison row either way; ``kill_consumer`` simply
-re-arms its flag with a fresh ``expires_at``. ``test_demo_live.py`` pins that the two modes
-name only repeat-safe hooks, so a mode added over a hook without that property fails a test
-instead of failing on camera.
+So the fault is fired HERE, in step 3, and the agent is started separately in step 5. Step 5
+passes ``--world-already-faulted``, so the runner does NOT fire the same hooks a second time
+(ADR 0075).
+
+**The double fire used to happen, and calling it "safe" was half a sentence.** It is safe for
+the WORLD — measured, not assumed (2026-09-19, platform v0.6.13): ``poison_message`` is
+idempotent by ``fixture_name`` and answers the repeat with ``created: false`` and the same
+deterministic ``dlq_job_id``, so the queue holds one poison row either way, and
+``kill_consumer`` simply re-arms its flag with a fresh ``expires_at``. It is wrong for the
+RECORD, which is what the owner's fourth take showed: the second injection landed 1 minute 43
+seconds after the real one, and every reader that anchors on the take's newest ``chaos.*`` row
+— the console's "fault injected" station, its T+ clock, its chart marker, "agent acting after
+N reads" — measured the whole demo from the re-arm. One fault, fired once, in step 3.
+``test_demo_live.py`` still pins that the two modes name only repeat-safe hooks: the world
+tolerating a repeat is why a crashed take can be re-run at all, and that property is worth
+keeping whether or not this script relies on it.
 
 **Spend.** The default path is FREE and is the rehearsal path: the real platform, the real
 hooks, the real Tier-1 action, and a SCRIPTED planner. It is the runner's own
@@ -62,7 +69,7 @@ from typing import Any, Final, NamedTuple
 # import here is inside the function that needs it, and that is why the first rehearsal died
 # at step 3 with a ModuleNotFoundError — after the ten-second countdown had run. A missing
 # PYTHONPATH now fails before the first line of output instead of on camera.
-from evals.runner import REHEARSAL_MODE
+from evals.runner import REHEARSAL_MODE, WORLD_ALREADY_FAULTED_FLAG
 
 _REPO_ROOT: Final = Path(__file__).resolve().parents[1]
 
@@ -567,7 +574,16 @@ def _walk(
     if args.live:
         console.note(step, "PAID: make eval-live with MODEL_ROLE=benchmark")
         _must(
-            ["make", "eval-live", f"ONLY={scenario}", "MODEL_ROLE=benchmark"],
+            # `WORLD_ALREADY_FAULTED=1` is how the make target forwards
+            # `--world-already-faulted`: step 3 already fired the hook, and a second
+            # injection is the wrong moment for every reader that anchors on it (ADR 0075).
+            [
+                "make",
+                "eval-live",
+                f"ONLY={scenario}",
+                "MODEL_ROLE=benchmark",
+                "WORLD_ALREADY_FAULTED=1",
+            ],
             "paid agent run",
             env={"AGENT_RUN_REPORTING": "true"},
         )
@@ -582,7 +598,19 @@ def _walk(
             # the scenario's script (ADR 0069). Without it there is no such run: dropping
             # `--live` puts the runner on its offline settings, which hardcode `eval.local`,
             # and blanking the key on top only made that fully canned run quieter.
-            [sys.executable, "-m", "evals.runner", "--mode", REHEARSAL_MODE, "--only", scenario],
+            # `--world-already-faulted`: step 3 fired the hook, so the runner must not fire it
+            # again — the second row is what the fourth take's timeline was measured from
+            # (ADR 0075).
+            [
+                sys.executable,
+                "-m",
+                "evals.runner",
+                "--mode",
+                REHEARSAL_MODE,
+                "--only",
+                scenario,
+                WORLD_ALREADY_FAULTED_FLAG,
+            ],
             "rehearsal agent run",
             env={
                 "AGENT_RUN_REPORTING": "true",

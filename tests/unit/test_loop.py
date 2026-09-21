@@ -236,6 +236,201 @@ class TestRunToCompletion:
         assert result.updated_at == later
 
 
+class TestAStatesTimestampIsTheMomentItWasEntered:
+    """ADR 0075, from the owner's fourth take.
+
+    ``dispatch`` is handed the iteration's START time and every transition stamps the state it
+    returns with it, so an investigation that ran 22 seconds and made three planner calls
+    reported ``investigating`` for 10 ms and gave ``planning`` the moment ``investigating``
+    began. The loop re-reads the clock after the transition returns and stamps with that.
+    """
+
+    @staticmethod
+    def _slow_clock(start: datetime, elapsed: timedelta) -> Callable[[], datetime]:
+        """A clock that advances only ACROSS the transition.
+
+        Reading 1 is the iteration's start (what ``dispatch`` is handed), reading 2 is the
+        moment it returned. Every later reading stays there, so a second iteration adds no
+        time and the assertions are about one transition.
+        """
+        reads = {"n": 0}
+
+        def clock() -> datetime:
+            reads["n"] += 1
+            return start if reads["n"] == 1 else start + elapsed
+
+        return clock
+
+    def test_the_new_state_carries_the_moment_the_transition_returned(
+        self, run_state: RunState, now: datetime
+    ) -> None:
+        """Red before ADR 0075: ``updated_at`` was ``now``, so the state read 0 ms old."""
+        elapsed = timedelta(seconds=20)
+
+        def slow(rs: RunState, at: datetime) -> RunState:
+            return rs.with_state(IncidentState.ESCALATED, at)
+
+        run = run_state.model_copy(
+            update={"budget": run_state.budget.model_copy(update={"max_wall_seconds": 7_200})}
+        )
+        result = run_to_completion(
+            run,
+            clock=self._slow_clock(now, elapsed),
+            transitions={IncidentState.TRIAGE: slow},
+        )
+        assert result.updated_at == now + elapsed
+
+    def test_the_investigating_span_is_the_real_one_and_planning_is_stamped_after_it(
+        self, run_state: RunState, now: datetime
+    ) -> None:
+        """The take's own shape: a long INVESTIGATING, then PLANNING.
+
+        The checkpoint history is what the reporter turns into the platform's
+        ``phase_history``, so the two stamps here ARE that page's two durations: before
+        ADR 0075 both read ``now`` and the page showed "investigating · 0 ms".
+        """
+        investigating_took = timedelta(seconds=22)
+        reads: list[datetime] = [
+            now,  # iteration 1 starts (TRIAGE)
+            now,  # TRIAGE returned immediately
+            now,  # iteration 2 starts (INVESTIGATING)
+            now + investigating_took,  # the investigation returned 22 s later
+            now + investigating_took,  # iteration 3 starts (PLANNING)
+            now + investigating_took,  # PLANNING returned immediately
+        ]
+        ticks = {"n": 0}
+
+        def clock() -> datetime:
+            value = reads[min(ticks["n"], len(reads) - 1)]
+            ticks["n"] += 1
+            return value
+
+        def investigate(rs: RunState, at: datetime) -> RunState:
+            return rs.with_state(IncidentState.PLANNING, at)
+
+        def plan(rs: RunState, at: datetime) -> RunState:
+            return rs.with_state(IncidentState.ESCALATED, at)
+
+        run = _with_alert(run_state, {"source": "billing", "severity": "high"})
+        run = run.model_copy(
+            update={"budget": run.budget.model_copy(update={"max_wall_seconds": 7_200})}
+        )
+        ckpt = InMemoryCheckpointer()
+        result = run_to_completion(
+            run,
+            clock=clock,
+            checkpointer=ckpt,
+            transitions={
+                **TRANSITIONS,
+                IncidentState.INVESTIGATING: investigate,
+                IncidentState.PLANNING: plan,
+            },
+        )
+        history = ckpt.history(result.incident_id)
+        stamps = {rs.state: rs.updated_at for rs in history}
+        assert stamps[IncidentState.INVESTIGATING] == now
+        # PLANNING was entered when the investigation RETURNED, not when it started.
+        assert stamps[IncidentState.PLANNING] == now + investigating_took
+        investigating_span = (
+            stamps[IncidentState.PLANNING] - stamps[IncidentState.INVESTIGATING]
+        ).total_seconds()
+        assert investigating_span == investigating_took.total_seconds()
+
+    def test_the_transitions_own_bookkeeping_entry_is_stamped_with_it_too(
+        self, run_state: RunState, now: datetime
+    ) -> None:
+        elapsed = timedelta(seconds=20)
+
+        def slow(rs: RunState, at: datetime) -> RunState:
+            entry = EvidenceEntry(
+                tool_name="_planner_stop",
+                arguments={"reason": "done"},
+                result_summary="planner stop: done",
+                timestamp=at,
+            )
+            return rs.model_copy(
+                update={
+                    "state": IncidentState.ESCALATED,
+                    "updated_at": at,
+                    "evidence": (*rs.evidence, entry),
+                }
+            )
+
+        run = run_state.model_copy(
+            update={"budget": run_state.budget.model_copy(update={"max_wall_seconds": 7_200})}
+        )
+        result = run_to_completion(
+            run,
+            clock=self._slow_clock(now, elapsed),
+            transitions={IncidentState.TRIAGE: slow},
+        )
+        assert result.evidence[-1].tool_name == "_planner_stop"
+        assert result.evidence[-1].timestamp == now + elapsed
+
+    def test_a_real_tool_entry_keeps_the_time_the_read_happened(
+        self, run_state: RunState, now: datetime
+    ) -> None:
+        """A probe's timestamp is about the READ, and the loop does not move it.
+
+        The restamp is for the row that records the transition, not for the calls the
+        transition made on the way there — a read at 19:56 stays at 19:56.
+        """
+        elapsed = timedelta(seconds=20)
+
+        def slow(rs: RunState, at: datetime) -> RunState:
+            entry = EvidenceEntry(
+                tool_name="get_consumer_lag",
+                arguments={"consumer_group": "worker-dispatcher"},
+                result_summary='{"lag": 30}',
+                timestamp=at,
+            )
+            return rs.model_copy(
+                update={
+                    "state": IncidentState.ESCALATED,
+                    "updated_at": at,
+                    "evidence": (*rs.evidence, entry),
+                }
+            )
+
+        run = run_state.model_copy(
+            update={"budget": run_state.budget.model_copy(update={"max_wall_seconds": 7_200})}
+        )
+        result = run_to_completion(
+            run,
+            clock=self._slow_clock(now, elapsed),
+            transitions={IncidentState.TRIAGE: slow},
+        )
+        assert result.evidence[-1].timestamp == now
+        assert result.updated_at == now + elapsed
+
+    def test_an_entry_the_transition_did_not_append_is_left_alone(
+        self, run_state: RunState, now: datetime
+    ) -> None:
+        """A transition that appends nothing must not have an older marker restamped."""
+        earlier = EvidenceEntry(
+            tool_name="_handoff_refused",
+            arguments={},
+            result_summary="handoff refused",
+            timestamp=now,
+        )
+        run = run_state.model_copy(
+            update={
+                "evidence": (earlier,),
+                "budget": run_state.budget.model_copy(update={"max_wall_seconds": 7_200}),
+            }
+        )
+
+        def silent(rs: RunState, at: datetime) -> RunState:
+            return rs.model_copy(update={"state": IncidentState.ESCALATED, "updated_at": at})
+
+        result = run_to_completion(
+            run,
+            clock=self._slow_clock(now, timedelta(seconds=20)),
+            transitions={IncidentState.TRIAGE: silent},
+        )
+        assert result.evidence[-1].timestamp == now
+
+
 # ---------------------------------------------------------------------------
 # WO-R2-39: the budget short-circuit and a crash-resumed REMEDIATING run.
 

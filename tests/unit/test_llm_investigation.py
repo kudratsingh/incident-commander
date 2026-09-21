@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Callable, Mapping
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 from uuid import UUID
@@ -21,6 +21,11 @@ from incident_commander.agent.investigation import (
     reads_fault_present,
 )
 from incident_commander.agent.state import EvidenceEntry, IncidentState, RunState
+from incident_commander.agent.thinking import (
+    ObservedThinking,
+    PlannerLog,
+    ThinkingAction,
+)
 from incident_commander.llm.client import LLMError, LLMResult
 from incident_commander.llm.fakes import CannedLLMClient, CannedUsage
 from incident_commander.tools import policies
@@ -2490,3 +2495,97 @@ class TestProbeWithdrawnOnceTheRankingIsSettled:
         assert [name for name, _ in mcp.calls] == ["get_consumer_lag", "get_consumer_lag"]
         assert result.state is IncidentState.ESCALATED
         assert "3 times after being refused" in result.evidence[-1].result_summary
+
+
+def _appends_to(seen: list[ObservedThinking]) -> Callable[[ObservedThinking], bool]:
+    """A ``PlannerLog`` sink that keeps every observation and always answers "sent"."""
+
+    def sink(thinking: ObservedThinking) -> bool:
+        seen.append(thinking)
+        return True
+
+    return sink
+
+
+class TestTheLoopRecordsTheRankingItAccepts:
+    """ADR 0075: one write point, where the strategy hands the step back to the loop.
+
+    ``plan_next_step``'s return is the single place every arm's proposal passes through —
+    ``baseline``, ``reflection``'s revised step, both ``best_of_n`` arms, ``candidate_selector``
+    and ``search`` — so the ranking is observed there and no strategy learns that telemetry
+    exists (ADR 0036). The refusal guards run AFTER it, deliberately: what is recorded is what
+    the planner decided, and a refusal is its own row on the evidence trail.
+    """
+
+    def test_every_planner_call_writes_its_ranking_in_order(
+        self, run_state: RunState, now: datetime
+    ) -> None:
+        mcp = _FakeMCPClient(lambda _n, _a: _consumer_lag_response("billing", 42))
+        log = PlannerLog()
+        seen: list[ObservedThinking] = []
+        log.subscribe(_appends_to(seen))
+        transition = make_llm_investigate(
+            mcp,
+            _probe_then_stop_llm(),
+            model="test-model",
+            planner_log=log,
+        )
+
+        result = transition(_investigating(run_state), now)
+
+        assert result.state is IncidentState.ESCALATED
+        assert [t.tool for t in seen] == ["investigation_planner"] * 2
+        assert [t.hypotheses[0].confidence for t in seen] == [0.55, 0.9]
+        assert seen[0].next_action == ThinkingAction(kind="probe", tool="get_consumer_lag")
+        # A probe carries no reason in the schema, so none is invented for it.
+        assert seen[0].reason is None
+        assert seen[1].next_action == ThinkingAction(kind="stop", tool=None)
+        assert seen[1].reason == "confidence sufficient for handoff"
+        assert (log.observed, log.dropped) == (2, 0)
+
+    def test_the_stamp_is_the_moment_the_ranking_was_accepted_not_the_iterations_start(
+        self, run_state: RunState, now: datetime
+    ) -> None:
+        """The loop's ``at`` is the iteration's START — the lie ADR 0075 is about.
+
+        The log takes its own reading, so two rankings a minute apart are a minute apart on
+        the page even though both happened inside one transition stamped once.
+        """
+        ticks = {"n": 0}
+
+        def clock() -> datetime:
+            ticks["n"] += 1
+            return now + timedelta(seconds=60 * ticks["n"])
+
+        mcp = _FakeMCPClient(lambda _n, _a: _consumer_lag_response("billing", 42))
+        log = PlannerLog(clock=clock)
+        seen: list[ObservedThinking] = []
+        log.subscribe(_appends_to(seen))
+        transition = make_llm_investigate(
+            mcp, _probe_then_stop_llm(), model="test-model", planner_log=log
+        )
+
+        transition(_investigating(run_state), now)
+
+        assert [t.at for t in seen] == [
+            now + timedelta(seconds=60),
+            now + timedelta(seconds=120),
+        ]
+
+    def test_no_log_changes_nothing_about_the_run(self, run_state: RunState, now: datetime) -> None:
+        """``None`` is every caller but ``make demo-live``, and it must be inert."""
+        with_log = PlannerLog()
+        with_log.subscribe(lambda _thinking: True)
+        runs = [
+            make_llm_investigate(
+                _FakeMCPClient(lambda _n, _a: _consumer_lag_response("billing", 42)),
+                _probe_then_stop_llm(),
+                model="test-model",
+                planner_log=log,
+            )(_investigating(run_state), now)
+            for log in (None, with_log)
+        ]
+        assert runs[0].state is runs[1].state
+        assert [e.tool_name for e in runs[0].evidence] == [e.tool_name for e in runs[1].evidence]
+        assert runs[0].hypotheses == runs[1].hypotheses
+        assert runs[0].budget == runs[1].budget

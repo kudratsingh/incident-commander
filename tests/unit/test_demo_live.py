@@ -15,7 +15,7 @@ from typing import Any
 
 import pytest
 
-from evals.runner import REHEARSAL_MODE
+from evals.runner import REHEARSAL_MODE, WORLD_ALREADY_FAULTED_FLAG
 from evals.scenarios.loader import load_scenarios
 from scripts import demo_live
 
@@ -808,3 +808,45 @@ class TestTheRunnerNeverWearsTheAgentsToken:
             "the one builder must pass an explicit token; no argument selects "
             "settings.platform_token — the agent's principal (S-04)"
         )
+
+
+class TestTheFaultIsFiredOnceByThisScript:
+    """ADR 0075 item 5: the double injection is gone.
+
+    The fourth take's audit stream holds ``chaos.tool_invoked kill_consumer`` twice — step 3's
+    at 03:18:05 and the eval runner's own at 03:19:48 — and the page anchored the whole
+    timeline on the second. Safe for the world (the hook re-arms), wrong for the record.
+    """
+
+    def test_the_free_rehearsal_tells_the_runner_the_world_is_already_faulted(
+        self, stack: _FakeStack
+    ) -> None:
+        assert demo_live.main(["--mode", "dlq_backlog", "--auto"]) == 0
+
+        runner = [argv for argv in stack.commands if "evals.runner" in argv]
+        assert len(runner) == 1
+        assert WORLD_ALREADY_FAULTED_FLAG in runner[0]
+
+    def test_the_paid_take_forwards_it_through_the_make_target(self, stack: _FakeStack) -> None:
+        assert demo_live.main(["--mode", "dlq_backlog", "--live", "--yes-spend", "--auto"]) == 0
+
+        paid = [argv for argv in stack.commands if "eval-live" in argv]
+        assert len(paid) == 1
+        assert "WORLD_ALREADY_FAULTED=1" in paid[0]
+
+    def test_the_make_target_forwards_the_variable_as_the_flag(self) -> None:
+        """The other half of the paid path: the recipe has to pass it on."""
+        recipe = (_REPO_ROOT / "Makefile").read_text()
+        assert "WORLD_ALREADY_FAULTED" in recipe
+        assert f"{WORLD_ALREADY_FAULTED_FLAG}," in recipe
+
+    def test_the_docstring_no_longer_calls_the_double_fire_safe(self) -> None:
+        """The record it kept was wrong, and the docstring said the opposite.
+
+        A doc-drift tripwire rather than prose policing: the sentence it replaced is the one
+        that made the second injection look like a settled decision for two takes.
+        """
+        doc = demo_live.__doc__ or ""
+        assert "--world-already-faulted" in doc
+        assert "wrong for the" in doc
+        assert "the scenario's own hooks fire twice" not in doc

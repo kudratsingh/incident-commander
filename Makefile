@@ -36,7 +36,9 @@ help:
 	@echo "  test-e2e         full compose end-to-end (spends tokens)"
 	@echo "  eval             full eval suite offline (writes report)"
 	@echo "  eval-live        run named scenario(s) against live platform (needs .env);"
-	@echo "                   ONLY=<name[,name...]> REQUIRED, full scenario names (e.g. ONLY=remediate_consumer_lag_success)"
+	@echo "                   ONLY=<name[,name...]> REQUIRED, full scenario names (e.g. ONLY=remediate_consumer_lag_success)."
+	@echo "                   WORLD_ALREADY_FAULTED=1 skips the seeding because somebody else"
+	@echo "                   fired the hook (the demo runner's step 3); the premise is still checked"
 	@echo "  eval-smoke       read-only smoke pass under the read-scoped smoke token"
 	@echo "  world-audit      FREE (zero-LLM, read-only) audit of the seeded world against"
 	@echo "                   the runbook baseline; exits non-zero on any FAIL."
@@ -244,7 +246,7 @@ eval-live:
 	$(error 'make eval-live' without ONLY= would select the whole suite for a live, paid run; name exactly one scenario: make eval-live ONLY=<scenario_name>)
 else
 eval-live:
-	@EVAL_TRACE_DIR=evals/traces uv run python -m evals.runner --model-role "$(MODEL_ROLE)" --live --only $(ONLY); \
+	@EVAL_TRACE_DIR=evals/traces uv run python -m evals.runner --model-role "$(MODEL_ROLE)" --live --only $(ONLY) $(if $(WORLD_ALREADY_FAULTED),--world-already-faulted,); \
 	code=$$?; \
 	PYTHONPATH=. uv run python scripts/format_traces.py || true; \
 	echo "JSONL traces: evals/traces/*.jsonl"; \

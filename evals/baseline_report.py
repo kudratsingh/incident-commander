@@ -164,6 +164,13 @@ _PLACEHOLDERS: Final[frozenset[str]] = frozenset({"", "unknown", "none", "null",
 #: Provenance fields that legitimately differ row to row within one run.
 _PER_SCENARIO: Final[frozenset[str]] = frozenset({"scenario", "budget", "recorded_at"})
 
+#: Provenance fields whose ABSENCE is itself the answer, so ``None`` is not a placeholder.
+#: ``chaos_seeded_by`` (ADR 0075) names the process that fired the scenario's setup hooks
+#: when it was not the runner; ``None`` means the runner seeded its own world, which is the
+#: case for every row of the offline suite and for every graded run. Still compared across
+#: rows above — one run cannot have seeded half its worlds externally.
+_ABSENCE_IS_AN_ANSWER: Final[frozenset[str]] = frozenset({"chaos_seeded_by"})
+
 
 def stamp_of(offline_path: Path) -> dict[str, Any]:
     """The one provenance record every row of the offline suite agrees on.
@@ -189,6 +196,7 @@ def stamp_of(offline_path: Path) -> dict[str, Any]:
         name
         for name in PROVENANCE_FIELDS
         if name not in _PER_SCENARIO
+        and name not in _ABSENCE_IS_AN_ANSWER
         and str(getattr(validated, name)).strip().lower() in _PLACEHOLDERS
     ]
     if missing:

@@ -63,6 +63,14 @@ from incident_commander.agent.state import (
     IncidentState,
     RunState,
 )
+from incident_commander.agent.thinking import (
+    MAX_REASON_CHARS,
+    PLANNER_TOOL,
+    VERIFY_JUDGE_TOOL,
+    ObservedThinking,
+    PlannerLog,
+    ThinkingAction,
+)
 from incident_commander.persistence.memory import InMemoryCheckpointer
 from incident_commander.tools.mcp_client import MCPClient, MCPError, ToolResult
 from incident_commander.tools.registry import TOOL_REGISTRY
@@ -1669,3 +1677,324 @@ class TestAReportIsSentWhenItHappens:
 
         assert reporter.failures, "the failure was swallowed without being recorded"
         assert reporter.steps_sent == 0
+
+
+def _appends_to(seen: list[ObservedThinking]) -> Callable[[ObservedThinking], bool]:
+    """A ``PlannerLog`` sink that keeps every observation and always answers "sent"."""
+
+    def sink(thinking: ObservedThinking) -> bool:
+        seen.append(thinking)
+        return True
+
+    return sink
+
+
+class TestThePlannersThinkingIsReportedAsItHappens:
+    """ADR 0075, from the owner's fourth take.
+
+    The steps reported live (ADR 0074 worked), and the RANKINGS did not: the reporter sends
+    ``hypotheses`` on a transition report, no transition happens during a 22-second
+    investigation, so three planner rankings existed and only the last was ever visible. That
+    burst is what the owner saw. A ranking has no client seam to hang off, so ``PlannerLog``
+    is the seam, and one ``report``-kind step carries each one.
+    """
+
+    def _timed(self, now: datetime) -> tuple[_Clock, _TimedClient, PlannerLog, RunReporter]:
+        clock = _Clock(now)
+        client = _TimedClient(clock)
+        log = PlannerLog(clock=clock)
+        return clock, client, log, _reporter(client, planner_log=log)
+
+    @staticmethod
+    def _rank(confidence: float, name: str) -> tuple[Hypothesis, ...]:
+        return (_hypothesis(name, confidence, reasoning=f"{name} at {confidence}"),)
+
+    def test_three_rankings_become_three_report_steps_in_order_each_with_its_own_ranking(
+        self, run_state: RunState, now: datetime
+    ) -> None:
+        """The take's own shape: three planner calls inside one INVESTIGATING transition."""
+        clock, client, log, reporter = self._timed(now)
+        reporter.report(_with(run_state, state=IncidentState.INVESTIGATING))
+
+        for offset, (confidence, name) in enumerate(
+            [(0.75, "first"), (0.82, "second"), (0.85, "third")], start=1
+        ):
+            clock.tick(7)
+            log.ranking(
+                tool=PLANNER_TOOL,
+                hypotheses=self._rank(confidence, name),
+                next_action=ThinkingAction(kind="probe", tool="get_consumer_lag"),
+                reason=None,
+            )
+            assert offset  # one report per ranking, checked in aggregate below
+
+        thinking = [
+            args
+            for args in client.arguments_for(REPORT_RUN_TOOL)
+            if args.get("step", {}).get("kind") == "report"
+        ]
+        assert len(thinking) == 3
+        assert [args["step"]["tool"] for args in thinking] == [PLANNER_TOOL] * 3
+        # Each report carries the ranking THAT call produced, not the one the last
+        # checkpoint held — which is the stale number the fourth take's page showed.
+        assert [args["current_hypothesis"]["name"] for args in thinking] == [
+            "first",
+            "second",
+            "third",
+        ]
+        assert [args["hypotheses"][0]["confidence"] for args in thinking] == [0.75, 0.82, 0.85]
+        assert [args["step"]["arguments"]["ranking"][0]["name"] for args in thinking] == [
+            "first",
+            "second",
+            "third",
+        ]
+        # In order, and still INVESTIGATING: no transition has happened.
+        assert [args["step"]["seq"] for args in thinking] == [1, 2, 3]
+        assert {args["state"] for args in thinking} == {"investigating"}
+
+    def test_each_ranking_leaves_within_one_call_of_the_planner_call(
+        self, run_state: RunState, now: datetime
+    ) -> None:
+        """The whole point, with a clock nobody but this test moves."""
+        clock, client, log, reporter = self._timed(now)
+        reporter.report(_with(run_state, state=IncidentState.INVESTIGATING))
+
+        clock.tick(5)
+        log.ranking(
+            tool=PLANNER_TOOL,
+            hypotheses=self._rank(0.8, "saturation"),
+            next_action=ThinkingAction(kind="probe", tool="get_consumer_lag"),
+            reason=None,
+        )
+        clock.tick(30)
+        log.ranking(
+            tool=PLANNER_TOOL,
+            hypotheses=self._rank(0.9, "saturation"),
+            next_action=ThinkingAction(kind="remediate"),
+            reason="the backlog is the symptom",
+        )
+
+        reports = list(zip(client.arguments_for(REPORT_RUN_TOOL), client.sent_at, strict=True))
+        thinking = [
+            (args["step"], sent)
+            for args, sent in reports
+            if args.get("step", {}).get("kind") == "report"
+        ]
+        for step, sent in thinking:
+            assert step["at"] == sent.isoformat()
+        assert [sent for _step, sent in thinking] == [
+            now + timedelta(seconds=5),
+            now + timedelta(seconds=35),
+        ]
+
+    def test_the_step_says_what_was_chosen_and_reads_as_one_sentence(
+        self, run_state: RunState, now: datetime
+    ) -> None:
+        _clock, client, log, reporter = self._timed(now)
+        reporter.report(_with(run_state, state=IncidentState.INVESTIGATING))
+
+        log.ranking(
+            tool=PLANNER_TOOL,
+            hypotheses=self._rank(0.85, "worker-dispatcher backlog"),
+            next_action=ThinkingAction(kind="probe", tool="get_consumer_lag"),
+            reason=None,
+        )
+
+        step = next(
+            args["step"]
+            for args in client.arguments_for(REPORT_RUN_TOOL)
+            if args.get("step", {}).get("kind") == "report"
+        )
+        assert step["arguments"]["next_action"] == {
+            "kind": "probe",
+            "tool": "get_consumer_lag",
+        }
+        assert step["result_excerpt"] == "top consumer_saturation 0.85 → probe get_consumer_lag"
+        assert step["latency_ms"] is None
+        assert step["outcome"] == "ok"
+
+    def test_a_verify_verdict_is_a_thinking_row_too(
+        self, run_state: RunState, now: datetime
+    ) -> None:
+        """A verify leg can poll for minutes; a page that shows nothing reads as a hang."""
+        _clock, client, log, reporter = self._timed(now)
+        reporter.report(_with(run_state, state=IncidentState.VERIFYING))
+
+        log.verdict(
+            hypotheses=self._rank(0.9, "saturation"),
+            verdict="not_verified",
+            reasoning="the lag reading is 30 and the cache may be stale",
+            attempt=2,
+            of=4,
+        )
+
+        step = next(
+            args["step"]
+            for args in client.arguments_for(REPORT_RUN_TOOL)
+            if args.get("step", {}).get("kind") == "report"
+        )
+        assert step["tool"] == VERIFY_JUDGE_TOOL
+        assert step["arguments"]["next_action"] is None
+        assert step["result_excerpt"].startswith("top consumer_saturation 0.90 → verify 2/4 ")
+        assert "the lag reading is 30" in step["result_excerpt"]
+
+    def test_a_thinking_row_is_never_the_runs_last_step(
+        self, run_state: RunState, now: datetime
+    ) -> None:
+        """``last_step.kind`` has two members and ``report`` is not one of them.
+
+        Writing it there would refuse the whole report on v0.6.15's input model and narrow
+        every later report of the run — so the guard is structural, not cosmetic.
+        """
+        _clock, client, log, reporter = self._timed(now)
+        probed = _with(
+            run_state,
+            state=IncidentState.INVESTIGATING,
+            evidence=(_entry("get_consumer_lag", now),),
+        )
+        reporter.report(probed)
+
+        log.ranking(
+            tool=PLANNER_TOOL,
+            hypotheses=self._rank(0.8, "saturation"),
+            next_action=ThinkingAction(kind="remediate"),
+            reason="act on it",
+        )
+
+        thinking = next(
+            args
+            for args in client.arguments_for(REPORT_RUN_TOOL)
+            if args.get("step", {}).get("kind") == "report"
+        )
+        assert thinking["last_step"]["tool"] == "get_consumer_lag"
+        assert thinking["last_step"]["kind"] == "read"
+        # And the local mirror agrees, which is what would have caught it before the wire did.
+        _RunReport.model_validate(thinking)
+
+    def test_thinking_steps_and_tool_steps_share_one_monotonic_sequence(
+        self, run_state: RunState, now: datetime
+    ) -> None:
+        """A ranking, the probe it chose, the next ranking — in that order on the page."""
+        clock = _Clock(now)
+        client = _TimedClient(clock)
+        tools = ToolCallLog(clock=clock)
+        planner = PlannerLog(clock=clock)
+        reporter = _reporter(client, tool_log=tools, planner_log=planner)
+        reporter.report(_with(run_state, state=IncidentState.INVESTIGATING))
+
+        planner.ranking(
+            tool=PLANNER_TOOL,
+            hypotheses=self._rank(0.75, "saturation"),
+            next_action=ThinkingAction(kind="probe", tool="get_consumer_lag"),
+            reason=None,
+        )
+        clock.tick(3)
+        tools.observe(_traced("get_consumer_lag", text='{"lag": 30}'))
+        clock.tick(4)
+        planner.ranking(
+            tool=PLANNER_TOOL,
+            hypotheses=self._rank(0.85, "saturation"),
+            next_action=ThinkingAction(kind="remediate"),
+            reason="act on it",
+        )
+
+        steps = [
+            (args["step"]["seq"], args["step"]["kind"])
+            for args in client.arguments_for(REPORT_RUN_TOOL)
+            if "step" in args
+        ]
+        assert steps == [(1, "report"), (2, "read"), (3, "report")]
+        assert reporter.thinking_sent == 2
+        assert reporter.steps_sent == 1
+
+    def test_a_ranking_before_the_first_transition_report_is_counted_not_sent(
+        self, run_state: RunState, now: datetime
+    ) -> None:
+        """No state to stamp a report with yet, so nobody could send it.
+
+        Dropped rather than buffered, deliberately: the ranking still reaches the console on
+        the next transition report, which has carried ``hypotheses`` since WO-R3-329, and a
+        buffer here would need a second place that knows about ``seq``.
+        """
+        _clock, client, log, _reporter_ = self._timed(now)
+
+        log.ranking(
+            tool=PLANNER_TOOL,
+            hypotheses=self._rank(0.8, "saturation"),
+            next_action=ThinkingAction(kind="remediate"),
+            reason="act on it",
+        )
+
+        assert client.arguments_for(REPORT_RUN_TOOL) == []
+        assert (log.observed, log.dropped) == (1, 1)
+
+    def test_an_older_platform_gets_no_thinking_rather_than_a_refused_report(
+        self, run_state: RunState, now: datetime
+    ) -> None:
+        """v0.6.15 has no ``step`` field, so a thinking report has nowhere to go."""
+        client = _OldPlatformClient()
+        log = PlannerLog()
+        reporter = _reporter(client, planner_log=log)
+        reporter.report(_with(run_state, state=IncidentState.INVESTIGATING))
+        assert not reporter.widened
+
+        log.ranking(
+            tool=PLANNER_TOOL,
+            hypotheses=self._rank(0.8, "saturation"),
+            next_action=ThinkingAction(kind="remediate"),
+            reason="act on it",
+        )
+
+        assert all("step" not in body for body in client.accepted)
+        assert reporter.thinking_sent == 0
+        assert log.dropped == 1
+
+    def test_a_raising_sink_never_escapes_the_log(self, now: datetime) -> None:
+        """``observe`` runs inside a transition, between an LLM call and the loop's decision."""
+        log = PlannerLog()
+
+        def explode(_thinking: ObservedThinking) -> bool:
+            raise RuntimeError("the reporter fell over")
+
+        log.subscribe(explode)
+        log.ranking(
+            tool=PLANNER_TOOL,
+            hypotheses=self._rank(0.8, "saturation"),
+            next_action=None,
+            reason=None,
+        )
+        assert (log.observed, log.dropped) == (1, 1)
+
+    def test_an_over_long_reason_is_cut_rather_than_refused(self, now: datetime) -> None:
+        """The platform refuses an over-long excerpt, and a refusal costs the whole report."""
+        seen: list[ObservedThinking] = []
+        log = PlannerLog()
+        log.subscribe(_appends_to(seen))
+        log.ranking(
+            tool=PLANNER_TOOL,
+            hypotheses=self._rank(0.8, "saturation"),
+            next_action=ThinkingAction(kind="stop"),
+            reason="x" * (MAX_REASON_CHARS + 50),
+        )
+        assert seen[0].reason is not None
+        assert len(seen[0].reason) == MAX_REASON_CHARS
+
+    def test_the_summary_line_counts_thinking_apart_from_calls(
+        self, run_state: RunState, now: datetime
+    ) -> None:
+        """ "N steps reported" is compared against the platform's ``agent.tool_invoked`` rows.
+
+        A thinking row is not a call, so counting it there is what makes the console print
+        "the two do not agree" about a disagreement nobody has.
+        """
+        _clock, _client, log, reporter = self._timed(now)
+        reporter.report(_with(run_state, state=IncidentState.INVESTIGATING))
+        log.ranking(
+            tool=PLANNER_TOOL,
+            hypotheses=self._rank(0.8, "saturation"),
+            next_action=ThinkingAction(kind="remediate"),
+            reason="act on it",
+        )
+        line = summarize(reporter)
+        assert "0 step(s)" in line
+        assert "1 thinking step(s)" in line

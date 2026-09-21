@@ -49,6 +49,7 @@ from incident_commander.agent.state import (
     IncidentState,
     RunState,
 )
+from incident_commander.agent.thinking import PlannerLog
 from incident_commander.config import DEFAULT_MAX_REMEDIATION_ATTEMPTS
 from incident_commander.llm.client import LLMClientProtocol, LLMError
 from incident_commander.llm.prompts.loader import load_prompt
@@ -2203,6 +2204,7 @@ def make_llm_verify(
     sleep: Callable[[float], None] = time.sleep,
     clock: Callable[[], datetime] | None = None,
     max_attempts: int = DEFAULT_MAX_REMEDIATION_ATTEMPTS,
+    planner_log: PlannerLog | None = None,
 ) -> Callable[[RunState, datetime], RunState]:
     """Bind clients + model to the VERIFYING transition.
 
@@ -2216,6 +2218,11 @@ def make_llm_verify(
     rely on. Attempt 1 always runs (ADR 0006, why loop.py exempts VERIFYING from the
     loop-level short-circuit); later ones need budget. ``clock`` stamps each poll for real,
     ``None`` with ``at``.
+
+    ``planner_log`` is where each poll's verdict is written the moment the judge returns
+    (ADR 0075). A verify leg can poll for minutes, and until ADR 0075 every verdict reached a
+    watching operator only when the leg ended, so a run that polled four times looked stuck.
+    ``None`` means nobody is watching, and changes nothing about the run.
     """
 
     def transition_verify(run_state: RunState, at: datetime) -> RunState:
@@ -2332,6 +2339,18 @@ def make_llm_verify(
                     "updated_at": at_attempt,
                 }
             )
+            # ADR 0075: the verdict goes out now, not when this leg ends. A verify leg can poll
+            # for minutes against the platform's own 60-second lag clock, and a page that shows
+            # nothing for those minutes reads as a hung run. The ranking travels unchanged — a
+            # verdict judges the action, it does not re-rank the causes.
+            if planner_log is not None:
+                planner_log.verdict(
+                    hypotheses=tuple(run_state.hypotheses),
+                    verdict=judgment.verdict,
+                    reasoning=judgment.reasoning,
+                    attempt=attempt + 1,
+                    of=probe_attempts,
+                )
             if judgment.verdict == "verified":
                 # "Did the action work?" is not "is the incident over?": a STABILIZE-ONLY
                 # pause reads verified and leaves the chain stuck. Consulted here rather

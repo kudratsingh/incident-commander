@@ -17,6 +17,7 @@ import pytest
 from pydantic import BaseModel, SecretStr
 
 from evals import artifacts
+from evals import chaos_hooks as chaos_hooks_module
 from evals import guards as guards_module
 from evals import runner as runner_module
 from evals.chaos_hooks import ChaosInvocationError
@@ -29,7 +30,10 @@ from evals.graders.deterministic import (
 )
 from evals.runner import (
     _SCENARIOS_DIR,
+    EXTERNAL_CHAOS_SEEDER,
+    WORLD_ALREADY_FAULTED_FLAG,
     ChaosSetupFailed,
+    PreconditionNotMet,
     RunReport,
     ScenarioOutcome,
     ScenarioResult,
@@ -2189,12 +2193,23 @@ class _ScriptedCanned(_ClosableCanned):
         arguments: Any,
         *,
         timeout_seconds: float | None = None,
+        # The premise reads go through ``LabProbeClient`` since ADR 0075, so every fake
+        # standing in for the transport takes the label and hands it on.
+        lab_probe: str | None = None,
+        lab_principal_token: str | None = None,
     ) -> ToolResult:
         self._attempts += 1
         if self._attempts in self._dead_on:
             self.calls.append((name, dict(arguments)))
+            self.labels.append((lab_probe, lab_principal_token))
             raise MCPError(-32000, "connection reset by peer")
-        return super().call_tool(name, arguments, timeout_seconds=timeout_seconds)
+        return super().call_tool(
+            name,
+            arguments,
+            timeout_seconds=timeout_seconds,
+            lab_probe=lab_probe,
+            lab_principal_token=lab_principal_token,
+        )
 
 
 class TestPreconditions:
@@ -2439,9 +2454,17 @@ class _OrderedCanned(_ClosableCanned):
         arguments: Any,
         *,
         timeout_seconds: float | None = None,
+        lab_probe: str | None = None,
+        lab_principal_token: str | None = None,
     ) -> ToolResult:
         self._order.append(f"tool:{name}")
-        return super().call_tool(name, arguments, timeout_seconds=timeout_seconds)
+        return super().call_tool(
+            name,
+            arguments,
+            timeout_seconds=timeout_seconds,
+            lab_probe=lab_probe,
+            lab_principal_token=lab_principal_token,
+        )
 
 
 class TestTwoFaultPreconditions:
@@ -4392,3 +4415,148 @@ class TestCrashPathLedgerIsSeededFromTheScaledCeilings:
         budget = self._crash_budget(budget_max_tokens=500_000, budget_max_usd=Decimal("5.00"))
         assert budget.max_tokens == 500_000
         assert budget.max_usd == Decimal("5.00")
+
+
+class TestTheWorldMayAlreadyBeFaulted:
+    """ADR 0075 item 5: one fault, fired once, by whoever is driving the demo.
+
+    The fourth take's audit stream holds ``chaos.tool_invoked kill_consumer`` twice — once from
+    ``scripts/demo_live.py`` step 3 at 03:18:05, and again from this runner's own
+    ``_seed_chaos_plan`` at 03:19:48 when step 5 started the agent. The world tolerates the
+    repeat (the hook re-arms); the RECORD does not, because every reader that anchors on the
+    take's newest chaos row then measures the demo from a re-arm 1 m 43 s late.
+    """
+
+    @staticmethod
+    def _scenario() -> Scenario:
+        """A live scenario with a hook to skip AND a premise to still check."""
+        base = _passing_scenario()
+        return base.model_copy(
+            update={
+                "name": "already_faulted_probe",
+                "use_live_mcp": True,
+                "chaos_setup": ChaosHook(
+                    name="kill_consumer",
+                    arguments={"consumer_group": "billing", "ttl_seconds": 300},
+                ),
+                "expected_precondition": (
+                    PreconditionProbe(
+                        tool="get_consumer_lag",
+                        arguments={"consumer_group": "billing"},
+                        expect=(PreconditionField(path="lag", at_least=20),),
+                    ),
+                ),
+            }
+        )
+
+    @staticmethod
+    def _no_chaos_may_fire(monkeypatch: pytest.MonkeyPatch) -> None:
+        """Pin at the ChaosClient seam, not only at the runner's reference to it.
+
+        ``invoke_chaos_hook`` builds a ``ChaosClient`` and calls it, so a path that reached the
+        platform some other way would still pass a check on the runner's own name. This makes
+        the transport itself the tripwire.
+        """
+
+        def _boom(*_args: Any, **_kwargs: Any) -> Any:
+            raise AssertionError(
+                "a chaos hook was fired in --world-already-faulted mode: that is the second "
+                "injection the fourth take's timeline was measured from"
+            )
+
+        monkeypatch.setattr(chaos_hooks_module.ChaosClient, "call", _boom)
+        monkeypatch.setattr(chaos_hooks_module.ChaosClient, "__init__", _boom)
+
+    def _live_client(self, monkeypatch: pytest.MonkeyPatch) -> _ClosableCanned:
+        client = _ClosableCanned(self._scenario().canned_tool_responses)
+        monkeypatch.setattr("evals.runner.make_client", lambda *_a, **_kw: client)
+        return client
+
+    def test_no_hook_fires_and_the_premise_is_still_checked(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        self._no_chaos_may_fire(monkeypatch)
+        client = self._live_client(monkeypatch)
+        settings = _test_settings(platform_mcp_url="http://real.host:8001/mcp")
+
+        result = run_scenario(self._scenario(), settings, world_already_faulted=True)
+
+        assert result.outcome.final_state is IncidentState.ESCALATED
+        # The premise WAS read — the flag says who seeded, not whether to check.
+        assert ("get_consumer_lag", {"consumer_group": "billing"}) in client.calls
+
+    def test_the_archive_names_who_seeded_instead(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        self._no_chaos_may_fire(monkeypatch)
+        self._live_client(monkeypatch)
+        settings = _test_settings(platform_mcp_url="http://real.host:8001/mcp")
+
+        result = run_scenario(self._scenario(), settings, world_already_faulted=True)
+
+        provenance = result.outcome.provenance
+        assert provenance is not None
+        assert provenance.chaos_seeded_by == EXTERNAL_CHAOS_SEEDER
+        # So a grader counting the scenario's chaos rows knows the one row it finds sits
+        # BEFORE this run rather than that a hook went missing.
+        assert result.outcome.chaos_hooks == ()
+
+    def test_the_default_still_seeds_and_names_nobody(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        calls: list[str] = []
+
+        def _fake_invoke(
+            _url: str, _token: str, name: str, _arguments: dict[str, Any]
+        ) -> dict[str, Any]:
+            calls.append(name)
+            return {"seeded": True}
+
+        monkeypatch.setattr(runner_module, "invoke_chaos_hook", _fake_invoke)
+        self._live_client(monkeypatch)
+        settings = _test_settings(platform_mcp_url="http://real.host:8001/mcp")
+
+        result = run_scenario(self._scenario(), settings)
+
+        assert calls == ["kill_consumer"]
+        provenance = result.outcome.provenance
+        assert provenance is not None
+        assert provenance.chaos_seeded_by is None
+
+    def test_a_precondition_that_fails_is_still_a_precondition_failure(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The premise is the one thing this mode does not get to answer."""
+        self._no_chaos_may_fire(monkeypatch)
+        healthy = _ClosableCanned(
+            {
+                "get_consumer_lag": ToolResult(
+                    content=[
+                        {
+                            "type": "text",
+                            "text": (
+                                '{"consumer_group":"billing","lag":0,"lag_known":true,'
+                                '"source":"live"}'
+                            ),
+                        }
+                    ]
+                )
+            }
+        )
+        monkeypatch.setattr("evals.runner.make_client", lambda *_a, **_kw: healthy)
+        settings = _test_settings(platform_mcp_url="http://real.host:8001/mcp")
+
+        with pytest.raises(PreconditionNotMet):
+            run_scenario(self._scenario(), settings, world_already_faulted=True)
+
+    def test_the_flag_is_refused_with_a_recorded_run(
+        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """A replay seeds nothing, so there is no seeding for the flag to skip."""
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            ["evals.runner", "--mode", "recorded", WORLD_ALREADY_FAULTED_FLAG, "--only", "x"],
+        )
+        assert runner_module.main() == 2
+        out = capsys.readouterr().out
+        assert WORLD_ALREADY_FAULTED_FLAG in out
+        assert "no scenarios ran, nothing was spent" in out

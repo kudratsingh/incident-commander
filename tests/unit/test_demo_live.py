@@ -11,7 +11,7 @@ from __future__ import annotations
 import subprocess
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
@@ -25,6 +25,26 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 def _reading(lag: int, *, age_seconds: float = 4.0, known: bool = True) -> demo_live.LagReading:
     """A lag reading in the shape the waits read, age included (ADR 0074's F7)."""
     return demo_live.LagReading(lag=lag, known=known, age_seconds=age_seconds)
+
+
+class _FakePopen:
+    """Enough of ``Popen`` for the handle's own bookkeeping: it is running until stopped."""
+
+    def __init__(self) -> None:
+        self.returncode: int | None = None
+
+    def poll(self) -> int | None:
+        return self.returncode
+
+    def terminate(self) -> None:
+        self.returncode = 0
+
+    def wait(self, timeout: float | None = None) -> int:
+        self.returncode = 0
+        return 0
+
+    def kill(self) -> None:
+        self.returncode = 0
 
 
 class _FakeStack:
@@ -110,10 +130,16 @@ def stack(monkeypatch: pytest.MonkeyPatch) -> _FakeStack:
     # rehearsal, not asserted here.
     monkeypatch.setattr(time, "sleep", lambda _seconds: None)
 
-    def _start(self: demo_live.TrafficHandle, rate: str | None = None) -> None:
+    def _start(
+        self: demo_live.TrafficHandle, rate: str | None = None, *, append: bool = False
+    ) -> None:
         fake.traffic_started += 1
         fake.traffic_rates.append(rate)
-        self.process = None
+        # A stand-in with a `Popen` shape, so `accelerate`'s "is the producer running" check
+        # and `stop`'s `poll()` both see what they would see live. `None` made `accelerate` a
+        # no-op and the acceleration untestable. The cast is the honest shape of a fake: it is
+        # structurally what the handle uses and nothing more.
+        self.process = cast("subprocess.Popen[str]", _FakePopen())
 
     def _stop(self: demo_live.TrafficHandle, console: demo_live.Console) -> None:
         fake.traffic_stopped += 1
@@ -231,10 +257,12 @@ class TestTheStepOrder:
 
 class TestTrafficBelongsToOneModeOnly:
     def test_consumer_outage_starts_and_stops_the_producer(self, stack: _FakeStack) -> None:
-        # Lag is arrival minus service: without a producer the fault cannot exist.
+        # Lag is arrival minus service: without a producer the fault cannot exist. TWO starts
+        # since WO-R3-339 — the slow baseline and the fast one the fault gets — and the
+        # important half is unchanged: it is stopped, so the loop cannot outlive the demo.
         assert demo_live.main(["--mode", "consumer_outage", "--auto"]) == 0
 
-        assert stack.traffic_started == 1
+        assert stack.traffic_started == 2
         assert stack.traffic_stopped >= 1
 
     def test_dlq_backlog_starts_no_producer(self, stack: _FakeStack) -> None:
@@ -360,7 +388,7 @@ class TestEveryFailurePathResetsAndAudits:
 
         assert demo_live.main(["--mode", "consumer_outage", "--auto"]) == 1
 
-        assert stack.traffic_started == 1
+        assert stack.traffic_started == 2
         assert stack.traffic_stopped >= 1
 
     def test_an_unexpected_exception_also_resets(
@@ -946,11 +974,36 @@ class TestThePlatformRaisesThePage:
 class TestTheProducerRunsAtTheModesRate:
     """WO-R3-339: 0.75 s during the fault, so the page arrives while somebody is watching."""
 
-    def test_the_traffic_mode_declares_and_passes_its_rate(self, stack: _FakeStack) -> None:
+    def test_the_baseline_is_slow_and_the_fault_is_fast(self, stack: _FakeStack) -> None:
+        """The order is the claim, and it is the one a measurement bought.
+
+        `POST /jobs` is rate-limited per identity in a FIXED 60-second window of 30
+        creations, so every job the BASELINE spends is one the backlog cannot have. Running
+        the whole walk at 0.75 s was measured on 2026-09-21: ten seconds of countdown left 17
+        of the 30, the lag stalled at 17 until the window rolled, and the platform's page
+        arrived 56.1 s after the fault instead of 15.6 s. So the producer starts at the
+        script's sustainable default and is restarted at the fault's rate in step 3.
+        """
         assert demo_live.main(["--mode", "consumer_outage", "--auto"]) == 0
 
-        assert stack.traffic_rates == ["0.75"]
-        assert demo_live.MODES["consumer_outage"]["traffic_rate"] == "0.75"
+        assert stack.traffic_rates == [None, "0.75"]
+        assert demo_live.MODES["consumer_outage"]["fault_traffic_rate"] == "0.75"
+
+    def test_the_quiet_mode_accelerates_nothing(self, stack: _FakeStack) -> None:
+        assert demo_live.main(["--mode", "dlq_backlog", "--auto"]) == 0
+
+        assert stack.traffic_rates == []
+        assert demo_live.MODES["dlq_backlog"]["fault_traffic_rate"] is None
+
+    def test_the_acceleration_happens_after_the_fault_is_fired(
+        self, stack: _FakeStack, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        # Not before: until the consumer is dead the jobs are consumed, so a fast baseline
+        # buys nothing and spends the window the fault needs.
+        assert demo_live.main(["--mode", "consumer_outage", "--auto"]) == 0
+
+        out = capsys.readouterr().out
+        assert out.index("fired: ") < out.index("producer to a job every 0.75s")
 
     def test_the_rate_reaches_make_as_a_variable(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """The argv `make traffic` is really started with — the fake stack stubs `start`."""
@@ -969,6 +1022,46 @@ class TestTheProducerRunsAtTheModesRate:
         demo_live.TrafficHandle().start(rate="0.75")
 
         assert seen == [["make", "traffic", "RATE=0.75"]]
+
+    def test_accelerate_stops_the_slow_loop_and_starts_a_fast_one(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        seen: list[list[str]] = []
+
+        class _Popen(_FakePopen):
+            def __init__(self, argv: list[str], **kwargs: Any) -> None:
+                super().__init__()
+                seen.append(argv)
+
+        monkeypatch.setattr(subprocess, "Popen", _Popen)
+        monkeypatch.setattr(demo_live, "_smoke_env", lambda: {"PLATFORM_SMOKE_TOKEN": "x"})
+        handle = demo_live.TrafficHandle()
+        handle.start()
+        handle.accelerate(demo_live.Console(auto=True), "0.75")
+
+        assert seen == [["make", "traffic"], ["make", "traffic", "RATE=0.75"]]
+
+    def test_accelerate_with_no_rate_or_no_producer_does_nothing(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        seen: list[list[str]] = []
+
+        class _Popen(_FakePopen):
+            def __init__(self, argv: list[str], **kwargs: Any) -> None:
+                super().__init__()
+                seen.append(argv)
+
+        monkeypatch.setattr(subprocess, "Popen", _Popen)
+        monkeypatch.setattr(demo_live, "_smoke_env", lambda: {"PLATFORM_SMOKE_TOKEN": "x"})
+        console = demo_live.Console(auto=True)
+        # No producer: the quiet mode's path.
+        demo_live.TrafficHandle().accelerate(console, "0.75")
+        # A producer but no declared rate: unchanged, still running.
+        handle = demo_live.TrafficHandle()
+        handle.start()
+        handle.accelerate(console, None)
+
+        assert seen == [["make", "traffic"]]
 
     def test_no_rate_keeps_the_scripts_own_sustainable_default(
         self, monkeypatch: pytest.MonkeyPatch

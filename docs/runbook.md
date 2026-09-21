@@ -1742,12 +1742,14 @@ sets to something else):
     agent was paged with. Three consequences for a re-pin:
 
     * `make eval-reset` gains `rule_alerts_resolved` in its JSON, and the world
-      audit's `active alerts: 3` is only true afterwards. A take that ends with a
-      reset therefore closes its own episode, and the `alert.resolved` row in that
-      take is usually the RESET's rather than the rule's — measured on both
-      rehearsals, where the run finished within a pass or two of the action. The
-      rule's own resolution path is real and was measured separately, zero-LLM: a
-      replay took the depth under the threshold and the rule resolved inside 3.2 s.
+      audit's `active alerts: 3` is only true afterwards. **Read that counter rather
+      than the row** when you want to know who closed an episode: a take that ends
+      with a reset can close its own page, so an `alert.resolved` inside a take
+      proves the rule only when the reset reports `rule_alerts_resolved: 0`.
+      Measured on the 2026-09-21 rehearsals, one of each — `consumer_outage`'s rule
+      resolved its own episode on a sample that read 8 against a threshold of 20 and
+      the reset then had nothing to close, while `dlq_backlog` finished first and the
+      reset closed it.
     * **the tell that the rules are on** is a query, like step 10's:
       `GET /api/v1/audit/logs?action_prefix=alert.` (operator login,
       `scripts/bootstrap_agent_token.py`'s dev pair) after a take should hold exactly

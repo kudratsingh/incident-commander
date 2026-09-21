@@ -6,15 +6,10 @@
 The world has to break while somebody is watching, in an order they can narrate — which
 ``make eval-live`` cannot do, because it seeds and runs in one breath. So the fault is fired
 HERE in step 3 and the agent starts in step 5 with ``--world-already-faulted`` (ADR 0075).
-Firing the hooks twice was safe for the WORLD (both are repeat-safe, pinned by
-``test_demo_live.py``) and wrong for the RECORD: the fourth take's console anchored its whole
-timeline on the second injection, 1 m 43 s late.
-
-Step 5 passes ``--world-already-faulted``, so the runner does not fire the same hooks a second
-time (ADR 0075): the fourth take's second injection landed 1 m 43 s after the real one, and
-every reader that anchors on the take's newest ``chaos.*`` row measured the demo from the
-re-arm. One fault, fired once, in step 3 — safe for the world either way, and wrong for the
-RECORD.
+Firing the hooks twice was safe for the WORLD and wrong for the RECORD: the fourth take's
+second injection landed 1 m 43 s after the real one, and the console anchored its whole
+timeline on it. One fault, fired once, in step 3 — which is also what lets a mode use a hook
+that is NOT repeat-safe, as ``demo_dlq_replay_safe_backlog`` does (ADR 0076).
 
 Step 3 waits TWICE, and they are different claims. The PLATFORM's own READING of the fault
 says the source the console draws from is showing a breach; the PLATFORM's own ALERT ROW says
@@ -64,14 +59,18 @@ MODES: Final[dict[str, dict[str, Any]]] = {
         # producer the backlog stays 0 however long you wait and the precondition
         # correctly refuses the run. This is the mode's whole operational difference.
         "needs_traffic": True,
-        # Seconds between jobs while the fault is on screen. `make traffic`'s own default
-        # is 3, which is the SUSTAINABLE rate; 0.75 is the DEMO rate and it works because
-        # `POST /jobs` is rate-limited in a fixed window, so a faster loop front-loads the
-        # window instead of raising the sustained rate. That front-load is the point: the
-        # backlog crosses the platform's alert threshold of 20 in seconds rather than in a
-        # minute, which is what makes the page arrive while somebody is watching
-        # (WO-R3-339). Declared per mode because it is a fact about the mode's world.
-        "traffic_rate": "0.75",
+        # Seconds between jobs ONCE THE FAULT HAS FIRED. The baseline keeps
+        # `make traffic`'s own default of 3, and the producer is restarted at this rate in
+        # step 3 — which is not a refinement, it is the difference between a reliable number
+        # and a lucky one. `POST /jobs` is rate-limited per identity in a FIXED 60-second
+        # window of 30 creations, so a faster loop front-loads the window rather than raising
+        # the sustained rate; the front-load is exactly what makes the backlog cross the
+        # threshold of 20 in seconds. But every job the BASELINE spends is one the fault
+        # cannot: measured on 2026-09-21, ten seconds of 0.75 s countdown traffic left only 17
+        # of the 30 for the fault, the lag stalled at 17 for half a minute waiting for the
+        # window to roll, and fault→page read 56.1 s instead of 15.6 s. At 3 s the countdown
+        # spends about three, so the fault gets the rest.
+        "fault_traffic_rate": "0.75",
         # Which platform reading tells the operator the page will show the fault. A closed
         # set for the same reason the modes are: this decides what is polled.
         "fault": "consumer_lag",
@@ -95,7 +94,7 @@ MODES: Final[dict[str, dict[str, Any]]] = {
         # The world is seeded at boot and the hook adds the backlog. Nothing arrives,
         # nothing drains, so no traffic is needed or wanted.
         "needs_traffic": False,
-        "traffic_rate": None,
+        "fault_traffic_rate": None,
         "fault": "dlq_depth",
         "story": (
             "a dead-letter queue that fills past its threshold with four replayable rows "
@@ -202,6 +201,23 @@ _LAG_CLOCK: Final = (
 )
 
 
+def _end(process: subprocess.Popen[str]) -> None:
+    """Terminate one producer, escalating to a kill. Shared by ``stop`` and ``accelerate``.
+
+    A free function rather than a method, because ``accelerate`` ends a process the handle no
+    longer points at — it has already started the replacement — and a method reading
+    ``self.process`` would end the new one.
+    """
+    if process.poll() is not None:
+        return
+    process.terminate()
+    try:
+        process.wait(timeout=15)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        process.wait(timeout=15)
+
+
 class TrafficHandle:
     """The producer subprocess, owned by ``main`` rather than returned from the walk.
 
@@ -214,15 +230,15 @@ class TrafficHandle:
     def __init__(self) -> None:
         self.process: subprocess.Popen[str] | None = None
 
-    def start(self, rate: str | None = None) -> None:
-        """Start the producer, at the MODE's rate when it declares one.
+    def start(self, rate: str | None = None, *, append: bool = False) -> None:
+        """Start the producer, at ``rate`` seconds between jobs when one is given.
 
-        ``rate`` is seconds between submissions, handed to `make traffic` as `RATE=`. A mode
-        that declares none gets the script's own sustainable default, which is what every
-        caller before WO-R3-339 got.
+        ``rate`` is handed to `make traffic` as `RATE=`; without one the script's own
+        sustainable default (3 s) applies, which is what every caller before WO-R3-339 got.
+        ``append`` keeps the previous phase's output in the log, for ``accelerate``.
         """
         log = _REPO_ROOT / "evals" / ".demo-traffic.log"
-        handle = log.open("w", encoding="utf-8")
+        handle = log.open("a" if append else "w", encoding="utf-8")
         self.process = subprocess.Popen(  # noqa: S603 - fixed argv, no shell
             ["make", "traffic", *([f"RATE={rate}"] if rate else [])],
             cwd=_REPO_ROOT,
@@ -240,13 +256,38 @@ class TrafficHandle:
         if process is None or process.poll() is not None:
             return
         console.say("  stopping the traffic loop")
-        process.terminate()
-        try:
-            process.wait(timeout=15)
-        except subprocess.TimeoutExpired:
-            process.kill()
-            process.wait(timeout=15)
+        _end(process)
         self.process = None
+
+    def accelerate(self, console: Console, rate: str | None) -> None:
+        """Re-start the producer at the FAULT's rate, once the fault has fired.
+
+        A restart rather than a signal, because the interval is the loop's own argument and
+        there is nothing to keep across it: each submission is independent, the jobs already
+        in the queue stay in the queue, and the log is appended to so the baseline's tally
+        survives. A no-op when the mode declares no fault rate or the producer is not running,
+        so the quiet modes and every failure path are unaffected.
+
+        Why it exists at all: `POST /jobs` is rate-limited per identity in a fixed 60-second
+        window of 30 creations, so running the BASELINE fast spends the allowance the fault
+        needs. Measured on 2026-09-21 — ten seconds of countdown at 0.75 s left 17 of the 30,
+        the lag stalled at 17 until the window rolled, and the page arrived 56.1 s after the
+        fault instead of 15.6 s.
+
+        **The new loop is started BEFORE the old one is stopped, and that ordering is worth
+        four seconds.** `make traffic` has to boot `uv`, import httpx and log in — two to three
+        seconds in which a stop-then-start producer submits nothing at all, which on the first
+        measurement of this path put fault→page at 19.9 s against a target of 20. Overlapping
+        them means the slow loop keeps arriving while the fast one boots, so the backlog never
+        stops climbing; the cost is a second or two at the sum of the two rates, which on a
+        backlog that is about to grow for fifteen seconds is not a number anybody can see.
+        """
+        if rate is None or self.process is None:
+            return
+        console.say(f"  producer to a job every {rate}s — the backlog is what climbs now")
+        previous = self.process
+        self.start(rate=rate, append=True)
+        _end(previous)
 
 
 class WindDown:
@@ -544,14 +585,15 @@ def _walk(
     # ---- STEP 2: the baseline the audience should see before anything breaks ----------
     step = console.begin(2, "baseline")
     if mode["needs_traffic"]:
-        rate = mode.get("traffic_rate")
         console.note(
             step,
-            "starting `make traffic` in the background (a job every "
-            f"{rate or '3'}s — fast enough that the backlog crosses the platform's "
-            "alert threshold in seconds once the consumer dies)",
+            "starting `make traffic` in the background at the sustainable rate (a job every "
+            "3s) — the audience should see work arriving and being consumed. It speeds up "
+            "when the fault fires, and not before: the platform's per-identity job limit is a "
+            "fixed 60-second window, so every job the baseline spends is one the backlog "
+            "cannot have",
         )
-        traffic.start(rate=rate)
+        traffic.start()
         _wait_for_healthy_baseline(console, step)
     else:
         console.note(step, "nothing to start — this world is seeded and quiet")
@@ -578,6 +620,10 @@ def _walk(
     fired = _seed(scenario)
     for line in fired:
         console.note(step, f"fired: {line}")
+    # The producer speeds up HERE and not in step 2, which is the whole reason it is a
+    # separate call: from now on nothing is consuming what arrives, so every job is backlog,
+    # and the fault needs the rate limit's window to itself (see ``accelerate``).
+    traffic.accelerate(console, mode.get("fault_traffic_rate"))
     console.note(step, "the console's phase strip should move to `fault injected` within 2s")
     console.note(
         step,

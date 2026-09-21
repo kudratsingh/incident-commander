@@ -526,12 +526,17 @@ traffic: export PLATFORM_SMOKE_TOKEN := $(PLATFORM_SMOKE_TOKEN)
 #
 # RATE is the seconds between submissions and defaults to the script's own 3.0,
 # which is the sustainable rate: `POST /jobs` is rate-limited per identity in a
-# FIXED window, so a faster rate does not raise the sustained arrival rate — it
-# front-loads the window and then collects 429s until the window rolls. That is
-# exactly what a demo wants and exactly what a soak does not, so it is a
-# parameter rather than a new default: the demo runner passes RATE=0.75 during
-# the fault so the backlog crosses the platform's alert threshold in seconds
-# instead of in a minute (WO-R3-339), and everything else keeps 3.
+# FIXED 60-second window of 30 creations, so a faster rate does not raise the
+# sustained arrival rate — it front-loads the window and then collects 429s
+# until the window rolls. That is exactly what a demo wants and exactly what a
+# soak does not, so it is a parameter rather than a new default.
+#
+# `scripts/demo_live.py` runs the BASELINE at this default and restarts the
+# producer at RATE=0.75 once the fault has fired (WO-R3-339), and the ordering is
+# not a nicety: every job the baseline spends is one the backlog cannot have.
+# Measured 2026-09-21 — running the whole walk at 0.75 left 17 of the 30 for the
+# fault, the lag stalled at 17 until the window rolled, and the platform's page
+# arrived 56.1 s after the fault instead of 15.6 s.
 traffic:
 	uv run python scripts/traffic_loop.py $(if $(RATE),--interval $(RATE)) $(if $(UNTIL_LAG),--until-lag $(UNTIL_LAG)) $(if $(COUNT),--count $(COUNT))
 

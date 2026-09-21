@@ -49,7 +49,8 @@ def _budget_exemption(run_state: RunState, *, resuming: bool) -> str | None:
     if (
         resuming
         and run_state.state is IncidentState.REMEDIATING
-        # No stored plan means nothing was dispatched: a corrupt checkpoint, not a resume.
+        # A REMEDIATING checkpoint with no plan saved on it never dispatched an action, so it
+        # is a corrupt checkpoint rather than a crash worth resuming.
         and run_state.remediation_plan is not None
     ):
         return "reinvoke-after-crash-resume"
@@ -100,7 +101,8 @@ def run_to_completion(
     Checkpoints on entry and after every transition; an exhausted budget
     short-circuits to ``ESCALATED`` unless ``_budget_exemption`` names one.
     """
-    # 1. Refuse a run that is already over, then checkpoint the state we were handed.
+    # 1. Raise ``TerminalStateError`` if this run has already finished; otherwise checkpoint the
+    #    state we were handed, so a crash in the first transition still records where it began.
     if run_state.state.is_terminal:
         raise TerminalStateError(
             f"run_to_completion called on terminal state {run_state.state.value}"
@@ -109,23 +111,26 @@ def run_to_completion(
         checkpointer.write(run_state)
 
     steps = 0
-    # First iteration only: api/app.py resumes from the latest checkpoint, so an entry state
-    # of REMEDIATING means a crash mid-remediation.
+    # True on the first iteration only. api/app.py restarts a run from its latest checkpoint,
+    # so arriving here already in REMEDIATING means the previous process crashed mid-action.
     resuming = True
     while not run_state.state.is_terminal:
-        # 2. The step ceiling, which is a defect guard rather than a budget.
+        # 2. Raise ``MaxStepsExceededError`` once the loop has taken more than ``max_steps``
+        #    transitions. Not a budget: it catches a bug that would otherwise spin here forever.
         if steps >= max_steps:
             raise MaxStepsExceededError(f"run did not terminate within {max_steps} steps")
-        # 3. The iteration's START, which the transition stamps its own reads with (ADR 0075).
+        # 3. Read the clock once for this iteration and charge the wall time elapsed so far.
+        #    The transition stamps everything it reads with this same moment (ADR 0075).
         now = clock()
         run_state = _accrue_wall_time(run_state, now)
-        # 4. Budget, unless ADR 0006 exempts this step — wall and USD included, not just calls.
+        # 4. Escalate instead of stepping when any budget is spent — tool calls, tokens, wall
+        #    clock and dollars alike — unless ADR 0006 exempts this particular step.
         exemption = _budget_exemption(run_state, resuming=resuming)
         if run_state.budget.is_exhausted and exemption is None:
             run_state = _escalate(run_state, "budget exhausted", now)
         else:
-            # 5. Dispatch one transition. A crash still charges the wall meter and checkpoints,
-            #    or the meter becomes a lower bound.
+            # 5. Run exactly one state transition. If it raises, still charge the wall clock
+            #    and checkpoint before re-raising, or the crashed run under-reports its cost.
             evidence_before = len(run_state.evidence)
             try:
                 run_state = dispatch(run_state, now, transitions=transitions)
@@ -134,8 +139,8 @@ def run_to_completion(
                 if checkpointer is not None:
                     checkpointer.write(run_state)
                 raise
-            # 6. ONE read shared by the meter and the stamp: a terminal transition's duration
-            #    and the moment its state was entered are the same fact (ADR 0075).
+            # 6. Read the clock once more and use that one reading twice: how long the
+            #    transition took, and when the state it produced began (ADR 0075).
             entered = clock()
             run_state = _stamp_entered(
                 run_state,
@@ -144,7 +149,7 @@ def run_to_completion(
                 evidence_before=evidence_before,
             )
             run_state = _accrue_wall_time(run_state, entered)
-        # 7. Checkpoint what the transition produced.
+        # 7. Save the state the transition produced, so a crash resumes from here.
         if checkpointer is not None:
             checkpointer.write(run_state)
         steps += 1

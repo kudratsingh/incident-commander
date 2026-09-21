@@ -64,6 +64,16 @@ _NON_SETTINGS_TOKENS: Final[frozenset[str]] = frozenset(
         "PURGE_IDEMPOTENCY",  # `make eval-reset` opt-in purge flag
         "SMOKE_ONLY",  # `make eval-smoke` scenario-list override
         "UNTIL_LAG",  # `make traffic` stop-at-this-backlog flag (scripts/traffic_loop.py)
+        # Platform-side metrics-pass interval, a SETTING since platform v0.6.18 / ADR 0039
+        # and set to 5 on both platform-code services in demo/compose.yml (owner decision
+        # O-35). Not a commander setting and deliberately not mirrored as one: the agent
+        # must not be able to read the clock it is measured against, and the runbook's own
+        # rule is that the tool description points at `age_seconds` rather than an interval.
+        "METRICS_LOOP_INTERVAL_SECONDS",
+        # A platform-side constant, not an env var: the absolute cap on the lag sample ring
+        # (backend/app/core/consumer_lag.py), quoted in the runbook's pin walk because it is
+        # the guard that binds only below a 3.75 s interval.
+        "LAG_SAMPLES_MAX_ENTRIES",
         # Settings on the PLATFORM, quoted in docs/safety-model.md (platform #169).
         "MCP_RATE_LIMIT_PER_PRINCIPAL",
         "MCP_RATE_LIMIT_WINDOW_SECONDS",

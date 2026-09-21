@@ -148,6 +148,73 @@ wait exists — it is a real sample of a real backlog that is still under the ba
 showing `11` against a threshold of `20` shows an audience nothing. Step 4 then passes in
 half a second, because the premise was already true when it asked.
 
+### Re-measured on v0.6.18, where the clock is a setting and the platform pages itself
+
+Owner decisions O-35 and O-36 (WO-R3-339, [ADR 0076](ADR/0076-the-demo-takes-the-platforms-page.md)).
+`demo/compose.yml` sets `METRICS_LOOP_INTERVAL_SECONDS=5`, the producer runs at **0.75 s**
+during the fault (`make traffic RATE=0.75`), and step 3 now waits for the PLATFORM's own alert
+row as well as for its reading. Both modes rehearsed again, 2026-09-21, `AUTO=1`, both PASS,
+world audit PASS before and after each:
+
+| Step | | `dlq_backlog` | `consumer_outage` |
+|---|---|---|---|
+| 1 | stack check, reset, world audit, console URL | 2.5 s | 2.5 s |
+| 2 | baseline (`consumer_outage` also starts `make traffic RATE=0.75`) | 0.0 s | 0.0 s |
+| 3 | inject the fault (10 s countdown), wait for the reading **and for the page** | 17.0 s | 31.1 s |
+| 4 | prove the premise the scenario grades against | 0.4 s | 0.4 s |
+| 5 | run the agent (scripted planner) | 1.2 s | 1.3 s |
+| 6 | wind down | 2.4 s | 7.7 s |
+| | **total** | **23.5 s** | **43.0 s** |
+
+`consumer_outage` went from 170.5 s to **43.0 s** and `dlq_backlog` from 19.4 s to 23.5 s —
+the DLQ mode is slower by four seconds because step 3 now waits for a page it did not wait for
+before. The interesting numbers are not in that table, though. They are the platform's own
+audit stamps, and they are what "watchable" means:
+
+| | `consumer_outage` | `dlq_backlog` |
+|---|---|---|
+| fault (`chaos.tool_invoked`) | 08:21:09.317 | 08:24:36.329 |
+| the platform's page (`alert.raised`) | 08:21:24.878 | 08:24:41.357 |
+| **fault → page** | **15.56 s** | **5.03 s** |
+| the agent starts (`phase_history[triage]`) | 08:21:31.120 | 08:24:44.030 |
+| **page → agent** | **6.24 s** | **2.67 s** |
+| the Tier-1 action | 08:21:31.285 | 08:24:44.212 |
+| the world is measured recovered | lag `0` at 08:21:35.127 | `total 3` at 08:24:44.238 |
+| **action → recovered** | **3.84 s** (one metrics pass) | **26 ms** (the replay is synchronous) |
+
+`fault → page` is the number O-35 bought. On `consumer_outage` it is arithmetic rather than
+luck: the threshold is 20 messages and the producer arrives every 0.75 s, so the backlog needs
+15 s to get there and the rule fires on the first pass after that — which is why the rate is
+the knob and not the interval. On `dlq_backlog` there is nothing to accumulate: the rows land
+at once, so the page waits only for the next tick.
+
+**`page → agent` is the demo machine, not the platform** — step 4's precondition poll plus the
+runner's own start-up (settings, three principal guards, the premise reads). It is worth
+knowing because it is the one leg a paid take does not lengthen.
+
+**What the rehearsal does NOT measure, and it matters for reading the table.** The scripted
+planner has no latency and the scripted verify judge returns `verified` on its first look, so
+the whole phase walk lands inside **230 ms** (`consumer_outage`) and **237 ms** (`dlq_backlog`).
+On `consumer_outage` the agent's own verify read still showed `lag 20` — the cached value, one
+pass old — and the script said verified anyway. So the recovery in the table above is the
+PLATFORM's measurement, taken 3.84 s later, and not the agent's verdict. In a paid take the
+real judge reads the same 20 and polls again (`VERIFY_PROBE_ATTEMPTS`), which is the behaviour
+this rehearsal cannot show. A green rehearsal is the demo working.
+
+**The drain, at the faster rate.** The backlog `consumer_outage` builds is ~20 jobs, and the
+first measured sample after `restart_consumer_group` read `0` — so the drain is one metrics
+pass, 3.84 s, against a wind-down wait of 150 s. The wind-down's own wait needed a single poll.
+On `dlq_backlog` one `replay_dlq_by_category(replay_safe)` took the queue from 7 rows to 3 in
+the agent's next read, 26 ms later, and the alerted slice read `total 0`.
+
+**The `alert.resolved` row in a rehearsal is the RESET's, not the rule's.** Both takes finished
+within a pass or two of the action, so the wind-down's `make eval-reset` closed the episode
+first — `rule_alerts_resolved: 1` in its JSON, and the row lands ~0.4 s before that take's
+`lab.world_reset`. The rule's own resolution path is real and was measured separately (zero-LLM,
+free): a replay took the DLQ depth under the threshold and the platform resolved its own alert
+inside **3.2 s**. Do not read a take's resolve row as evidence the rule can resolve; read the
+reset's counter.
+
 Step 6 is the same clock in reverse — the agent's restart drains the backlog in seconds, but
 the next sample is up to a minute away, so the machine **waits for a fresh `0` before
 auditing** and only then runs `make world-audit`. Without that wait the audit reads the value
@@ -170,6 +237,17 @@ read any of them (platform ADR 0035).
 | Agent running (step 5) | a new row appears: `scenario: remediate_consumer_lag_success`, `state` walking `triage → investigating → planning → remediating → verifying → resolved`, `current_hypothesis: consumer_saturation @ 0.85`, `last_step: {kind: read, tool: get_consumer_lag}` | still the stale `23` — the run is faster than the metric | `total 4` | +14 rows in three seconds: 6 × `agent.run_reported` + 1 briefing + 7 × `agent.tool_invoked`, under the **agent** principal |
 | Briefing (end of step 5) | same row, `active: false`, `finished_at` set, `briefing.prose` present ("…restarted the consumer group … the follow-up probe shows lag back at 0") | unchanged | `total 4` | quiet |
 | Wound down (step 6) | unchanged — a finished run is a record | `lag 0 (age 0 s)` on the first post-drain sample | `total 4` | +7 more `agent.tool_invoked` from the closing `make world-audit` |
+
+**The DLQ mode's scenario changed with v0.6.18, and it is worth knowing before a take.** It is
+`demo_dlq_replay_safe_backlog` now, not `remediate_dlq_backlog_success`. The platform's depth
+rule names the category carried by the rows above the seeded baseline, and the old world's one
+injected row is unclassified on purpose — so the alert the platform can honestly raise there is
+the `unclassified` incident and the honest action is to fence the row, which is the opposite of
+"the queue frees up while you watch". The new world seeds three transient `replay_safe` rows
+instead: depth 7, the platform pages naming `replay_safe`, and one
+`replay_dlq_by_category(replay_safe)` clears four rows and takes the depth back under the
+threshold. `remediate_dlq_backlog_success` is unchanged and still graded — it is simply not this
+demo's story (ADR 0076 decision 2).
 
 `dlq_backlog` differs in exactly two of those cells, and they are the mode's whole story:
 `/admin/dlq/stats` reads `total 5` (`bulk_api_sync 4`) the moment `poison_message` lands and
@@ -221,14 +299,23 @@ excludes them by principal (they are not the run's), which is why they were left
 2. **Baseline.** In `consumer_outage`, starts `make traffic` and waits for a healthy reading
    (lag known, small). In `dlq_backlog`, nothing — the world is seeded and quiet. Prints
    **BASELINE — START RECORDING NOW**.
-3. **The fault.** Ten-second countdown, then the scenario's own chaos plan fires under the
-   chaos principal. Printed, so you can say what fired.
+3. **The fault, and then the page.** Ten-second countdown, then the scenario's own chaos plan
+   fires under the chaos principal — printed, so you can say what fired. Then TWO waits, and
+   they are different claims: the platform's own READING crossing the threshold (the source the
+   chart draws from is showing a breach) and the platform's own ALERT ROW (it has paged). The
+   second is new in WO-R3-339 and it prints the alert id, the time and the summary, because
+   that row is what step 5 starts the run from. Both warn rather than fail; step 5's own wait
+   is the gate and it refuses with the alert stream's contents in the message.
 4. **The fault, proved.** Polls the scenario's *own* precondition probes, so "visible" means
    exactly what the grader will later assume it meant. Prints **FAULT VISIBLE**. If the fault
    never appears the demo stops here — nothing was run and nothing was graded.
-5. **The agent.** Free path: `evals.runner --mode rehearsal` — the real platform, the real
-   Tier-1 action, a scripted planner, zero spend. Paid path: `make eval-live ONLY=<scenario>
-   MODEL_ROLE=benchmark`.
+5. **The agent, paged by the platform.** Free path: `evals.runner --mode rehearsal
+   --world-already-faulted --alert-from-platform` — the real platform, the real Tier-1 action,
+   the platform's real alert, a scripted planner, zero spend. Paid path: `make eval-live
+   ONLY=<scenario> MODEL_ROLE=benchmark WORLD_ALREADY_FAULTED=1 ALERT_FROM_PLATFORM=1`. The run
+   starts from the alert ROW's payload verbatim rather than from the scenario file's `alert:`
+   block (O-36, [ADR 0076](ADR/0076-the-demo-takes-the-platforms-page.md)); the grade does not
+   move, because the graders key on the terminal state, the audit log and the readings.
 6. **Wind down.** Stops traffic, prints the trajectory / briefing / human-report / trace
    paths, waits for the backlog in a traffic mode, resets and re-audits. Prints **DONE — STOP
    RECORDING**.

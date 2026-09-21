@@ -1,4 +1,8 @@
-"""In-memory ``Checkpointer`` for tests and the demo compose. Not durable."""
+"""A ``Checkpointer`` that keeps snapshots in memory, for tests and the demo. Nothing survives exit.
+
+Same interface as the Postgres one, so a test can run the whole loop without a database. It is not
+a fallback: a real deployment that used it would lose every run it was in the middle of.
+"""
 
 from __future__ import annotations
 
@@ -8,7 +12,7 @@ from incident_commander.agent.state import RunState
 
 
 class InMemoryCheckpointer:
-    """Stores every write in a per-incident list. ``load`` returns the latest."""
+    """Keeps one list of snapshots per incident, in the order written; ``load`` returns the last."""
 
     def __init__(self) -> None:
         self._store: dict[UUID, list[RunState]] = {}
@@ -21,5 +25,5 @@ class InMemoryCheckpointer:
         self._store.setdefault(run_state.incident_id, []).append(run_state)
 
     def history(self, incident_id: UUID) -> list[RunState]:
-        """Ordered snapshots. Testing convenience — not part of the Protocol."""
+        """Every snapshot for one incident, oldest first. For tests; not on the protocol."""
         return list(self._store.get(incident_id, []))

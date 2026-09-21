@@ -1,4 +1,8 @@
-"""Postgres-backed ``Checkpointer`` — append-only per-incident snapshot log."""
+"""Where a run's progress is saved: one Postgres row per snapshot, only ever appended to.
+
+A snapshot is never updated or deleted, so the whole history of an incident stays readable and a
+crashed run can be resumed from its newest row.
+"""
 
 from __future__ import annotations
 
@@ -13,7 +17,11 @@ from incident_commander.agent.state import RunState
 
 
 class PostgresCheckpointer:
-    """Writes each RunState snapshot as a new row keyed by (incident_id, version)."""
+    """Writes each snapshot of a run as a new row, identified by incident and version number.
+
+    The version is what makes the log append-only: two writers cannot take the same one, so a
+    snapshot can never overwrite another (ADR 0016).
+    """
 
     def __init__(self, engine: Engine) -> None:
         self._engine = engine
@@ -35,12 +43,16 @@ class PostgresCheckpointer:
         return RunState.model_validate(payload)
 
     def write(self, run_state: RunState) -> None:
-        """Append one snapshot. One connection, one transaction, one attempt.
+        """Append one snapshot of a run, retrying if another writer took the version first.
 
-        The version read is inside ``begin()`` so no other writer can take it
-        (ADR 0016, ADR 0022).
+        Each try holds ONE connection for ONE transaction, because a run already has a connection
+        pinned for its lease and asking the same pool for a second one can deadlock (ADR 0022).
         """
+        # 1. Serialise the run through Pydantic first, so a model that cannot be dumped fails here
+        #    rather than halfway through a database transaction.
         payload = json.loads(run_state.model_dump_json())
+        # 2. Read the next free version number and insert the row inside ONE transaction. Doing the
+        #    read inside it is the point: no other writer can claim the same version (ADR 0016).
         for attempt in range(3):
             try:
                 with self._engine.begin() as conn:
@@ -60,14 +72,19 @@ class PostgresCheckpointer:
                         },
                     )
                 return
+            # 3. Another writer inserted that version between our read and our insert, so the
+            #    unique constraint rejected the row: read the version again and retry. This really
+            #    happens — two deliveries of one alert both write before either holds the lease.
             except IntegrityError:
-                # Concurrent writer took our version; retry. A double delivery's two
-                # ingress writes happen OUTSIDE the lease and do collide (ADR 0016).
                 if attempt == 2:
                     raise
 
     def history(self, incident_id: UUID) -> list[RunState]:
-        """Ordered snapshots. Testing / debugging convenience — not on the Protocol."""
+        """Every snapshot for one incident, oldest first. For tests and debugging only.
+
+        Deliberately not part of the ``Checkpointer`` protocol: the run loop reads the newest
+        snapshot and nothing else, and should not be able to reach the whole history.
+        """
         with self._engine.connect() as conn:
             rows = conn.execute(
                 text(
@@ -80,14 +97,19 @@ class PostgresCheckpointer:
         return [RunState.model_validate(row[0]) for row in rows]
 
     def reconcile(self, incident_id: UUID) -> RunState | None:
-        """Reconciliation entry point — today just ``load``.
+        """Where resuming a run will one day check the world as well as our own records.
 
-        Phase 6: also check the platform audit log for the last proposed action.
+        Today it is exactly ``load``. Phase 6 adds the other half: reading the platform's audit log
+        to find out whether an action this run proposed was actually carried out.
         """
         return self.load(incident_id)
 
     def _next_version(self, conn: Connection, incident_id: UUID) -> int:
-        """Next free version, on the CALLER's connection (one transaction with the INSERT)."""
+        """The next free version number for this incident, read on the CALLER's connection.
+
+        Taking the connection as an argument is what puts this read in the same transaction as the
+        insert that uses it; on its own connection it would be a guess by the time it was used.
+        """
         row = conn.execute(
             text(
                 "SELECT COALESCE(MAX(version), -1) + 1 AS next "

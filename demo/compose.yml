@@ -1,6 +1,6 @@
 # Live demo: full platform footprint sufficient for remediation eval.
 #
-# Pinned to the incident-platform v0.6.19 release by digest so the agent's
+# Pinned to the incident-platform v0.6.20 release by digest so the agent's
 # contract expectations don't shift under us. Every platform-code service
 # below uses the SAME pinned digest. Bump the digest whenever the platform
 # ships a new release and rerun `make eval-live` to catch drift.
@@ -137,7 +137,7 @@ services:
     # One-shot schema migration, mirroring the dev compose's migrate
     # service: with two app-code services (mcp + api) neither should
     # race `alembic upgrade head` at boot.
-    image: ghcr.io/kudratsingh/incident-platform:v0.6.19@sha256:1d1d6555dbb5159a7ba4618cf3e5bb9e798e7c47407d6edd4acda33d092c788a
+    image: ghcr.io/kudratsingh/incident-platform:v0.6.20@sha256:e172be9692a04d1da974d968c33da45374f2b658515369df3a92ee9808614625
     platform: linux/amd64
     environment:
       DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/incident_platform
@@ -149,7 +149,7 @@ services:
     restart: "no"
 
   platform:
-    # incident-platform v0.6.19 (INDEX digest published by the platform
+    # incident-platform v0.6.20 (INDEX digest published by the platform
     # release, confirmed with `docker buildx imagetools inspect` — the
     # top-level `Digest:`, not a per-platform child manifest).
     #
@@ -396,7 +396,7 @@ services:
     #     of two points. `lag_samples_cleared` stays in the reset JSON as a
     #     permanent 0.
     #
-    # What v0.6.19 changed (plat #236): the CONSOLE only — the /demo page's
+    # What v0.6.19 changed (plat #235): the CONSOLE only — the /demo page's
     # own fixes for the fifth take (WO-R3-341: a finished run stays up, the
     # stations never move backwards, and an unattributed tool row is never
     # drawn as the agent's). The BACKEND image is byte-identical in behaviour
@@ -442,11 +442,27 @@ services:
     #     does not hide it. `make eval-reset` closes any open episode and
     #     counts it as `rule_alerts_resolved`, so the world audit's "active
     #     alerts: 3" is true after a reset.
+    #
+    # What v0.6.20 changed (plat #236, WO-R3-343): how many jobs one caller may
+    # create is a SETTING now. Nothing in `tools/list` moves — still 40 tools
+    # (15 chaos, 16 read), hashed identical on both sides by the platform PR —
+    # because the limit sits on the REST route the demo's producer posts to and
+    # no MCP tool creates a job.
+    #   * `JOB_CREATE_RATE_LIMIT` (default 30) and
+    #     `JOB_CREATE_RATE_WINDOW_SECONDS` (default 60) replace the literal
+    #     `rate_limiter(limit=30, window=60, key_prefix="jobs:create")` on
+    #     `POST /jobs`; `POST /sagas` shares that bucket and moved with it. Read
+    #     per request, so a deployment's environment decides the ceiling. Still
+    #     keyed on the caller's ADDRESS, which is why no token arrangement ever
+    #     widened it and this setting does.
+    #   * Defaults unchanged, so CI and anything that sets neither variable
+    #     behaves exactly as v0.6.19 did: the 31st creation in a window is a
+    #     429. The demo raises it on `api` below — see the note there for why.
     # Do not switch to `:latest` — the whole point of pinning by digest is
     # that a platform-side prompt or schema change can't shift agent
     # behavior without an explicit bump here.
-    image: ghcr.io/kudratsingh/incident-platform:v0.6.19@sha256:1d1d6555dbb5159a7ba4618cf3e5bb9e798e7c47407d6edd4acda33d092c788a
-    # v0.6.19 is an OCI index, but it still lists linux/amd64 ONLY (plus an
+    image: ghcr.io/kudratsingh/incident-platform:v0.6.20@sha256:e172be9692a04d1da974d968c33da45374f2b658515369df3a92ee9808614625
+    # v0.6.20 is an OCI index, but it still lists linux/amd64 ONLY (plus an
     # attestation manifest) — being an index is not the same as being
     # multi-arch, and this one is not. On Apple Silicon this runs under
     # Rosetta (slower cold start, correct output) — REQUIRED there; without
@@ -569,7 +585,7 @@ services:
     # Env copied deliberately from the dev compose's `app` service
     # (drift between services is platform bug #69's class); minio/jaeger
     # endpoints omitted with the services (see header note).
-    image: ghcr.io/kudratsingh/incident-platform:v0.6.19@sha256:1d1d6555dbb5159a7ba4618cf3e5bb9e798e7c47407d6edd4acda33d092c788a
+    image: ghcr.io/kudratsingh/incident-platform:v0.6.20@sha256:e172be9692a04d1da974d968c33da45374f2b658515369df3a92ee9808614625
     platform: linux/amd64
     ports:
       - "${DEMO_API_HOST_PORT:-8000}:8000"
@@ -603,6 +619,26 @@ services:
       # above — a leftover mismatch would have one service reporting a clock
       # the other does not keep.
       METRICS_LOOP_INTERVAL_SECONDS: "5"
+      # v0.6.20 (plat #236, WO-R3-343): how many jobs one caller address may
+      # create per window. Set on THIS service and nowhere else, because this is
+      # the process that serves `POST /jobs` — the `platform` service above runs
+      # `app.mcp.standalone:app`, which mounts no REST route, and no MCP tool
+      # creates a job.
+      #
+      # 240 per 60 s (the window is left at its default) is 8× the platform's
+      # own default of 30, and the demo needs it because the default IS the
+      # backlog's speed limit: at 30 a minute the producer can add one job every
+      # two seconds, so the `consumer_stalled` threshold of 20 takes 40 s to
+      # reach and the fifth take's chart went flat at 28 while the producer
+      # collected 429s. At 240 the fault-phase producer runs at 0.75 s and the
+      # backlog crosses the threshold in about 15 s, with the pacer in
+      # `scripts/traffic_loop.py` sized from THIS number so the platform still
+      # never has to refuse a submission.
+      #
+      # It changes nothing the agent can see: no tool, no reading, no audit row,
+      # and the eval scenarios do not create jobs. A stack that wants the
+      # platform's real ceiling drops this line.
+      JOB_CREATE_RATE_LIMIT: "240"
       # See the platform service: the worker loops run in THIS process, so
       # this is where the SLO evaluator actually ran, and this is the
       # service whose "0" was doing the silencing. Both services carried the
@@ -658,7 +694,7 @@ services:
     # No `depends_on: service_healthy` on api, deliberately: nginx resolves
     # the upstream per request, so the console coming up first only means a
     # 502 until the backend is ready, and `make demo` waits on both anyway.
-    image: ghcr.io/kudratsingh/incident-platform-console:v0.6.19@sha256:356e80701a6a2db702311519a191939024bfbe9e22092e1effd3b72b0c5224f0
+    image: ghcr.io/kudratsingh/incident-platform-console:v0.6.20@sha256:4d2079637ec8e28ea9c931bac76dd55471c6d72b9ae6fa24a0a1385e4c1121ad
     platform: linux/amd64
     environment:
       API_UPSTREAM: http://api:8000

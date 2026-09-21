@@ -64,15 +64,20 @@ MODES: Final[dict[str, dict[str, Any]]] = {
         # producer the backlog stays 0 however long you wait and the precondition
         # correctly refuses the run. This is the mode's whole operational difference.
         "needs_traffic": True,
-        # Seconds between jobs, for the WHOLE take — one producer, one rate, never restarted.
-        # 2.0 s is the platform's own sustained ceiling: `POST /jobs` allows 30 creations per
-        # FIXED 60-second window per caller address, so there is no faster rate to switch to
-        # once the fault has fired, only a window to borrow from and repay. WO-R3-339 borrowed
-        # it at 0.75 s and the fifth take repaid it on camera — the backlog climbed to 28 in
-        # 25 s, then sat flat at 28 for another 25 while the producer collected 429s, which on
-        # the console's chart is a climb that stops being a climb (F4). At 2.0 s the backlog
-        # grows by one job every two seconds from the fault until the restart drains it.
+        # Seconds between jobs BEFORE the fault. 2.0 s fits the platform's default allowance
+        # of 30 creations a minute, so the baseline is honest on any stack.
         "traffic_rate": "2.0",
+        # And seconds between jobs from the fault onwards. Faster, because from the fault on
+        # nothing consumes what arrives, so this is the speed the backlog climbs at: at 0.75 s
+        # the alert threshold of 20 is about 15 s after the fault rather than 40 s.
+        "fault_traffic_rate": "0.75",
+        # The `POST /jobs` allowance the producer paces itself against, and it has to be the
+        # `JOB_CREATE_RATE_LIMIT` this stack actually runs (`demo/compose.yml` sets 240 since
+        # platform v0.6.20; the platform's own default is 30). 0.75 s is only honest because of
+        # that setting — on a default stack the pacer would slow the loop back to 30 a minute,
+        # which is the fifth take's plateau: the producer spent one window in 22 s and then
+        # collected 429s while the chart sat flat at 28 (F4).
+        "traffic_max_per_window": "240",
         # Which platform reading tells the operator the page will show the fault. A closed
         # set for the same reason the modes are: this decides what is polled.
         "fault": "consumer_lag",
@@ -97,6 +102,8 @@ MODES: Final[dict[str, dict[str, Any]]] = {
         # nothing drains, so no traffic is needed or wanted.
         "needs_traffic": False,
         "traffic_rate": None,
+        "fault_traffic_rate": None,
+        "traffic_max_per_window": None,
         "fault": "dlq_depth",
         "story": (
             "a dead-letter queue that fills past its threshold with four replayable rows "
@@ -218,6 +225,19 @@ _LAG_CLOCK: Final = (
 )
 
 
+def _stop_producer(process: subprocess.Popen[str] | None, console: Console) -> None:
+    """Terminate one producer, escalating to a kill if it will not go. Never raises."""
+    if process is None or process.poll() is not None:
+        return
+    console.say("  stopping the traffic loop")
+    process.terminate()
+    try:
+        process.wait(timeout=15)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        process.wait(timeout=15)
+
+
 class TrafficHandle:
     """The producer subprocess, owned by ``main`` rather than returned from the walk.
 
@@ -230,16 +250,29 @@ class TrafficHandle:
     def __init__(self) -> None:
         self.process: subprocess.Popen[str] | None = None
 
-    def start(self, rate: str | None = None) -> None:
+    def start(
+        self,
+        rate: str | None = None,
+        *,
+        max_per_window: str | None = None,
+        phase: str = "baseline",
+    ) -> None:
         """Start the producer, at ``rate`` seconds between jobs when one is given.
 
         ``rate`` is handed to `make traffic` as `RATE=`, and the loop treats it as a floor it
         may only slow down from; without one the script's own default (3 s) applies.
+        ``max_per_window`` is the platform's `POST /jobs` allowance the loop paces itself
+        against. ``phase`` only names the log file, so two producers never share one.
         """
-        log = _REPO_ROOT / "evals" / ".demo-traffic.log"
+        log = _REPO_ROOT / "evals" / f".demo-traffic-{phase}.log"
         handle = log.open("w", encoding="utf-8")
         self.process = subprocess.Popen(  # noqa: S603 - fixed argv, no shell
-            ["make", "traffic", *([f"RATE={rate}"] if rate else [])],
+            [
+                "make",
+                "traffic",
+                *([f"RATE={rate}"] if rate else []),
+                *([f"MAX_PER_WINDOW={max_per_window}"] if max_per_window else []),
+            ],
             cwd=_REPO_ROOT,
             stdout=handle,
             stderr=subprocess.STDOUT,
@@ -250,18 +283,22 @@ class TrafficHandle:
             env={**os.environ, **_smoke_env()},
         )
 
+    def accelerate(self, console: Console, *, rate: str, max_per_window: str | None = None) -> None:
+        """Hand the take over to a faster producer without pausing the arrivals.
+
+        The new producer is started BEFORE the old one is stopped, and the order is the point:
+        after the fault nothing drains the backlog, so a gap in arrivals is a sample that
+        matches the one before it, and a flat sample on the chart is a climb that stopped.
+        Spawning `make traffic` costs a second or two, which is exactly that gap.
+        """
+        previous = self.process
+        self.start(rate=rate, max_per_window=max_per_window, phase="fault")
+        console.say(f"  the producer is now submitting a job every {rate}s")
+        _stop_producer(previous, console)
+
     def stop(self, console: Console) -> None:
         """Terminate the producer, escalating to a kill if it will not go."""
-        process = self.process
-        if process is None or process.poll() is not None:
-            return
-        console.say("  stopping the traffic loop")
-        process.terminate()
-        try:
-            process.wait(timeout=15)
-        except subprocess.TimeoutExpired:
-            process.kill()
-            process.wait(timeout=15)
+        _stop_producer(self.process, console)
         self.process = None
 
 
@@ -428,6 +465,16 @@ def _console_url(mode: str, run_id: str | None = None) -> str:
     return url if run_id is None else f"{url}&run={run_id}"
 
 
+def _max_per_window(mode: dict[str, Any]) -> str | None:
+    """The `POST /jobs` allowance this mode's producer paces itself against, as `make` wants it.
+
+    ``None`` for a quiet mode, and for a mode that declares none — then the loop uses the
+    platform's own default of 30, which is right for a stack that has not raised the setting.
+    """
+    declared = mode.get("traffic_max_per_window")
+    return None if declared is None else str(declared)
+
+
 def main(argv: list[str] | None = None) -> int:
     """Parse, refuse if unsafe, then walk the six steps and always put the world back."""
     # 1. Read what the operator asked for: which demo mode, whether this is the paid take, whether
@@ -586,15 +633,16 @@ def _walk(
     step = console.begin(2, "baseline")
     if mode["needs_traffic"]:
         rate = str(mode["traffic_rate"])
+        fault_rate = mode["fault_traffic_rate"]
         console.note(
             step,
             f"starting `make traffic` in the background at a job every {rate}s — the audience "
-            "should see work arriving and being consumed. This rate is the platform's own "
-            "sustained ceiling for creating jobs (30 per fixed 60-second window), so it runs "
-            "unchanged through the fault: there is no faster rate to switch to, and borrowing "
-            "from the window is what made the fifth take's backlog stall on camera",
+            "should see work arriving and being consumed. Step 3 hands the take over to a "
+            f"faster producer (a job every {fault_rate}s) the moment the fault fires, because "
+            "from then on nothing drains what arrives and the arrival rate IS the speed the "
+            "backlog climbs at",
         )
-        traffic.start(rate=rate)
+        traffic.start(rate=rate, max_per_window=_max_per_window(mode))
         _wait_for_healthy_baseline(console, step)
     else:
         console.note(step, "nothing to start — this world is seeded and quiet")
@@ -622,9 +670,13 @@ def _walk(
     fired = _seed(scenario)
     for line in fired:
         console.note(step, f"fired: {line}")
-    # The producer is not touched here. From now on nothing consumes what arrives, so the same
-    # arrival rate is pure backlog, and that is the whole change: one job every two seconds
-    # becomes one job of backlog every two seconds, monotonically, until the restart.
+    # Nothing consumes what arrives from here on, so every job that lands is a job of backlog
+    # and the arrival rate is the climb's slope. The producer speeds up now rather than at the
+    # start of the take because the baseline's own submissions spend the same per-address
+    # allowance, and because a baseline the audience watches should look like ordinary traffic.
+    fault_rate = mode["fault_traffic_rate"]
+    if mode["needs_traffic"] and fault_rate:
+        traffic.accelerate(console, rate=str(fault_rate), max_per_window=_max_per_window(mode))
     console.note(step, "the console's phase strip should move to `fault injected` within 2s")
     console.note(
         step,

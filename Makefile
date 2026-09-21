@@ -525,20 +525,22 @@ traffic: export PLATFORM_SMOKE_TOKEN := $(PLATFORM_SMOKE_TOKEN)
 # refuses to run it. `--until-lag N` stops once the backlog is deep enough.
 #
 # RATE is the seconds between submissions and defaults to the script's own 3.0.
-# It is a FLOOR, not a rate: `POST /jobs` allows 30 creations per FIXED 60-second
-# window per caller address (`rate_limiter(limit=30, window=60,
-# key_prefix="jobs:create")`), and the loop paces itself against that allowance
-# from the same clock, so asking for RATE=0.5 gets 30 a minute rather than a run
-# of 429s. `--max-per-window 0` switches the pacing off for anyone who wants to
-# meet the limit head-on.
+# It is a FLOOR, not a rate: `POST /jobs` allows MAX_PER_WINDOW creations per
+# FIXED 60-second window per caller address, and the loop paces itself against
+# that allowance from the same clock, so a RATE the allowance cannot cover is
+# slowed down rather than met with a run of 429s.
 #
-# `scripts/demo_live.py` runs ONE producer at RATE=2.0 for the whole take —
-# 30 a minute, the platform's own sustained ceiling — and never restarts it.
-# WO-R3-339 restarted it at 0.75 s once the fault had fired; that borrowed the
-# window's allowance and the fifth take repaid it on camera, with the backlog
-# climbing to 28 in 25 s and then sitting flat at 28 for another 25.
+# MAX_PER_WINDOW is what the platform's own `JOB_CREATE_RATE_LIMIT` is set to on
+# the stack being driven, and it defaults to the script's 30 — the platform's
+# default. Since platform v0.6.20 it is a setting rather than a literal, and
+# `demo/compose.yml` runs the demo stack at 240, which is what lets
+# `scripts/demo_live.py` speed the producer up to RATE=0.75 when the fault fires
+# (`MAX_PER_WINDOW=240` on both of its producers). Telling this loop 240 against
+# a stack that is really running 30 is the one way to get the 429s back.
+# `MAX_PER_WINDOW=0` switches the pacing off for anyone who wants to meet the
+# limit head-on.
 traffic:
-	uv run python scripts/traffic_loop.py $(if $(RATE),--interval $(RATE)) $(if $(UNTIL_LAG),--until-lag $(UNTIL_LAG)) $(if $(COUNT),--count $(COUNT))
+	uv run python scripts/traffic_loop.py $(if $(RATE),--interval $(RATE)) $(if $(MAX_PER_WINDOW),--max-per-window $(MAX_PER_WINDOW)) $(if $(UNTIL_LAG),--until-lag $(UNTIL_LAG)) $(if $(COUNT),--count $(COUNT))
 
 chaos-help:
 	PYTHONPATH=. uv run python scripts/chaos_setup.py --help

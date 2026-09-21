@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any, cast
 
 import pytest
+import yaml
 
 from evals.runner import ALERT_FROM_PLATFORM_FLAG, REHEARSAL_MODE, WORLD_ALREADY_FAULTED_FLAG
 from evals.scenarios.loader import load_scenarios
@@ -51,6 +52,20 @@ class _FakePopen:
         self.returncode = 0
 
 
+def _recording_popen(seen: list[list[str]]) -> Any:
+    """A ``Popen`` stand-in that records the argv it was asked to spawn, and nothing else."""
+
+    class _Popen:
+        def __init__(self, argv: list[str], **kwargs: Any) -> None:
+            seen.append(argv)
+            self.returncode: int | None = None
+
+        def poll(self) -> int | None:
+            return self.returncode
+
+    return _Popen
+
+
 class _FakeStack:
     """Records every command the machine would have run, and answers success.
 
@@ -73,9 +88,13 @@ class _FakeStack:
         #: whether that wait finds one. True by default for ``fault_visible``'s reason.
         self.pages_awaited: list[str] = []
         self.platform_paged = True
-        #: The RATE each `make traffic` was started at — ``None`` when the mode declares
-        #: none. A list because a failing walk may start it more than once.
+        #: The RATE each `make traffic` was started at, in order — a traffic mode starts a
+        #: baseline producer and then a faster one when the fault fires.
         self.traffic_rates: list[str | None] = []
+        #: The allowance each of those producers was told to pace itself against.
+        self.traffic_allowances: list[str | None] = []
+        #: Fault firings and producer starts in ONE list, so a test can say which came first.
+        self.events: list[str] = []
 
     def run(self, command: Any, **kwargs: Any) -> subprocess.CompletedProcess[str]:
         argv = list(command)
@@ -99,6 +118,7 @@ def stack(monkeypatch: pytest.MonkeyPatch) -> _FakeStack:
 
     def _seed(scenario: str) -> list[str]:
         fake.seeded.append(scenario)
+        fake.events.append(f"fault {scenario}")
         return ["hook"]
 
     monkeypatch.setattr(demo_live, "_seed", _seed)
@@ -134,9 +154,17 @@ def stack(monkeypatch: pytest.MonkeyPatch) -> _FakeStack:
     # rehearsal, not asserted here.
     monkeypatch.setattr(time, "sleep", lambda _seconds: None)
 
-    def _start(self: demo_live.TrafficHandle, rate: str | None = None) -> None:
+    def _start(
+        self: demo_live.TrafficHandle,
+        rate: str | None = None,
+        *,
+        max_per_window: str | None = None,
+        phase: str = "baseline",
+    ) -> None:
         fake.traffic_started += 1
         fake.traffic_rates.append(rate)
+        fake.traffic_allowances.append(max_per_window)
+        fake.events.append(f"producer {rate}")
         # A stand-in with a `Popen` shape, so `stop`'s `poll()` sees what it would see live.
         # The cast is the honest shape of a fake: structurally what the handle uses, nothing more.
         self.process = cast("subprocess.Popen[str]", _FakePopen())
@@ -257,12 +285,12 @@ class TestTheStepOrder:
 
 class TestTrafficBelongsToOneModeOnly:
     def test_consumer_outage_starts_and_stops_the_producer(self, stack: _FakeStack) -> None:
-        # Lag is arrival minus service: without a producer the fault cannot exist. ONE start
-        # for the whole take since WO-R3-342 (the rate never changes), and the important half
-        # is unchanged: it is stopped, so the loop cannot outlive the demo.
+        # Lag is arrival minus service: without a producer the fault cannot exist. TWO starts
+        # since WO-R3-344 — the baseline's and the faster one the fault hands over to — and the
+        # important half is unchanged: the producer is stopped, so it cannot outlive the demo.
         assert demo_live.main(["--mode", "consumer_outage", "--auto"]) == 0
 
-        assert stack.traffic_started == 1
+        assert stack.traffic_started == 2
         assert stack.traffic_stopped >= 1
 
     def test_dlq_backlog_starts_no_producer(self, stack: _FakeStack) -> None:
@@ -388,7 +416,7 @@ class TestEveryFailurePathResetsAndAudits:
 
         assert demo_live.main(["--mode", "consumer_outage", "--auto"]) == 1
 
-        assert stack.traffic_started == 1
+        assert stack.traffic_started == 2
         assert stack.traffic_stopped >= 1
 
     def test_an_unexpected_exception_also_resets(
@@ -971,70 +999,146 @@ class TestThePlatformRaisesThePage:
         assert "WARNING" not in capsys.readouterr().out or stack.pages_awaited
 
 
-class TestTheProducerRunsAtThePlatformsOwnCeiling:
-    """The fifth take's F4: the backlog climbed to 28 and then sat flat at 28 for 25 seconds.
+class TestTheProducerSpeedsUpWhenTheFaultFires:
+    """How fast the backlog climbs is how fast jobs arrive, and the ceiling is a setting now.
 
-    `POST /jobs` allows 30 creations per FIXED 60-second window per caller address
-    (`rate_limiter(limit=30, window=60, key_prefix="jobs:create")`), so 30 a minute is the
-    sustained ceiling and there is no faster fault-phase rate to switch to. WO-R3-339's
-    mid-take acceleration to 0.75 s borrowed from that one window and the chart repaid it as a
-    plateau, so the producer now runs at the ceiling for the whole take and never changes rate.
+    Until platform v0.6.20 `POST /jobs` allowed a literal 30 creations per fixed 60-second
+    window per caller ADDRESS, so 30 a minute was the sustained ceiling: WO-R3-339 ran the
+    fault phase at 0.75 s anyway, spent one window in 22 s and the fifth take's chart sat flat
+    at 28 while the producer collected 429s, and WO-R3-342 answered that by running the whole
+    take at the ceiling — which made the climb honest and took 40 s to reach the threshold.
+    v0.6.20 makes the ceiling `JOB_CREATE_RATE_LIMIT`, `demo/compose.yml` sets it to 240 for
+    the `api` service, and the producer can speed up at the fault without borrowing anything.
     """
 
-    def test_one_producer_at_the_ceiling_for_the_whole_take(self, stack: _FakeStack) -> None:
+    def test_the_baseline_rate_and_then_the_faster_fault_rate(self, stack: _FakeStack) -> None:
         assert demo_live.main(["--mode", "consumer_outage", "--auto"]) == 0
 
-        assert stack.traffic_rates == [demo_live.MODES["consumer_outage"]["traffic_rate"]]
-        assert demo_live.MODES["consumer_outage"]["traffic_rate"] == "2.0"
+        mode = demo_live.MODES["consumer_outage"]
+        assert stack.traffic_rates == [mode["traffic_rate"], mode["fault_traffic_rate"]]
+        assert (mode["traffic_rate"], mode["fault_traffic_rate"]) == ("2.0", "0.75")
+        assert float(str(mode["fault_traffic_rate"])) < float(str(mode["traffic_rate"]))
+
+    def test_the_faster_producer_starts_only_once_the_fault_has_fired(
+        self, stack: _FakeStack
+    ) -> None:
+        """The order matters twice: the baseline must look like ordinary traffic, and the
+        countdown's own submissions spend the same per-address allowance."""
+        assert demo_live.main(["--mode", "consumer_outage", "--auto"]) == 0
+
+        assert stack.events == [
+            "producer 2.0",
+            "fault remediate_consumer_lag_success",
+            "producer 0.75",
+        ]
+
+    def test_both_producers_are_paced_against_the_stacks_own_allowance(
+        self, stack: _FakeStack
+    ) -> None:
+        assert demo_live.main(["--mode", "consumer_outage", "--auto"]) == 0
+
+        allowance = demo_live.MODES["consumer_outage"]["traffic_max_per_window"]
+        assert stack.traffic_allowances == [allowance, allowance]
+
+    def test_the_allowance_is_the_one_the_demo_stack_really_runs(self) -> None:
+        """A number told to the pacer that the stack does not allow is how the 429s come back.
+
+        So the mode's allowance is read back out of `demo/compose.yml`'s `api` service — the
+        process that serves `POST /jobs` — rather than trusted to two copies staying equal.
+        """
+        compose = yaml.safe_load((_REPO_ROOT / "demo" / "compose.yml").read_text(encoding="utf-8"))
+        on_the_stack = compose["services"]["api"]["environment"]["JOB_CREATE_RATE_LIMIT"]
+
+        assert str(demo_live.MODES["consumer_outage"]["traffic_max_per_window"]) == str(
+            on_the_stack
+        )
 
     def test_the_quiet_mode_starts_no_producer(self, stack: _FakeStack) -> None:
         assert demo_live.main(["--mode", "dlq_backlog", "--auto"]) == 0
 
         assert stack.traffic_rates == []
         assert demo_live.MODES["dlq_backlog"]["traffic_rate"] is None
+        assert demo_live.MODES["dlq_backlog"]["fault_traffic_rate"] is None
 
-    def test_the_rate_never_changes_part_way_through_the_take(self, stack: _FakeStack) -> None:
-        """The producer is started once and not restarted: a restart loses the count of what
-        the current window already spent, which is how the plateau arrived."""
-        assert demo_live.main(["--mode", "consumer_outage", "--auto"]) == 0
-
-        assert stack.traffic_started == 1
-        assert not hasattr(demo_live.TrafficHandle, "accelerate")
-
-    def test_the_rate_reaches_make_as_a_variable(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_the_rate_and_the_allowance_reach_make_as_variables(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """The argv `make traffic` is really started with — the fake stack stubs `start`."""
         seen: list[list[str]] = []
-
-        class _Popen:
-            def __init__(self, argv: list[str], **kwargs: Any) -> None:
-                seen.append(argv)
-                self.returncode = None
-
-            def poll(self) -> None:
-                return None
-
-        monkeypatch.setattr(subprocess, "Popen", _Popen)
+        monkeypatch.setattr(subprocess, "Popen", _recording_popen(seen))
         monkeypatch.setattr(demo_live, "_smoke_env", lambda: {"PLATFORM_SMOKE_TOKEN": "x"})
-        demo_live.TrafficHandle().start(rate="2.0")
+        demo_live.TrafficHandle().start(rate="0.75", max_per_window="240")
 
-        assert seen == [["make", "traffic", "RATE=2.0"]]
+        assert seen == [["make", "traffic", "RATE=0.75", "MAX_PER_WINDOW=240"]]
 
     def test_no_rate_keeps_the_scripts_own_default(self, monkeypatch: pytest.MonkeyPatch) -> None:
         seen: list[list[str]] = []
-
-        class _Popen:
-            def __init__(self, argv: list[str], **kwargs: Any) -> None:
-                seen.append(argv)
-                self.returncode = None
-
-            def poll(self) -> None:
-                return None
-
-        monkeypatch.setattr(subprocess, "Popen", _Popen)
+        monkeypatch.setattr(subprocess, "Popen", _recording_popen(seen))
         monkeypatch.setattr(demo_live, "_smoke_env", lambda: {"PLATFORM_SMOKE_TOKEN": "x"})
         demo_live.TrafficHandle().start()
 
         assert seen == [["make", "traffic"]]
+
+    def test_the_faster_producer_is_running_before_the_slower_one_is_stopped(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Nothing drains the backlog after the fault, so a gap in arrivals is a repeated
+        sample, and a repeated sample is the plateau this whole change exists to remove."""
+        events: list[str] = []
+
+        class _Popen:
+            def __init__(self, argv: list[str], **kwargs: Any) -> None:
+                self.rate = next((a for a in argv if a.startswith("RATE=")), "RATE=default")
+                events.append(f"started {self.rate}")
+                self.returncode: int | None = None
+
+            def poll(self) -> int | None:
+                return self.returncode
+
+            def terminate(self) -> None:
+                events.append(f"stopped {self.rate}")
+                self.returncode = 0
+
+            def wait(self, timeout: float | None = None) -> int:
+                return 0
+
+        monkeypatch.setattr(subprocess, "Popen", _Popen)
+        monkeypatch.setattr(demo_live, "_smoke_env", lambda: {"PLATFORM_SMOKE_TOKEN": "x"})
+        handle = demo_live.TrafficHandle()
+        handle.start(rate="2.0", max_per_window="240")
+        handle.accelerate(demo_live.Console(auto=True), rate="0.75", max_per_window="240")
+
+        assert events == ["started RATE=2.0", "started RATE=0.75", "stopped RATE=2.0"]
+
+    def test_the_two_producers_do_not_share_a_log_file(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """One log opened `"w"` twice loses the baseline's half of the take."""
+        opened: list[str] = []
+        monkeypatch.setattr(demo_live, "_REPO_ROOT", tmp_path)
+        (tmp_path / "evals").mkdir()
+        monkeypatch.setattr(demo_live, "_smoke_env", lambda: {"PLATFORM_SMOKE_TOKEN": "x"})
+
+        class _Popen:
+            def __init__(self, argv: list[str], **kwargs: Any) -> None:
+                opened.append(Path(kwargs["stdout"].name).name)
+                self.returncode: int | None = None
+
+            def poll(self) -> int | None:
+                return self.returncode
+
+            def terminate(self) -> None:
+                self.returncode = 0
+
+            def wait(self, timeout: float | None = None) -> int:
+                return 0
+
+        monkeypatch.setattr(subprocess, "Popen", _Popen)
+        handle = demo_live.TrafficHandle()
+        handle.start(rate="2.0")
+        handle.accelerate(demo_live.Console(auto=True), rate="0.75")
+
+        assert opened == [".demo-traffic-baseline.log", ".demo-traffic-fault.log"]
 
 
 class TestTheHoldKeepsTheFinishedRunOnScreen:

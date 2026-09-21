@@ -455,7 +455,8 @@ def _console_url(mode: str, run_id: str | None = None) -> str:
 
 def main(argv: list[str] | None = None) -> int:
     """Parse, refuse if unsafe, then walk the six steps and always put the world back."""
-    # 1. What the operator asked for.
+    # 1. Read what the operator asked for: which demo mode, whether this is the paid take, whether
+    #    to wait for Enter between steps, and when to prompt for recording.
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--mode", choices=sorted(MODES), required=True)
     parser.add_argument(
@@ -484,8 +485,8 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
-    # 2. PROTOCOL step 0, before anything is started, seeded or spent: readiness is not
-    #    authorization, so the flag that costs money is not the flag that grants it.
+    # 2. Refuse a paid take that did not also pass --yes-spend, before anything is started, seeded
+    #    or spent: the flag that costs money is deliberately not the flag that authorises it.
     if args.live and not args.yes_spend:
         print(
             "REFUSING: --live runs a real model and spends real money.\n"
@@ -500,14 +501,15 @@ def main(argv: list[str] | None = None) -> int:
         # Not an error worth failing over, but worth saying: YES_SPEND alone buys nothing.
         print("note: YES_SPEND=1 without LIVE=1 changes nothing — this run is free.")
 
-    # 3. The machinery the steps share, and the handle that puts the world back.
+    # 3. Build the console the steps print through, and the traffic and wind-down handles. They
+    #    are held HERE rather than inside ``_walk``, so they still work if a step raises.
     console = Console(auto=args.auto)
     mode = MODES[args.mode]
     scenario = str(mode["scenario"])
     traffic = TrafficHandle()
     wind_down = WindDown(traffic, drained=bool(mode["needs_traffic"]))
 
-    # 4. What the audience is about to watch, said out loud before it starts.
+    # 4. Say what the audience is about to watch, including whether this run spends money.
     console.say(f"LIVE DEMO — mode {args.mode}, scenario {scenario}")
     console.say(f"  the story: {mode['story']}")
     console.say(
@@ -517,7 +519,8 @@ def main(argv: list[str] | None = None) -> int:
     console.say("  the platform: real, and so are the fault and the remediation")
     console.say(f"  recording from: {args.record_from}")
 
-    # 5. The six steps.
+    # 5. Walk the six steps. A step that failed, an operator interrupt and a bug in this script
+    #    each print their own message and set their own exit code, and none of them skips step 6.
     code = 0
     try:
         _walk(console, args, scenario, traffic, wind_down)
@@ -537,8 +540,8 @@ def main(argv: list[str] | None = None) -> int:
         console.say("  (this is a bug in the demo machine, not a finding about the agent)")
         code = 1
     finally:
-        # 6. The one place the world goes back, on EVERY path including the ones nobody named.
-        #    Step 6 has normally run it already, and it refuses to run twice.
+        # 6. The one place the world goes back, on EVERY path including a second interrupt or a bug
+        #    above. Step 6 of ``_walk`` normally ran it, and the handle refuses to run twice.
         wind_down.run(console)
         console.say(console.timings())
     return code
@@ -555,7 +558,8 @@ def _walk(
     mode = MODES[args.mode]
     record_from_baseline = args.record_from == "baseline"
 
-    # 1. A world that is provably healthy, and a console to watch it on.
+    # 1. Get to a world that is provably healthy, and a console to watch it on: bring the stack up
+    #    if it is down, reset, pass the world audit, then print the URL and what to do with it.
     step = console.begin(1, "stack, reset, audit, and the console URL")
     if _stack_is_up():
         console.note(step, "stack is already up")
@@ -583,7 +587,8 @@ def _walk(
     console.end(step)
     console.wait("open (or reload) the console, log in, and put it on screen")
 
-    # 2. The baseline the audience should see before anything breaks.
+    # 2. Show the baseline the audience has to see before anything breaks, starting the job
+    #    producer first in the mode that needs one, and wait until the backlog reads healthy.
     step = console.begin(2, "baseline")
     if mode["needs_traffic"]:
         console.note(
@@ -613,7 +618,8 @@ def _walk(
         console.end(step)
         console.wait("ready? then the fault fires")
 
-    # 3. Break it, on a countdown, so the moment is narratable.
+    # 3. Break the world, on a ten-second countdown so the moment can be narrated, then wait until
+    #    the platform's own measurement shows the fault rather than only the hook having fired.
     step = console.begin(3, "inject the fault, and wait for the platform to show it")
     for remaining in range(_FAULT_COUNTDOWN_SECONDS, 0, -1):
         console.say(f"  fault in {remaining}…")
@@ -644,7 +650,8 @@ def _walk(
     _wait_until_the_platform_pages(console, step, scenario)
     console.end(step)
 
-    # 4. Prove the fault is real before spending anything on it.
+    # 4. Prove the fault is real before anything is spent on it, by polling the scenario's own
+    #    precondition probes — the same premise the run will be graded against.
     step = console.begin(4, "prove the premise the scenario grades against")
     console.note(step, "polling the scenario's own precondition probes")
     _await_precondition(scenario)
@@ -659,7 +666,8 @@ def _walk(
         console.say("  *** FAULT VISIBLE — START RECORDING NOW ***")
         console.wait("recording? then say what is broken and start the agent")
 
-    # 5. The agent.
+    # 5. Run the agent: the paid take through ``make eval-live`` with a real model, or the free
+    #    rehearsal against the real platform with the scenario's scripted planner.
     step = console.begin(5, "run the agent" + (" — PAID" if args.live else " (free rehearsal)"))
     if args.live:
         console.note(step, "PAID: make eval-live with MODEL_ROLE=benchmark")
@@ -720,7 +728,8 @@ def _walk(
     console.end(step)
     console.wait("walk through the briefing, then wind down")
 
-    # 6. Say what happened, put the world back, and prove it.
+    # 6. Print the run's own id and the deep link to its record, list the artefacts it wrote, then
+    #    put the world back and prove it went back.
     step = console.begin(6, "wind down")
     run_id = _run_id_of(scenario)
     if run_id is None:

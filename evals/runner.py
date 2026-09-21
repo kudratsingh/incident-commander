@@ -132,11 +132,11 @@ _SCENARIOS_DIR = _REPO_ROOT / "evals" / "scenarios"
 _REPORTS_DIR = _REPO_ROOT / "evals" / "reports"
 _TRAJECTORIES_DIR = _REPO_ROOT / "evals" / "trajectories"
 _BRIEFINGS_DIR = _REPO_ROOT / "evals" / "briefings"
-# The three directories above hold VERSIONED files, exclusive-create, never overwritten
-# (invariant 9); ``evals/artifacts.py`` resolves the newest by the stamp in the FILENAME.
-# ``evals/runs/<invocation_id>/`` archives a run incrementally, with ``report.json`` written
-# LAST as the completion marker: without one it is a killed run whose files are still evidence
-# (ADR 0017). Files are locked read-only, the tree sealed with the marker (ADR 0021).
+# Every file in the three directories above carries the run's own timestamp and id in its name, and
+# a second write to that name FAILS rather than replacing it, because eval artefacts are
+# append-only; ``evals/artifacts.py`` is the one place that resolves which version is newest.
+# ``evals/runs/<invocation_id>/`` archives a run as it goes, with ``report.json`` written LAST as
+# the marker that it finished: a directory without one is a killed run whose files are evidence too.
 _RUNS_DIR = _REPO_ROOT / "evals" / "runs"
 _TRACE_DIR_ENV = "EVAL_TRACE_DIR"
 
@@ -856,14 +856,15 @@ def _assert_preconditions(
     """
     for probe in scenario.expected_precondition:
         reader = _precondition_reader(client, probe, lab_principal_token)
-        # 1. Only the DECISIVE attempt speaks for the world (empty list = met, ``None`` = no
-        #    answer): latching "did any attempt answer" let a dead platform read as "no fault".
+        # 1. Only the LAST attempt speaks for the world: an empty failure list means the premise
+        #    holds, and ``None`` means the platform gave no readable answer at all.
         reading: list[str] | None = None
         unreadable: list[str] = []
         # Kept only to say, in the Unverifiable message, that a now-stale reading exists.
         # Always unmet: an attempt that reads MET breaks out.
         stale_reading: list[str] = []
-        # 2. Poll where the scenario declared it, taking the first MET reading.
+        # 2. Read the probe up to the number of attempts the scenario declared, waiting between
+        #    them, and stop early at the first reading where the premise holds.
         for attempt in range(probe.attempts):
             if attempt:
                 time.sleep(probe.delay_seconds)
@@ -884,10 +885,11 @@ def _assert_preconditions(
             if not reading:
                 break
             stale_reading = reading
-        # 3. The predicate the report turns on: did the DECISIVE attempt answer?
+        # 3. Decide which of the two failures this is: did the last attempt get an answer at all?
         answered = reading is not None
         failures = reading if reading is not None else unreadable
-        # 4. The trace record, whatever the verdict.
+        # 4. Write the trace record either way, so a met precondition is as visible as a failed
+        #    one to whoever reads the run afterwards.
         if tracer is not None:
             tracer.write(
                 {
@@ -903,8 +905,8 @@ def _assert_preconditions(
                     "failures": failures,
                 }
             )
-        # 5. UNKNOWN is not the same finding as NOT MET: one sends a reader to the platform,
-        #    the other to the seeding.
+        # 5. The last attempt got no readable answer, so whether the fault exists is UNKNOWN: raise
+        #    the "unverifiable" error, which sends the reader to the platform, not to the seeding.
         if failures and not answered:
             stale = (
                 f" An earlier attempt did read the world ({'; '.join(stale_reading)}), "
@@ -919,7 +921,8 @@ def _assert_preconditions(
                 "the fault exists is UNKNOWN — look at the platform, not at the "
                 f"seeding.{stale}"
             )
-        # 6. The fault was never manufactured, so nothing about the agent is being said.
+        # 6. The platform answered and the premise does not hold, so the fault was never made:
+        #    raise "not met", abandoning the run before any model call and saying nothing about it.
         if failures:
             raise PreconditionNotMet(
                 f"scenario {scenario.name!r} precondition not met after "
@@ -1246,7 +1249,8 @@ def temporal_timing_refusal(scenario: Scenario, settings: Settings) -> str | Non
     """
     if not scenario.is_temporal:
         return None
-    # 1. The windows this run's knobs actually give, and what it spends before the agent starts.
+    # 1. Work out the two waiting windows this run's environment knobs actually give the agent,
+    #    and how much fault-time the run spends on settling and preconditions before it starts.
     plan = scenario.chaos
     investigation_window = settings.investigation_reprobe_window_seconds
     verify_window = settings.verify_polling_window_seconds
@@ -1261,8 +1265,8 @@ def temporal_timing_refusal(scenario: Scenario, settings: Settings) -> str | Non
         derivation = hook.ttl_from_windows
         if derivation is None:
             continue
-        # 2. An expiry positioned inside a window the knobs collapse to zero is a different
-        #    experiment wearing the same name.
+        # 2. The expiry is positioned inside a window this run's knobs collapse to zero, so the TTL
+        #    would fall back to its floor: refuse, because that is another experiment, same name.
         collapsed = [
             name
             for name, multiple, window in (
@@ -1281,7 +1285,8 @@ def temporal_timing_refusal(scenario: Scenario, settings: Settings) -> str | Non
                 "name. Set the live probe knobs (docs/runbook.md, environment variable "
                 "knobs) or do not run this template."
             )
-        # 3. And a TTL that does not outlast the run's own pre-agent cost measures the HARNESS.
+        # 3. Or the TTL these knobs derive does not outlast what the run spends before the agent's
+        #    first probe, so it would grade the agent for missing a fault that had already gone.
         ttl = derivation.seconds(
             precondition_window=scenario.precondition_window_seconds,
             investigation_window=investigation_window,
@@ -1332,15 +1337,16 @@ def _invoke_plan_hook(
     raises for a hook failure, because the callers disagree about what one means; a
     MISSING credential does raise, because nothing was attempted.
     """
-    # 1. A derived TTL (WP-14.1) resolves here, from this run's own knobs, so the seeded value
-    #    and the recorded timeline are the same number by construction.
+    # 1. Resolve the arguments, which is where a derived TTL becomes a number, from this run's own
+    #    knobs — so the value seeded and the expiry recorded below cannot disagree.
     arguments = hook.seeded_arguments(
         precondition_window=scenario.precondition_window_seconds,
         investigation_window=settings.investigation_reprobe_window_seconds,
         verify_window=settings.verify_polling_window_seconds,
     )
     record = ChaosHookRecord(phase=phase, name=hook.name, arguments=arguments)
-    # 2. Fire it under the EVALUATOR's chaos principal, never the agent's.
+    # 2. Fire the hook under the EVALUATOR's chaos credential, never the agent's: on the agent's
+    #    token the platform would also serve it the audit row naming the fault just injected.
     chaos_token = settings.require_chaos_token()
     try:
         result = invoke_chaos_hook(
@@ -1349,15 +1355,16 @@ def _invoke_plan_hook(
             hook.name,
             arguments,
         )
-    # 3. A failure is RECORDED, not raised: the callers disagree about what one means. Verbatim,
-    #    because ``err`` carries the platform's refusal NAME ("reset, do not retry").
+    # 3. A refused hook is RECORDED, not raised, because the callers disagree about what one means:
+    #    seeding stops the run, teardown carries on. The refusal text names the fix, so keep it.
     except ChaosInvocationError as err:
         record = record.model_copy(update={"ok": False, "error": str(err)})
     else:
         record = record.model_copy(
             update={"result": result, **_timeline_of(hook, arguments, phase=phase)}
         )
-    # 4. One trace record for both halves of a plan, with ``phase`` saying which.
+    # 4. Write one trace record for either half of a plan, with ``phase`` saying whether this hook
+    #    was seeding the fault or putting the world back.
     if tracer is not None:
         tracer.write(
             {
@@ -1522,8 +1529,10 @@ def _replay_record(
     """
     if replay_client is None or recorded_world is None:
         return None
-    # 1. WHICH WORLD, by fingerprint as well as path — what ``make world-drift`` compares.
-    # 2. HOW COMPLETE the replay was, since a miss makes the run incomparable.
+    # 1. WHICH WORLD was replayed, by fingerprint as well as by path, because the fingerprint is
+    #    what ``make world-drift`` compares against the live platform later.
+    # 2. HOW COMPLETE the replay was: a call the recording could not answer makes this run's
+    #    numbers incomparable with any other, so the miss count travels on the row.
     record: dict[str, Any] = dict(replay_client.summary())
     record["recording"] = _repo_relative(recorded_world)
     record["world_label"] = replay_client.world.world.label
@@ -1532,8 +1541,8 @@ def _replay_record(
         for f in replay_client.world.findings
     ]
     record["truncated_at_planning_handoff"] = handoff.fired
-    # 3. THE PLAN when truncated, because ``ACTION`` stays not-applicable and "grade the plan"
-    #    (04:117) needs somewhere. Read by key off the checkpoint's plain mapping.
+    # 3. THE PLAN the run got as far as making. A recorded run executes nothing, so the ACTION
+    #    dimension makes no claim and this row is the only place the plan can be read at all.
     plan = final.remediation_plan
     planned_tool = None if plan is None else plan.get("action_tool")
     expected = tuple(scenario.expectation.expected_action_tools)
@@ -1678,12 +1687,12 @@ def run_scenario(
     tick = clock or (lambda: datetime.now(UTC))
     now = tick()
 
-    # 1. The allow-list projection the agent's run is built from (WP-1.3): ``ground_truth`` and
-    #    the other evaluator-only fields are not on it, so they cannot leak from here.
+    # 1. Cut the scenario down to the fields the agent may see, and build the run from that alone:
+    #    the answer key is not on that list, so nothing below can hand it over by accident.
     agent_visible = scenario.agent_visible()
 
-    # 2. Which mode this is, decided once. RECORDED means the world is a file, so seeding,
-    #    settling, preconditions, teardown and the real transport are all off below.
+    # 2. Decide the mode once, then refuse the combinations with no honest reading. A recorded run's
+    #    world is a FILE, which switches off seeding, settling, preconditions and teardown below.
     recorded = recorded_world is not None
 
     # Refused here and not only at the CLI, because ``run_all`` is also driven from tests and
@@ -1717,9 +1726,8 @@ def run_scenario(
     if recorded and (temporal := scenario.recorded_refusal) is not None:
         raise ChaosSetupFailed(temporal)
 
-    # 3. Which legs are real. ``use_live_*`` means "prefer live if the env is real, else
-    #    canned" — nothing skips on a placeholder. ``not recorded`` leads because a replay under
-    #    a real ``PLATFORM_MCP_URL`` could seed the shared world while the row claimed a replay.
+    # 3. Work out which of the two legs — platform and model — are really live. The mode is checked
+    #    FIRST in both, or a replay under a real platform URL could seed the shared world.
     live_mcp_available = (
         not recorded
         and scenario.use_live_mcp
@@ -1745,8 +1753,8 @@ def run_scenario(
             "platform had paged."
         )
 
-    # 4. Opt-in tracing: EVAL_TRACE_DIR captures every LLM and MCP call to JSONL. The hooks wire
-    #    into the live clients only; the per-step ``StepRecord``s (WP-2.1) are written on both.
+    # 4. Turn on tracing if ``EVAL_TRACE_DIR`` is set, writing every model and tool call to JSONL.
+    #    The per-step records are written on canned runs too: their DECISIONS are still real data.
     tracer: JsonlTracer | None = None
     trace_dir_env = os.environ.get(_TRACE_DIR_ENV)
     if trace_dir_env:
@@ -1774,8 +1782,8 @@ def run_scenario(
             }
         )
 
-    # 5. The fault in one shape however the YAML spells it, read once so setup and teardown
-    #    share a tuple — and the one place the world goes back.
+    # 5. Read the scenario's fault as ONE shape, whichever of the two ways its YAML spells it, so
+    #    the seeding and the teardown work from the same hooks. ``_tear_down`` is the only undo.
     chaos_plan = scenario.chaos
     chaos_records: tuple[ChaosHookRecord, ...] = ()
     teardown_error: str | None = None
@@ -1806,7 +1814,8 @@ def run_scenario(
             write_chaos_block(scenario.name, error, invocation_id=invocation_id)
         return error
 
-    # 6. The platform the agent reads: a replay, a seeded live world, or canned fixtures.
+    # 6. Build the platform the agent reads, which is one of three things: a recording replayed from
+    #    disk, a live platform this run seeds and then checks, or the scenario's canned responses.
     mcp_client: MCPClientProtocol
     live_mcp_client: MCPClient | None = None
     replay_client: RecordedMCPClient | None = None
@@ -1908,7 +1917,8 @@ def run_scenario(
     else:
         mcp_client = CannedMCPClient(agent_visible.canned_tool_responses)
 
-    # 7. One LLM client per role, real or scripted, so each call's trace record is labelled.
+    # 7. Build one model client per prompt role — investigation, selector, critic, planner, verify
+    #    judge, briefing writer, judge — so every call's trace record names the role that made it.
     investigation_llm: LLMClientProtocol
     selector_llm: LLMClientProtocol
     critic_llm: LLMClientProtocol
@@ -1968,9 +1978,8 @@ def run_scenario(
     briefing_canned = briefing_llm if isinstance(briefing_llm, CannedLLMClient) else None
     judge_canned = judge_llm if isinstance(judge_llm, CannedLLMClient) else None
 
-    # 8. Meter every one of them (WP-2.3), so the split is complete by construction.
-    #    ``charged_to_ledger`` draws the line at WHOSE money a call is — the briefing WRITER is
-    #    the agent's (ADR 0015 § 4), the JUDGE the evaluator's.
+    # 8. Wrap every one of those clients in the cost meter, so the per-role bill adds up to the
+    #    run's total. ``charged_to_ledger`` marks whose money a call is: the judge's is not agent's.
     accounting = RunAccounting()
     investigation_llm = accounting.meter(investigation_llm, "investigation_planner")
     # Charged: the selector decides the run's diagnosis, so it is the agent's own cost.
@@ -1982,8 +1991,8 @@ def run_scenario(
     briefing_llm = accounting.meter(briefing_llm, "briefing_writer")
     judge_llm = accounting.meter(judge_llm, "briefing_judge", charged_to_ledger=False)
 
-    # 9. The strategy (WP-0.2) and the four transitions it drives. Resolved once and given to
-    #    both the loop and the provenance record; an unknown one raises before anything is spent.
+    # 9. Build the strategy named by ``INFERENCE_STRATEGY`` and wire the four transitions that call
+    #    a model: investigate, plan, remediate, verify. An unknown name raises before any spend.
     strategy = STRATEGIES.create(settings.inference_strategy, strategy_knobs(settings))
     transitions: dict[IncidentState, Transition] = dict(TRANSITIONS)
     transitions[IncidentState.INVESTIGATING] = make_llm_investigate(
@@ -2052,9 +2061,8 @@ def run_scenario(
         transitions[IncidentState.REMEDIATING] = handoff
         transitions[IncidentState.AWAITING_APPROVAL] = handoff
 
-    # 10. The checkpointer, and the console reporter on its seam (ADR 0068). Outside the try, so
-    #     a crash can still read what the run had spent (see ScenarioCrash). Reporting needs a
-    #     LIVE platform and the AGENT's own client, never the chaos one.
+    # 10. Build the checkpoint store and, when reporting is on, the reporter that posts each
+    #     transition so a console can follow the run. OUTSIDE the try: a crash still reads them.
     checkpointer = InMemoryCheckpointer()
     reporter: RunReporter | None = None
     reporting_checkpointer: ReportingCheckpointer | None = None
@@ -2082,8 +2090,8 @@ def run_scenario(
     # enrichment would reconcile against a stale ledger and report a false ``COST UNRECONCILED``.
     run_ledger: BudgetLedger | None = None
     try:
-        # 11. Run the loop to a terminal state. The scenario's declared cap IS the run's ceiling
-        #     (ADR 0019), not just the number it is graded against.
+        # 11. Start the run from the alert and drive the state machine to a terminal state. The
+        #     scenario's tool-call cap is the real ceiling, not just the number it is graded on.
         run = start_run(
             # The scenario's own block, unless the PLATFORM paged this run — and then the
             # alert row's payload verbatim (O-36). Resolved to one object above rather than
@@ -2109,8 +2117,8 @@ def run_scenario(
             incident_id=str(final.incident_id),
             checkpoints=tuple(checkpointer.history(final.incident_id)),
         )
-        # 12. The briefing the human would receive, enrichment included — built before grading,
-        #     because ``expect_briefing_contains`` grades that. Grading makes no LLM call.
+        # 12. Build the briefing a human would receive and let the model write its findings into it.
+        #     Before grading, because a scenario may assert on that text; grading calls no model.
         briefing = render_briefing(final)
         briefing_error: str | None = None
         # The ledger after the post-terminal briefing charge (WO-R3-260), never put back on
@@ -2132,8 +2140,8 @@ def run_scenario(
             # After enrichment, so the console shows the handoff a human would receive; outside
             # the enrichment try, so a failed enrichment still reports the deterministic half.
             reporter.report_briefing(briefing, prose=_briefing_prose(briefing))
-        # 13. Which world this run was actually in (INC-003, ADR 0040) — only the runner knows,
-        #     and ``grade()`` is a pure function of its arguments and must stay one.
+        # 13. Decide whether this run was in the world its ground-truth label describes. Only the
+        #     runner knows: a recording states its own world, a live run states it by its seeding.
         if replay_client is not None:
             # A recording states its own world (ADR 0043 § 4) and is the only authority here:
             # ``live_mcp_available`` is False, so the derivation below would strike out the one
@@ -2151,7 +2159,8 @@ def run_scenario(
                 live_mcp=live_mcp_available,
                 chaos_seeded=seeded_chaos(chaos_records) or world_already_faulted,
             )
-        # 14. Grade it, from facts passed in.
+        # 14. Grade the run, handing the grader every fact as an argument: the briefing, the labels,
+        #     which world this was, when the fault self-recovers, what this mode cannot claim.
         report = grade(
             final,
             scenario.expectation,
@@ -2170,8 +2179,8 @@ def run_scenario(
             # Which dimensions this MODE cannot make a claim about (WP-3.3).
             not_applicable=(recorded_not_applicable(truncated=handoff.fired) if recorded else None),
         )
-        # 15. And the judge's soft-quality column: a decoration on an already-graded run, so
-        #     losing it must not void the run (ADR 0007).
+        # 15. Ask the pinned judge model how useful the briefing is. That is a soft column beside
+        #     an already-decided grade, so a failed judge call is recorded and the run stands.
         judge_score: JudgeScore | None = None
         judge_error: str | None = None
         if scenario.use_live_llm or (judge_canned is not None and judge_canned.has_remaining):
@@ -2180,7 +2189,8 @@ def run_scenario(
             except (LLMError, ValidationError) as err:
                 # ValidationError too, because decoding does not guarantee JudgeScore's bounds.
                 judge_error = f"judge call failed: {err}"
-    # 16. Crash path: the world goes back, what was spent rides along, and the crash re-raises.
+    # 16. Something above raised. Write the trace's end record, put the world back, attach what was
+    #     spent and where it got to, and re-raise a ``ScenarioCrash`` the caller turns into a row.
     except Exception as exc:
         if tracer is not None:
             tracer.write(
@@ -2218,12 +2228,14 @@ def run_scenario(
         # Operator output, not a row field: reporting says nothing about the agent's behaviour
         # and belongs in no measurement (ADR 0068).
         print(f"  {summarize_reporting(reporter)}")
-    # 17. Put the world back BEFORE the row that reports it: the outcome carries the error.
+    # 17. The run finished. Put the world back BEFORE building the row, because the row carries
+    #     whether the teardown itself failed and left the shared world dirty.
     teardown_error = _tear_down()
     # ``run_ledger`` is bound by the time this path runs; the fallback is for the type checker.
     reported_ledger = final.budget if run_ledger is None else run_ledger
     failure_class, failure_class_detail = _classify_failure(report, final)
-    # 18. The row: the grade, the bucket, the provenance and the bill.
+    # 18. Build the row this scenario contributes to the report: the grade, which bucket a failure
+    #     falls in, what produced the run, what it cost, and whether it is a measurement at all.
     outcome = ScenarioOutcome(
         scenario=scenario.name,
         **_grouping_keys(scenario),
@@ -2276,7 +2288,7 @@ def run_scenario(
         accounting=build_accounting(accounting, reported_ledger),
         replay=_replay_record(replay_client, recorded_world, handoff, final, scenario),
     )
-    # 19. And the trace's own last record, matching the row.
+    # 19. And close the trace with the same verdict the row carries, so the two cannot disagree.
     if tracer is not None:
         tracer.write(
             {
@@ -2331,22 +2343,25 @@ def _classify_failure(report: GradeReport, final: RunState | None) -> tuple[str,
     failing = {d.dimension for d in report.dimensions if not d.passed}
     evidence = final.evidence if final is not None else ()
     summaries = [e.result_summary for e in evidence]
-    # 1. The AGENT was right and the HARNESS could not read it. Ahead of "transport", which live
-    #    run 779b19a287a7 reported as `unclassified` over a correct decision.
+    # 1. The agent's own output failed our validation, so the harness could not read a decision that
+    #    may well have been right. Checked first: one live run called this "unclassified".
     if any(
         summary.startswith(prefix) for summary in summaries for prefix in OUTPUT_INVALID_PREFIXES
     ):
         return PLANNER_OUTPUT_INVALID_CLASS, ""
-    # 2. A leg of the run did not reach its other end.
+    # 2. A call to the platform or the model did not get through at all, so this is the network
+    #    between the parts rather than anything the agent decided.
     if any(
         ("MCP error" in s) or ("MCPError" in s) or ("LLM" in s and "invalid" in s)
         for s in summaries
     ):
         return "transport", ""
-    # 3. The platform refused something: somebody else's state, in one shared world.
+    # 3. The platform answered a tool call with an error, which usually means the shared world was
+    #    not in the state this run assumed — somebody else's leftovers.
     if any("is_error=True" in s for s in summaries):
         return "shared-env", ""
-    # 4. Right action, judge said not-yet: the fix outran the probe.
+    # 4. The action was the right one and the verify judge still said "not yet", so the fix landed
+    #    faster than the platform's own measurement of it could catch up.
     action = dims.get(GradeDimension.ACTION)
     if (
         action is not None
@@ -2357,20 +2372,23 @@ def _classify_failure(report: GradeReport, final: RunState | None) -> tuple[str,
         )
     ):
         return "eventual-consistency", ""
-    # 5. Budget alone: the same prompt spending differently between runs.
+    # 5. Only the budget failed, which is the same prompt spending differently from one run to the
+    #    next rather than a different decision.
     if failing == {GradeDimension.BUDGET}:
         return "llm-variance", ""
-    # 6. Evidence alone: the claim before the agent (INC-001).
+    # 6. Only the evidence claims failed, so suspect the CLAIM before the agent: attach the detail
+    #    that shows which shapes the run actually used, so nobody edits a prompt over it.
     if failing == {GradeDimension.EVIDENCE}:
         return "grader-brittleness", _grader_drift_detail(report, evidence)
-    # 7. A finding ABOUT THE AGENT: it credited itself with a recovery the fault's own clock
-    #    produced. Matched on membership, because the same run usually reds OUTCOME too.
+    # 7. Attribution failed, which IS a finding about the agent: it took credit for a recovery the
+    #    fault's own expiry produced. Matched by membership, since OUTCOME usually fails with it.
     if GradeDimension.ATTRIBUTION in failing:
         return FALSE_ATTRIBUTION_CLASS, next(
             (d.detail for d in report.dimensions if d.dimension is GradeDimension.ATTRIBUTION),
             "",
         )
-    # 8. Nothing above fits, and a wrong bucket is worse than none.
+    # 8. Nothing above fits. Say "unclassified" rather than guessing, because a wrong bucket sends
+    #    the next reader to the wrong place.
     return "unclassified", ""
 
 
@@ -2391,12 +2409,14 @@ def _crashed_result(
     ``ScenarioCrash`` also carries the partial ledger and checkpoints, so the row reports
     what was spent; the bucketing reads the original CAUSE, not the wrapper.
     """
-    # 1. What the crash carried: the original CAUSE, the last checkpoint, the history.
+    # 1. Unwrap what the crash carried: the original exception, the last state the run reached, and
+    #    its checkpoint history. The bucket below reads the CAUSE, not the wrapper around it.
     cause = exc.cause if isinstance(exc, ScenarioCrash) else exc
     partial = exc.final if isinstance(exc, ScenarioCrash) else None
     checkpoints = exc.checkpoints if isinstance(exc, ScenarioCrash) else ()
     error_detail = f"{type(cause).__name__}: {cause}"
-    # 2. One failed OUTCOME dimension naming the error, so the row is readable as a grade.
+    # 2. Build a grade report with one failed OUTCOME dimension naming the error, so a crashed run
+    #    still reads as a row in the report rather than as a hole in it.
     report = GradeReport(
         scenario=scenario.name,
         passed=False,
@@ -2408,8 +2428,8 @@ def _crashed_result(
             ),
         ),
     )
-    # 3. The bucket, off the CAUSE. The transitions absorb transport failures as graded
-    #    escalations, so a crash reaching here is the seeding or an unwrapped transport path.
+    # 3. Pick the bucket from the cause: an unmet precondition means the world was not in the
+    #    asserted state, an unverifiable one that the platform never answered — different places.
     if isinstance(cause, PreconditionNotMet):
         # Not "shared-env": nothing was contended, the world simply was not in the
         # asserted state, and no agent behaviour is described.
@@ -2424,8 +2444,8 @@ def _crashed_result(
         crash_class = "shared-env"
     else:
         crash_class = "transport"
-    # 4. What the crash had billed — a crashed run's spend is spend. ``None`` means no
-    #    measurement exists, which is distinct from a zeroed one.
+    # 4. Carry over what the run had already billed: a crashed run's spend is still spend, and this
+    #    row is the only place it reaches a report. ``None`` is no measurement, not a measured zero.
     crash_accounting = exc.accounting if isinstance(exc, ScenarioCrash) else None
     # The crash's own ledger if it reached a terminal state, else the last checkpoint's: they
     # differ by the post-terminal briefing charge this split contains.
@@ -2435,7 +2455,8 @@ def _crashed_result(
         if crash_accounting is None or partial is None
         else build_accounting(crash_accounting, crash_ledger or partial.budget)
     )
-    # 5. The row itself, with the provenance a crash must not lose (ADR 0013).
+    # 5. Build the row, keeping the provenance a crash must not lose: which legs were declared live,
+    #    the model and revision, the budgets it would have had. These once defaulted to "canned".
     outcome = ScenarioOutcome(
         scenario=scenario.name,
         **_grouping_keys(scenario),
@@ -2499,8 +2520,8 @@ def _crashed_result(
         ),
         accounting=accounting,
     )
-    # 6. Invariant 9: the evidence a crashed run did produce is still evidence. An empty
-    #    trajectory under a nil incident id is data the harness threw away.
+    # 6. Keep the checkpoints the crashed run did write: eval artefacts are append-only, and an
+    #    empty trajectory under an all-zero incident id is evidence the harness threw away.
     trajectory = Trajectory(
         invocation_id=invocation_id,
         scenario=scenario.name,
@@ -2539,21 +2560,22 @@ def run_all(
     name to the recording to replay it against (WP-3.3), with ``main`` refusing a recorded
     selection that has no recording before anything runs.
     """
-    # 1. The selection, read once: the refusal below needs the names, and a generator read
-    #    twice would be empty by the time the loop ran.
+    # 1. Read the selection into a tuple once. The refusal below needs the names before the loop
+    #    starts, and a generator read twice would be empty by the time the loop got to it.
     results: list[ScenarioResult] = []
     ungraded: list[UngradedScenario] = []
     worlds = dict(recorded_worlds or {})
     planned = tuple(scenarios)
-    # 2. ``search`` is recorded-mode only (ADR 0060), and this is the one place that knows which
-    #    scenarios have a recording — refused for the WHOLE invocation before the first starts.
+    # 2. The ``search`` strategy may only run against a recording, because its branches read the
+    #    world and a live one moves between them. Refuse the WHOLE invocation, once, here.
     unrecorded = tuple(scenario.name for scenario in planned if scenario.name not in worlds)
     if settings.inference_strategy is StrategyName.SEARCH and unrecorded:
         raise ValueError(
             f"{SEARCH_IS_RECORDED_MODE_ONLY} Scenarios in this invocation with no "
             f"recording to replay: {', '.join(unrecorded)}."
         )
-    # 3. One scenario at a time, and neither failure path stops the suite.
+    # 3. Run the scenarios one at a time. Neither failure path stops the suite: a world that could
+    #    not be built gives an UNGRADED entry, and any other crash gives a row saying so.
     for scenario in planned:
         recorded_world = worlds.get(scenario.name)
         try:
@@ -2588,11 +2610,12 @@ def run_all(
                 world_already_faulted=world_already_faulted,
             )
         results.append(result)
-        # 4. Scenario N is made durable while N+1 runs, and OUTSIDE the try, so an archive
-        #    failure aborts the suite instead of reading as a scenario crash.
+        # 4. Hand the result to the caller's hook, which archives it while the next scenario runs.
+        #    OUTSIDE the try, so a failed archive aborts the suite instead of reading as a crash.
         if on_result is not None:
             on_result(result)
-    # 5. The totals and the judge's columns, off the rows themselves.
+    # 5. Count the totals and the judge's columns from the rows themselves, never from a tally kept
+    #    while looping, so the report and its rows cannot disagree.
     outcomes = tuple(r.outcome for r in results)
     trajectories = tuple(r.trajectory for r in results)
     briefings = tuple(r.briefing for r in results)
@@ -2610,7 +2633,8 @@ def run_all(
         judge_mean_overall = (
             sum(o.judge_score.overall for o in judged if o.judge_score is not None) / judged_count
         )
-    # 6. And the report, which says what it can and cannot close.
+    # 6. Assemble the report, which also records what it may NOT be used for: a run on the
+    #    development model, or a rehearsal, cannot close a phase however green it is.
     report = RunReport(
         generated_at=datetime.now(UTC),
         invocation_id=invocation_id,
@@ -2882,9 +2906,10 @@ def root_cause_coverage(report: RunReport) -> RootCauseCoverage:
 
 
 def _print_summary(report: RunReport) -> None:
-    # 1. The totals.
+    # 1. The headline counts.
     print(f"scenarios: {report.total}, passed: {report.passed}, failed: {report.failed}")
-    # 2. What is NOT in them, first, because it changes how every number under it is read.
+    # 2. What those counts do NOT include, printed first because it changes how every number above
+    #    is read: these scenarios never ran, so they are neither passes nor failures.
     if report.ungraded:
         print(
             f"UNGRADED: {len(report.ungraded)} scenario(s) never ran — the fault world "
@@ -2895,8 +2920,8 @@ def _print_summary(report: RunReport) -> None:
     for scenario_name in report.contaminated_scenarios:
         error = next(o.teardown_error for o in report.outcomes if o.scenario == scenario_name)
         print(f"TEARDOWN FAILED: {scenario_name} — {error}")
-    # 3. What produced these rows, off the first row's own record rather than the settings this
-    #    process holds, so the line and the artifact cannot disagree (A-01).
+    # 3. What produced these rows — model, role, judge, revision, platform image — off the first
+    #    row's own provenance, not this process's settings, so line and report cannot disagree.
     first = next((o.provenance for o in report.outcomes if o.provenance is not None), None)
     if first is not None:
         print(
@@ -2906,11 +2931,10 @@ def _print_summary(report: RunReport) -> None:
         )
     if reason := report.non_closing_reason:
         print(f"NON-CLOSING: this report cannot close a phase — {reason}")
-    # 4. And how much of it is a measurement at all.
+    # 4. How much of this report measures the agent at all. A rehearsal's scripted planner
+    #    is the mode and not a fallback, so it gets a different sentence: "fix your .env" is wrong.
     if (report.degraded_count or 0) > 0:
         if first is not None and first.rehearsal:
-            # Different sentence for the same field: a rehearsal's canned model leg is the mode,
-            # not a fallback, so "fix your .env" is the wrong next move (ADR 0069).
             print(
                 f"degraded: {report.degraded_count} scenarios, every one of them "
                 "BY DESIGN — this is a rehearsal, so the planner was scripted. No row "
@@ -2927,8 +2951,8 @@ def _print_summary(report: RunReport) -> None:
             f"mean overall {report.judge_mean_overall:.2f}"
         )
     print(root_cause_coverage(report).describe())
-    # 5. The bill, from the rows' own accounting records (WP-2.3). Silent on a canned suite,
-    #    where "$0.000000" would be noise.
+    # 5. The bill, added up from the rows' own records rather than recomputed from settings. Silent
+    #    on a canned suite, and loud when a row's per-role split misses its own budget ledger.
     accounted = [o.accounting for o in report.outcomes if o.accounting is not None]
     if any(row.usd_used > 0 for row in accounted):
         unreconciled = [
@@ -2949,7 +2973,8 @@ def _print_summary(report: RunReport) -> None:
                 "COST UNRECONCILED: the per-role split does not equal the "
                 f"budget ledger for {', '.join(unreconciled)}"
             )
-    # 6. Then one line per scenario, and under a red one its failing dimensions.
+    # 6. Then one line per scenario, and under a failing one every dimension that failed with its
+    #    detail, plus the diagnosis that says whether to suspect the claim or the agent.
     for outcome in report.outcomes:
         mark = "PASS" if outcome.report.passed else "FAIL"
         judge_hint = ""
@@ -3120,7 +3145,8 @@ def recordings_for(scenarios: Sequence[Scenario], world: str | None) -> tuple[di
     Without ``--world``, each scenario replays its newest recording (via ``artifacts``, never a
     glob); ``--world <id>`` pins one, which is what makes a number reproducible.
     """
-    # 1. A temporal scenario is refused first (WP-14.1): its recording never expires.
+    # 1. Refuse a scenario whose fault is meant to expire during the run: a recording answers every
+    #    call at the clock it is replayed at, so that fault never expires and nothing is measured.
     temporal = [
         (scenario.name, refusal)
         for scenario in scenarios
@@ -3128,8 +3154,8 @@ def recordings_for(scenarios: Sequence[Scenario], world: str | None) -> tuple[di
     ]
     if temporal:
         return {}, "RECORDED FAIL: " + " ".join(refusal for _, refusal in temporal)
-    # 2. No ``--world``: each scenario's newest recording, and a missing one REFUSES rather
-    #    than falling back to canned fixtures inside a recorded report.
+    # 2. With no ``--world`` given, take each scenario's newest recording. A scenario with none
+    #    REFUSES the invocation rather than falling back to canned fixtures in a recorded report.
     if world is None:
         found: dict[str, Path] = {}
         missing: list[str] = []
@@ -3149,8 +3175,8 @@ def recordings_for(scenarios: Sequence[Scenario], world: str | None) -> tuple[di
             )
         return found, ""
 
-    # 3. A pinned world resolves through ONE resolver — ``make world-drift`` asks the same
-    #    question of the same id, and two copies would answer with different recordings.
+    # 3. A pinned ``--world`` is resolved through the one shared resolver, because ``make
+    #    world-drift`` asks the same question and two copies would answer with different worlds.
     matches = matching_recordings(world, [scenario.name for scenario in scenarios])
     if not matches:
         return {}, (
@@ -3158,7 +3184,8 @@ def recordings_for(scenarios: Sequence[Scenario], world: str | None) -> tuple[di
             "scenario. Pass a recording's invocation id (the last segment of its "
             "filename under evals/recorded_worlds/) or a selected scenario's full name."
         )
-    # 4. And it has to pin exactly one recording of exactly one selected scenario.
+    # 4. And it has to name exactly one recording of exactly one selected scenario: anything else
+    #    leaves it ambiguous which world the numbers in this report came from.
     if len(matches) > 1:
         return {}, (
             f"RECORDED FAIL: --world {world!r} matches recordings of "
@@ -3208,8 +3235,8 @@ def _smoke_holdback_reason(scenario: Scenario) -> str:
 
 
 def main() -> int:
-    # 1. The operator half of the teardown latch, its own invocation rather than a flag: clearing
-    #    it asserts the world is back, and nobody asserts that consciously as part of a run.
+    # 1. ``--clear-chaos-block`` is its own invocation and does nothing else: clearing the latch
+    #    ASSERTS the shared world is back, and nobody asserts that as a side effect of a run.
     if "--clear-chaos-block" in sys.argv[1:]:
         cleared = clear_chaos_block()
         if cleared is None:
@@ -3217,8 +3244,8 @@ def main() -> int:
         else:
             print(f"cleared chaos teardown block: {cleared}")
         return 0
-    # 2. Which mode the flags ask for, and every combination that has no honest reading. All of
-    #    it before the settings load, so a mistyped mode costs nothing and needs no env.
+    # 2. Read which mode the flags ask for, and refuse every combination with no honest reading. All
+    #    before the settings load, so a mistyped flag needs no environment and costs nothing.
     live = "--live" in sys.argv[1:]
     # The read-scoped principal comes from Settings directly, NOT through the shell: a make
     # recipe's export was overridden by `-include .env`, so every "read-scoped" smoke run before
@@ -3251,8 +3278,8 @@ def main() -> int:
         )
         print("no scenarios ran, nothing was spent")
         return 2
-    # 3. A previous teardown that did not complete leaves the baseline carrying a fault nobody
-    #    intended. Refused before settings, guards and spend — and a rehearsal seeds there too.
+    # 3. If a previous run's teardown did not finish, the baseline still carries a fault nobody
+    #    intended: exit 10 before any spend, and print the reset. A rehearsal is blocked too.
     if (live or rehearsal) and (blocked := chaos_block_reason()) is not None:
         print(f"CONTAMINATED WORLD: live and rehearsal runs are blocked — {blocked}")
         print(
@@ -3263,8 +3290,8 @@ def main() -> int:
         )
         print("no scenarios ran, nothing was spent")
         return 10
-    # 4. ADR 0075: the setup hooks already fired, so this run must not fire them again. Beside the
-    #    other mode flags, because it too states what world the invocation was handed.
+    # 4. ``--world-already-faulted`` says the demo script already fired this scenario's hooks, so
+    #    run must not: a second injection gives every audit-anchored reader the wrong moment.
     world_already_faulted = WORLD_ALREADY_FAULTED_FLAG in sys.argv[1:]
     if world_already_faulted and recorded:
         print(
@@ -3305,7 +3332,8 @@ def main() -> int:
         )
         print("no scenarios ran, nothing was spent")
         return 2
-    # 5. The billed role, and the one identity every artifact of this invocation joins on.
+    # 5. Read which model role pays for this run, and mint the one id every artefact of this
+    #    invocation carries — trace, trajectories, report and archive all join on it.
     model_role, role_refusal = _parse_model_role(sys.argv[1:])
     if model_role is None:
         print(role_refusal)
@@ -3313,8 +3341,8 @@ def main() -> int:
         return 2
     invocation_id = uuid.uuid4().hex[:12]
     only_patterns = _parse_only(sys.argv[1:])
-    # 6. A shared-world run needs a named selection: a bare `--live` is the whole suite against
-    #    one platform with real spend and no reset. `--smoke` derives its own (WO-R2-123).
+    # 6. A run touching the shared world has to name what it runs: a bare ``--live`` is the whole
+    #    suite on one platform, paid for, with no reset between. The smoke pass derives its own.
     if live and not smoke and not only_patterns:
         print(
             "LIVE FAIL: --live requires --only <scenario_name> (or --smoke). "
@@ -3335,8 +3363,8 @@ def main() -> int:
         print("Name exactly one scenario, e.g. make demo-live MODE=dlq_backlog")
         print("no scenarios ran, nothing was spent")
         return 2
-    # 7. The settings this mode reads. A recorded run reads the real environment and costs money
-    #    (the platform is a replay, the MODEL is not); a rehearsal reads it for the opposite half.
+    # 7. Load the settings this mode needs. A recorded run reads the REAL environment and spends,
+    #    because only its platform is a replay; a rehearsal replaces the model key instead.
     try:
         settings = _settings_for_mode(live or recorded, rehearsal=rehearsal)
     except ValidationError as err:
@@ -3351,8 +3379,8 @@ def main() -> int:
     # construction: re-reading the environment is a second chance for it to differ.
     settings = settings.model_copy(update={"agent_model": settings.model_for_role(model_role)})
     print(f"model role: {model_role.value} → AGENT_MODEL={settings.agent_model}")
-    # 8. What the environment says about this mode's legs. The knob warning is live-only and
-    #    never an exit code, so it surfaces even on a run that goes on to be refused.
+    # 8. Check what the environment says about this mode's two legs. The probe-knob warning never
+    #    exits; a rehearsal pointed at a placeholder platform IS refused, since nothing is real.
     if live and (msg := _canned_equivalent_knob_warning(settings)) is not None:
         print(msg)
     # The mirror of `--mode recorded`'s placeholder-KEY refusal below: with a placeholder platform
@@ -3390,8 +3418,8 @@ def main() -> int:
             print("run `make bootstrap-token` and add the read-scoped token")
             return 3
         mcp_token = settings.platform_smoke_token.get_secret_value()
-    # 9. The selection. The smoke pass DERIVES its own through `in_smoke_pass` (WO-R2-123): the
-    #    old hand-written Makefile list let a renamed scenario fall out of it silently.
+    # 9. Load the corpus and work out what to run. The smoke pass DERIVES its selection from each
+    #    scenario's properties: the hand-written list it replaced silently lost renamed scenarios.
     scenarios = load_scenarios(_SCENARIOS_DIR)
     if smoke and not only_patterns:
         held_back = sorted(
@@ -3412,8 +3440,8 @@ def main() -> int:
             )
             print("no scenarios ran, nothing was spent")
             return 2
-    # 10. `--only`: an OR-match accounted PER PATTERN, because refusing only an EMPTY selection
-    #     let one dead pattern hide among nineteen and report green over a smaller suite.
+    # 10. Apply ``--only``, accounting for each pattern SEPARATELY: one matching nothing fails the
+    #     invocation, or a dead pattern hides among live ones and reports green over less.
     if only_patterns:
         matched: dict[str, list[str]] = {
             pattern: [s.name for s in scenarios if pattern in s.name] for pattern in only_patterns
@@ -3460,9 +3488,8 @@ def main() -> int:
         else:
             scenarios = [s for s in scenarios if any(p in s.name for p in only_patterns)]
         print(f"filter --only={only_patterns} → {len(scenarios)} scenario(s)")
-    # 11. Then the gates on whatever is now selected. Seeding fires under PLATFORM_CHAOS_TOKEN
-    #     whatever --smoke says, and the exit-5 audit sees a write only after it lands, so
-    #     refusing the SELECTION is the only prevention (S-03): `--only` may narrow, never widen.
+    # 11. Now the gates on whatever ended up selected. Seeding fires under the chaos credential
+    #     whatever ``--smoke`` says, so refusing the SELECTION is the only thing that prevents it.
     if smoke:
         held_back = [(s.name, _smoke_holdback_reason(s)) for s in scenarios if not s.in_smoke_pass]
         if held_back:
@@ -3478,9 +3505,8 @@ def main() -> int:
             )
             print("no scenarios ran, nothing was spent")
             return 6
-    # 12. A canned-only scenario's fault cannot be manufactured live, so its fixtures would be
-    #     served and the row would enter the live report's pass count. Before the ADR 0020 gate,
-    #     whose advice assumes a scenario that CAN run.
+    # 12. Refuse a live run over a scenario whose fault the platform cannot manufacture: its canned
+    #     fixtures would be served and the row would join a live report's pass count.
     if live and not smoke:
         canned_only = sorted(s.name for s in scenarios if s.canned_only)
         if canned_only:
@@ -3497,8 +3523,8 @@ def main() -> int:
             )
             print("no scenarios ran, nothing was spent")
             return 8
-    # 13. Stricter than `canned_only` above, which asks whether BOTH legs are canned: here the
-    #     model leg is canned by definition, so `use_live_mcp: false` rehearses out of fixtures.
+    # 13. Stricter again for a rehearsal: its model leg is scripted, so a scenario with
+    #     no live platform either would rehearse out of fixtures — an offline run, relabelled.
     if rehearsal:
         no_platform = sorted(s.name for s in scenarios if not s.use_live_mcp)
         if no_platform:
@@ -3514,9 +3540,8 @@ def main() -> int:
             )
             print("no scenarios ran, nothing was spent")
             return 8
-    # 14. One state-mutating scenario per invocation (ADR 0020): the remediation scenarios share
-    #     ONE platform and one seeded replay_safe row, so in a single invocation a CORRECT agent
-    #     greens one and reds the other. Through ``seeds_chaos``, which counts a plan.
+    # 14. At most ONE state-mutating scenario per invocation: they share one platform and one seeded
+    #     replayable row, so a CORRECT agent would go green on the first and red on the second.
     if live or rehearsal:
         mutating = [
             s.name for s in scenarios if s.expectation.expected_action_tools or s.seeds_chaos
@@ -3543,8 +3568,8 @@ def main() -> int:
             )
             print("no scenarios ran, nothing was spent")
             return 7
-    # 15. Which recording each scenario replays, resolved AFTER the selection is final so the
-    #     refusal can name the scenarios that are actually going to run.
+    # 15. Resolve which recording each scenario replays, and print what its numbers may be used for.
+    #     AFTER the selection is final, so a refusal can name the scenarios that would have run.
     recorded_worlds: dict[str, Path] = {}
     if recorded:
         recorded_worlds, recorded_refusal = recordings_for(scenarios, world)
@@ -3599,8 +3624,8 @@ def main() -> int:
             "is unchanged: the graders key on the terminal state, the audit log and the "
             "readings, never on the brief."
         )
-    # 16. The last two preflights, both BEFORE run_all: a misconfigured --live run then costs
-    #     nothing and cannot produce a report indistinguishable from a live-green one (A-01/S-09).
+    # 16. The last two preflight checks, both BEFORE the suite runs: how many scenarios would fall
+    #     back to canned, and whether the key authenticates. A bad live run then costs nothing.
     offline_mcp = _is_offline_placeholder(str(settings.platform_mcp_url))
     offline_llm = _is_offline_api_key(settings.anthropic_api_key.get_secret_value())
     degraded_to_canned = sum(
@@ -3630,9 +3655,8 @@ def main() -> int:
             print(f"PREFLIGHT FAIL (LLM auth): {err}")
             print("fix ANTHROPIC_API_KEY in .env — no scenarios ran, nothing was spent")
             return 3
-    # 17. The principal, guarded at point of use before a dollar is spent. No whoami exists, so
-    #     each guard is a negative probe: an invalid Tier-1 call must be refused on SCOPE, and
-    #     the handler checks scope before arguments, so nothing can execute.
+    # 17. Prove this stage's token is the one it should be, before a dollar is spent. There is no
+    #     "who am I", so a deliberately invalid Tier-1 call must come back refused on SCOPE.
     stage_started_at = datetime.now(UTC)
     # Derived from the URL and NOT the --live flag, with no opt-out: the guard must not depend on
     # flag parsing to decide whether scope needs checking.
@@ -3670,9 +3694,8 @@ def main() -> int:
             return 4
         print("principal guard: token is read-scoped (negative probe refused on scope)")
         print(_lab_probe_note(lab_probe_token))
-    # 18. The mirror, for the stage that must be able to ACT: gating every principal check on
-    #     `smoke` left the one stage that spends AND mutates unguarded, where a read-scoped token
-    #     grades every scenario red after full spend. A rehearsal is on this side too.
+    # 18. The mirror, for a stage that has to be ABLE to act: a read-only token there grades every
+    #     scenario red after the money is gone. The same token must also be BLIND to chaos.
     live_platform = (
         (live or rehearsal)
         and not smoke
@@ -3741,8 +3764,8 @@ def main() -> int:
         # Last, so it reads as a statement about the probes just reported.
         print(_lab_probe_note(lab_probe_token))
 
-    # 19. The archive, created BEFORE the suite runs so each scenario streams its evidence in as
-    #     it finishes (ADR 0017). ``exist_ok=False``: an id collision fails before any spend.
+    # 19. Create this invocation's archive directory BEFORE the suite runs, so each scenario writes
+    #     its evidence as it finishes. Created non-destructively: an id collision fails here.
     trace_dir_setting = os.environ.get(_TRACE_DIR_ENV)
     trace_dir = Path(trace_dir_setting) if trace_dir_setting else None
     target = _RUNS_DIR / invocation_id
@@ -3752,9 +3775,8 @@ def main() -> int:
     if trace_dir is not None:
         (target / "traces").mkdir(exist_ok=False)
 
-    # 20. `list_audit_events` has no offset and no created_after, so the post-stage assertion sees
-    #     only the newest 200 rows. A page after every scenario, unioned, is the fix: without it a
-    #     stage louder than 200 rows exits 5 "inconclusive" on a paid run.
+    # 20. Start collecting audit pages as the stage runs. The listing has no offset and no "since",
+    #     so afterwards only the newest 200 rows exist: a noisy stage would end up unprovable.
     audit_scan = (
         AuditWindowScan(stage_started_at, lab_principal_token=lab_probe_token)
         if guard_required
@@ -3777,7 +3799,7 @@ def main() -> int:
             # A missed checkpoint only narrows coverage, which fails closed on its own.
             print(f"post-stage audit checkpoint skipped ({type(err).__name__}: {err})")
 
-    # 21. Run the suite.
+    # 21. Run the suite, archiving each scenario and taking an audit page as it finishes.
     try:
         report, trajectories, briefings = run_all(
             scenarios,
@@ -3796,9 +3818,8 @@ def main() -> int:
         if scan_client is not None:
             scan_client.close()
     ran_names = [o.scenario for o in report.outcomes]
-    # 22. report.json goes down as the completion marker and only THEN the top-level copies, so a
-    #     failure there leaves the durable record complete: with only the flat files, a routine
-    #     offline `make eval` erased Run 001's paid trajectories (F-003).
+    # 22. Seal the archive with its ``report.json`` marker, and only THEN the top-level report,
+    #     trajectories and briefings: in that order a failure halfway still leaves a full record.
     archived = finalize_archive(target, report)
     written_report = write_report(report)
     write_trajectories(trajectories, timestamp=report.generated_at)
@@ -3809,8 +3830,8 @@ def main() -> int:
     print(f"run archived: {_repo_relative(archived)} (immutable)")
     print(f"report: {_repo_relative(written_report)}")
 
-    # 23. The post-stage assertion, graded from the platform audit log rather than the agent's
-    #     trajectory (invariant 6) — the evidence that exposed the token bug, automated.
+    # 23. Assert from the platform's own audit log, not the agent's self-reported trajectory, that a
+    #     read-only stage executed no Tier-1 action. This caught a stage holding write scope.
     if guard_required:
         # Attributed to the principals this stage owns, so another service account cannot fail or
         # mask it (A-13). BOTH ids or nothing: the failure this exists for writes under the AGENT
@@ -3853,9 +3874,8 @@ def main() -> int:
             return 5
         print("post-stage audit: zero successful Tier-1 actions during the smoke stage")
 
-    # 24. The exit code, ordered by BLAST RADIUS, widest first: only a contaminated world reaches
-    #     the NEXT invocation. All of it after the archive is on disk — evidence first, verdict
-    #     second. Read off the LATCH too: a scenario abandoned at SEEDING has no row.
+    # 24. Choose the exit code, widest blast radius first, since only a dirty world reaches the NEXT
+    #     invocation: dirty world, then ungraded scenario, then a failure. All after the archive.
     if (live or rehearsal) and (report.contaminated_scenarios or chaos_block_reason() is not None):
         named = ", ".join(report.contaminated_scenarios) or (chaos_block_reason() or "")
         print(

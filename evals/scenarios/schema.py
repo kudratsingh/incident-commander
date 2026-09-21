@@ -198,7 +198,8 @@ def chaos_argument_errors(name: str, arguments: Mapping[str, Any]) -> list[str]:
     if not properties:
         return []  # schema declares no properties — nothing to check against
     errors: list[str] = []
-    # 1. Names the schema does not declare.
+    # 1. Argument names the hook's schema does not declare at all. The platform refuses unknown
+    #    properties outright, so live seeding would fail on any of these.
     unknown = sorted(set(arguments) - set(properties))
     if unknown:
         errors.append(
@@ -206,13 +207,14 @@ def chaos_argument_errors(name: str, arguments: Mapping[str, Any]) -> list[str]:
             "The platform declares additionalProperties=false, so live seeding "
             "would fail on this."
         )
-    # 2. Required names the invocation omits.
+    # 2. Names the schema marks required that this invocation leaves out.
     raw_required = schema.get("required")
     required = raw_required if isinstance(raw_required, list) else []
     missing = sorted({str(field) for field in required} - set(arguments))
     if missing:
         errors.append(f"missing required argument(s) {missing} for {name}")
-    # 3. Each value against its resolved JSON type and closed set.
+    # 3. Then each value that IS passed, against the JSON type its property admits and against
+    #    the closed set of values where the schema names one.
     for argument, value in sorted(arguments.items()):
         if argument not in properties:
             continue  # already reported as unknown
@@ -275,10 +277,11 @@ class TtlFromWindows(BaseModel):
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    #: Multiple of the ADR 0009 investigation re-probe window. 0.6 puts the expiry inside the
-    #: investigation (gone before the agent can act); 1.0 or more carries it past the action.
+    #: How many times the window the agent spends re-probing for fresh readings (ADR 0009) the
+    #: fault should outlast. 0.6 puts the expiry inside the investigation, so the fault is gone
+    #: before the agent can act; 1.0 or more carries it past the action.
     investigation_multiple: float = Field(default=0.0, ge=0.0, le=10.0)
-    #: Multiple of the ADR 0006 verify polling window, added on top.
+    #: The same, for the window the agent spends polling after it acts (ADR 0006), added on top.
     verify_multiple: float = Field(default=0.0, ge=0.0, le=10.0)
     #: The smallest TTL that still leaves the fault observable at run start, in the units the
     #: world imposes. Load-bearing at the OFFLINE knob defaults, where both windows are 0.
@@ -319,8 +322,9 @@ class ChaosHook(BaseModel):
 
     name: str = Field(min_length=1, description="Platform hook name, e.g. `inject_latency`.")
     arguments: dict[str, Any] = Field(default_factory=dict)
-    #: WP-14.1: derive ``ttl_seconds`` from the agent's timing knobs instead of writing
-    #: one. Set only by a temporal template; ``None`` leaves ``arguments`` as declared.
+    #: Derive ``ttl_seconds`` from the agent's own timing knobs instead of writing a number here.
+    #: Set only by a template whose fault is meant to expire while the run is under way; ``None``
+    #: leaves ``arguments`` exactly as the scenario declared them.
     ttl_from_windows: TtlFromWindows | None = None
 
     @field_validator("name")
@@ -642,8 +646,8 @@ class ScenarioFamily(StrEnum):
     CONSUMER_LAG = "consumer_lag"
     DEPLOY = "deploy"
     DLQ = "dlq"
-    # The harness under test rather than a world: the planner's own control
-    # path (stop on iteration 1) with no fault to diagnose.
+    # These scenarios test the harness rather than a world: the planner's own control path, where
+    # it stops on the first iteration and there is no fault to diagnose at all.
     HARNESS_CONTROL = "harness_control"
     INCIDENTS = "incidents"
     # Plan 01 § 7.1's Family B, "accepted but not executing": one symptom, four answers,
@@ -651,8 +655,8 @@ class ScenarioFamily(StrEnum):
     JOBS_NOT_PROGRESSING = "jobs_not_progressing"
     NOISE_CONTROL = "noise_control"
     POSTGRES = "postgres"
-    # Plan 00 § 113's capability level 7 (WO-R3-236, WP-14.1): a fault that is there and then
-    # is not, on its own clock. What the world PRESENTS is the recovery, not the fault.
+    # A fault that is there and then is not, on a clock of its own. Its own family because what
+    # the world PRESENTS to the agent is the recovery, not the fault underneath it.
     TEMPORAL_RECOVERY = "temporal_recovery"
     TOOL_FAULT = "tool_fault"
     TRACES = "traces"
@@ -720,8 +724,8 @@ class Scenario(BaseModel):
     # Stable across every instance of one template (plan 03 § 2). ``name`` identifies the
     # INSTANCE and keys the archive, the report, the baseline and the drift ledger.
     template_id: str = ""
-    # Which instance of the template this is. 0 for every legacy scenario, none of which
-    # is generated; instance generation (WP-3.x) is what makes it move.
+    # Which instance of the template this is. It is 0 on every hand-written scenario, and only
+    # starts moving once instances are generated from a template.
     seed: int = Field(default=0, ge=0)
     # The observable symptom, and the first key every report groups on. Optional on the MODEL and
     # mandatory in the CORPUS, which ``test_scenario_metadata.py`` asserts over the directory.

@@ -75,11 +75,9 @@ def _stamp_entered(
 ) -> RunState:
     """Stamp the state a transition produced with the moment it was ENTERED (ADR 0075).
 
-    The loop owns the stamp because only the loop observes that moment; ``entered`` reuses
-    ``_accrue_wall_time``'s reading, so it costs no extra clock call. The transition's own
-    evidence row is restamped only when this dispatch appended it, it still carries
-    ``dispatched_at``, and it is an underscore bookkeeping marker — a real tool row keeps
-    the time of its read.
+    The loop owns the stamp because only the loop observes that moment, and ``entered`` reuses
+    ``_accrue_wall_time``'s reading. The transition's own evidence row is restamped only when it
+    is an underscore marker this dispatch appended at ``dispatched_at``; a tool row keeps its own.
     """
     entries = run_state.evidence
     update: dict[str, object] = {"updated_at": entered}

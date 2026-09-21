@@ -1,9 +1,8 @@
 """``best_of_n_sampled`` — N independent planner calls at a temperature (plan 02 § 11.2, WP-5.3).
 
-Pass@k: N draws from one context, the candidate set being the union of their top hypotheses by
+Pass@k: N draws from one context, the set being the union of their top hypotheses by
 ``(category, name)`` with no folding. The emitted step is ONE sample's, verbatim — the most
 confident, ties to the earliest — because a blend would emit a step no model proposed (ADR 0045).
-A failure is re-raised as ``SampledPlannerFailed`` carrying every billed leg (ADR 0015).
 """
 
 from __future__ import annotations

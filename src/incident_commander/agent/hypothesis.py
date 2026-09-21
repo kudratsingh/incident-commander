@@ -242,9 +242,8 @@ class InvestigationStep(StructuredOutput):
 
 
 # The step schema with `probe` withdrawn (ADR 0074, amending ADR 0073). A refusal the planner
-# meets AFTER it has chosen leaves "probe something else" open and a model takes it (INC-004),
-# so once the ranking has settled the choice is narrowed in the SCHEMA it is handed. The loop
-# decides when (`investigation._probe_withdrawn`); every strategy renders it (ADR 0036).
+# meets AFTER it has chosen leaves "probe something else" open and a model takes it (INC-004), so
+# a settled ranking is narrowed in the SCHEMA. The LOOP decides when (ADR 0036).
 
 
 SettledNextAction = Annotated[StopAction | RemediateAction, Field(discriminator="kind")]

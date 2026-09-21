@@ -324,7 +324,7 @@ class TestLedgerRatchet:
         assert classify([], frozenset({key}), stack_context="cold")[1] == (key,)
 
     def test_warm_stack_entries_are_only_stale_on_a_warm_stack(self) -> None:
-        key = ("remediate_stale_cache_success", "get_cache_key_info", "size", "value", 0)
+        key = ("cascading_redis_starves_backpressure", "get_consumer_lag", "lag", "value")
         assert classify([], frozenset({key}), stack_context="cold") == ((), ())
         assert classify([], frozenset({key}), stack_context="warm")[1] == (key,)
 

@@ -995,11 +995,28 @@ operate by:
   every time). The **smoke** token deliberately: this loop only ever reads
   lag, and giving it the write-scoped token would widen it for nothing.
 
-  Two corrections to the old note. It submits every **3s, not 2s**:
-  `jobs:create` is limited to 30/60s and 1-job/2s sits exactly on that
-  limit, so half the requests would 429. And it needs the **user** login,
-  not the service-account token the eval uses — `POST /jobs` depends on
-  `get_current_user`.
+  Two corrections to the old note. It submits every **3s, not 2s** by
+  default, and it needs the **user** login, not the service-account token
+  the eval uses — `POST /jobs` depends on `get_current_user`.
+
+  **`RATE` is a floor, not a rate, and 30 a minute is the ceiling nothing
+  gets past.** The platform's allowance is
+  `rate_limiter(limit=30, window=60, key_prefix="jobs:create")` in
+  `backend/app/api/jobs.py` — a **literal, not a setting**, and keyed on the
+  CALLER'S ADDRESS rather than on the identity, so every producer on this
+  machine shares one bucket and no token arrangement widens it. The window
+  is fixed (`int(time.time()) // 60`), so asking faster does not raise the
+  sustained arrival rate: it front-loads one window and then collects 429s
+  until the window rolls. `scripts/traffic_loop.py` reads that same clock
+  and spreads whatever allowance is left over the time left in the window
+  (`WindowPacer`), so `RATE=0.5` gets a steady 30 a minute instead of a
+  burst and a stall, and a 429 — which only another producer can now cause —
+  marks the window spent rather than being asked for again. Two numbers
+  follow from the ceiling and they are worth having before a demo: a backlog
+  of **20 takes 40 s** to build and one of **40 takes 80 s**, from the moment
+  the consumer dies. A deeper backlog than that inside a minute is not
+  available from one machine, and the lever is the platform's literal, not
+  the loop.
 
   Expect 503s once lag passes 1000. That is not a failure: the platform's
   backpressure check reads `kafka:consumer_lag:worker-dispatcher`, the
@@ -1183,13 +1200,14 @@ and on `main` until the other half lands. Bless the new snapshot locally
 from the new pinned stack, then commit the compose bump, the snapshot, and
 any registry realignment together.
 
-Platform ships a new digest → eleven steps on the agent side (the sixth arrived
+Platform ships a new digest → twelve steps on the agent side (the sixth arrived
 with v0.6.11, the first pin to make an existing tool's output field required; the
 seventh with v0.6.12; the eighth with v0.6.13; the ninth with v0.6.14, the first
 pin whose re-record would rewrite a graded trajectory; the tenth with v0.6.17, the
 first pin that moved the REQUEST and left `tools/list` byte-identical; the eleventh
 with v0.6.18, the first pin that made a platform CONSTANT a setting this stack then
-sets to something else):
+sets to something else; the twelfth with v0.6.19, the first release that changes
+nothing on the agent's side of the wire at all):
 
 1. Update `demo/compose.yml` — **all THREE platform-code services**
    (`migrate`, `platform`, `api`) and the prose that names the version:
@@ -1760,6 +1778,27 @@ sets to something else):
       `source`**: the platform's rows read `kafka:consumer_lag` and `dlq:threshold`
       where the corpus writes `platform.kafka` and `platform.dlq`. A pin that changes
       either spelling changes nothing here, and that is the point.
+
+12. **A release can change nothing the agent can see, and the re-pin is still the
+    whole job.** v0.6.19 is the first (plat #236, WO-R3-341): the CONSOLE image
+    carries the fifth take's `/demo` fixes and the backend image's behaviour is
+    identical to v0.6.18 — no tool, description, schema, scope or refusal code
+    moves. Measured, not assumed: `make snapshot` against the live v0.6.19 stack
+    rewrote the file and `git diff contracts/` came back **empty**, 40 tools, and
+    `make test-contract` passed. So there is nothing to rebless, no fixture moves,
+    and no eval claim moves.
+
+    **Pin all four services anyway, on the same tag.** The backend containers take
+    a tag whose image they were already running, which looks like busywork and is
+    not: "which platform was this run against" has to have one answer, and a stack
+    running `console:v0.6.19` beside `api:v0.6.18` has two. The provenance the run
+    archive records is the digest out of `demo/compose.yml`
+    (`platform_image_digest`), so a half-pinned stack also mislabels every archive
+    it produces.
+
+    **The one-line rebless note still gets written**, in the hub's
+    `docs/wave4-specs/rebless-notes.md`, and it says the diff was empty. A version
+    with no ledger row reads later as a version nobody checked.
 
 ## Connection pool and run capacity ([ADR 0022](ADR/0022-connection-pool-sizing-and-the-run-concurrency-ceiling.md))
 

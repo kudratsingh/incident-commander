@@ -7,6 +7,7 @@ is what to have open beside it.
 make demo-live MODE=consumer_outage           # a consumer stops, the backlog climbs
 make demo-live MODE=dlq_backlog               # one replayable row, one poisoned row
 make demo-live MODE=… AUTO=1                  # rehearsal: no pauses
+make demo-live MODE=… HOLD=90                 # keep the finished run on screen longer (default 60)
 make demo-live MODE=… RECORD_FROM=baseline    # record from the healthy world, not the fault
 make demo-live MODE=… LIVE=1 YES_SPEND=1      # the ONE paid take
 ```
@@ -41,12 +42,23 @@ scenario, every time. No make target sets `YES_SPEND`.
       page loaded before it is still showing the previous run.
 - [ ] `PLATFORM_SMOKE_TOKEN` set, and this one is a REFUSAL rather than a degradation
       (ADR 0074): every read the runner makes — the baseline wait, the fault watch, the
-      precondition poll, the drain wait, and `make traffic`'s own `--until-lag` read — is made
+      precondition poll, the drain wait, and `make traffic`'s own lag read — is made
       under the read-only principal, and the script stops with
       `PLATFORM_SMOKE_TOKEN is not set … it will not fall back` if it is missing. The fallback
       it replaced is what flooded the 2026-09-20 take's action ledger: a `get_consumer_lag`
       every three seconds under the AGENT principal, which the page cannot tell from the
       agent's own four reads.
+
+      **Since WO-R3-342 the right token is not enough — each of those reads also says it is the
+      lab's.** They carry a `_lab_probe` reason and the lab credential, so the platform files
+      them as `lab.probe` rather than `agent.tool_invoked` (platform ADR 0038). The fifth take
+      had the right token and no label, and the page — which with no run selected counted every
+      tool row as the agent's — drew 39 of them as the agent acting before the fault existed.
+      **The refusal to know about:** an unhonoured label is refused with `-32602` and the call
+      does NOT run, so if the demo stack's smoke account is ever renamed away from
+      `lab_probe_smoke_account_name` every wait in the script goes blind at once. The tell is a
+      baseline wait that never sees a known lag; the check is one `lab.probe` row from
+      `make world-audit`, which wears the same credential.
 - [ ] Nothing else running: no `make traffic`, no `evals.runner`, no merge in flight. Step 1
       audits for exactly this and stops if it finds one.
 - [ ] Screen recorder ready but **not started** — step 4 tells you when (step 2 with
@@ -150,6 +162,10 @@ half a second, because the premise was already true when it asked.
 
 ### Re-measured on v0.6.18, where the clock is a setting and the platform pages itself
 
+> **History as of WO-R3-342.** The producer no longer speeds up when the fault fires — see
+> "Re-measured on v0.6.19" below for why the acceleration was the thing that made the fifth
+> take's chart stop climbing, and for the numbers that replace the ones in this section.
+
 Owner decisions O-35 and O-36 (WO-R3-339, [ADR 0076](ADR/0076-the-demo-takes-the-platforms-page.md)).
 `demo/compose.yml` sets `METRICS_LOOP_INTERVAL_SECONDS=5`, the producer is restarted at **0.75 s
 once the fault fires** (`make traffic RATE=0.75`), and step 3 now waits for the PLATFORM's own
@@ -230,6 +246,101 @@ read was `0` twenty seconds later. A timeout (150 s) warns and audits anyway —
 never be a way to declare the world fine. The fault watch in step 3 has the same rule for the
 same reason: a timeout (180 s) WARNS, and the precondition below it is the gate.
 
+### Re-measured on v0.6.19, where the backlog climbs without stalling and the run stays on screen
+
+WO-R3-342, from the fifth take's four commander findings. The platform image is v0.6.19 and
+its BACKEND is v0.6.18's behaviour unchanged — `make snapshot` against the live stack showed no
+diff at all, 40 tools — so nothing below is a platform change. Both modes rehearsed
+2026-09-21 with `AUTO=1 HOLD=5`, both PASS, `make world-audit` PASS before and after each. Runs
+`835ef73e-99f5-57a0-a2c8-597806efd122` (`consumer_outage`) and
+`ab2406d1-49e7-5c44-aa6a-0a24e7cb7a86` (`dlq_backlog`):
+
+| Step | | `dlq_backlog` | `consumer_outage` |
+|---|---|---|---|
+| 1 | stack check, reset, world audit, console URL | 3.0 s | 3.0 s |
+| 2 | baseline (`consumer_outage` starts `make traffic` at 2.0 s) | 0.0 s | 0.0 s |
+| 3 | inject the fault (10 s countdown), wait for the reading and for the page | 14.0 s | 51.3 s |
+| 4 | prove the premise the scenario grades against | 0.5 s | 0.4 s |
+| 5 | run the agent (scripted planner) | 1.4 s | 1.4 s |
+| 6 | wind down, **including a 5 s hold** | 7.9 s | 8.1 s |
+| | **total** | **26.7 s** | **64.2 s** |
+
+**The chart climbs the whole way now, and that is the point of the change.** The platform's own
+15-minute sample ring for `worker-dispatcher`, at its 5-second tick, across the
+`consumer_outage` take:
+
+```text
+fault 12:22:21.788 → 0  0  2  4  7  10  12  15  17  20 → restart 12:23:04.084 → 0
+```
+
+Nine strictly increasing samples and **zero flat ones** between the fault and the restart. The
+fifth take's series was `0 → 5 → 11 → 18 → 24 → 28` and then **flat at 28 for about 25
+seconds**, because the producer had been restarted at 0.75 s once the fault fired, spent that
+minute's whole allowance in 22 s, and collected 429s until the window rolled.
+
+**Why one rate for the whole take.** `POST /jobs` allows 30 creations per FIXED 60-second window
+per caller address — `rate_limiter(limit=30, window=60, key_prefix="jobs:create")` in the
+platform's `backend/app/api/jobs.py`, a **literal rather than a setting**, and keyed on the
+address rather than on the identity, so no token arrangement widens it. 30 a minute is therefore
+the sustained ceiling and there is no faster fault-phase rate to switch to: the acceleration was
+borrowing from a window it then had to repay. So `make demo-live MODE=consumer_outage` starts ONE
+producer at `RATE=2.0` in step 2 and never restarts it, and `scripts/traffic_loop.py` reads the
+same clock the platform cuts its window from and spreads what is left of the allowance over what
+is left of the window (`WindowPacer`), which is what makes "never refused" a property rather
+than a hope. A 429 — which now only another producer can cause — marks the window spent instead
+of being asked for again.
+
+**The arithmetic to know before a take, because it is a ceiling and not a tuning knob:** the
+backlog grows one job every two seconds, so **lag 20 takes 40 s** and **lag 40 takes 80 s** from
+the moment the consumer dies. In this rehearsal the platform paged at lag 20, **39.8 s** after
+the fault, and the agent's Tier-1 restart landed **42.3 s** after it, with the last sample before
+the restart reading **20**. A deeper backlog than that before the agent acts is not available
+from one machine at this limit: it needs either the platform's literal to become a setting (then
+0.75 s is honest again and lag 40 arrives in 30 s) or a deliberate wait for a deeper backlog
+before the run starts, which puts a visible gap between the page and the response. Neither is a
+builder's decision.
+
+| | `consumer_outage` | `dlq_backlog` |
+|---|---|---|
+| take boundary (`lab.world_reset`) | 12:22:10.165 | 12:23:14.836 |
+| fault (`chaos.tool_invoked`) | `kill_consumer` 12:22:21.788 | `seed_dlq_messages` 12:23:26.481 |
+| the platform's page (`alert.raised`) | `consumer_stalled` 12:23:01.580 | `dlq_depth_warning` 12:23:27.556 |
+| **fault → page** | **39.79 s** | **1.08 s** |
+| the agent's first own call | 12:23:04.028 | 12:23:31.369 |
+| **page → agent** | **2.45 s** | **3.81 s** |
+| the Tier-1 action | `restart_consumer_group` 12:23:04.084 | `replay_dlq_by_category` 12:23:31.461 |
+| `alert.resolved` | 12:23:07.111 | 12:23:32.881 |
+
+**The audit sequence of a take is now exactly what a reader would draw.** Per take: **one**
+`chaos.tool_invoked` with `outcome: success` and no `lab_probe_reason` (the fault), **one**
+`alert.raised`, and **zero** `agent.tool_invoked` rows before the run's own first call. The
+fifth take had **39** rows before it — `get_consumer_lag` every few seconds under the read-only
+principal, from this script's own waits and from the traffic loop's tick line — and with no run
+selected the page drew them as the agent acting before the lab had injected anything. Those reads
+now carry a `_lab_probe` reason (`demo: baseline lag poll`, `demo: fault watch read`,
+`traffic: lag read`) plus the lab credential, so the platform files them as `lab.probe`, which is
+withheld from the agent and hidden by the console. The traffic loop also reads the lag only when
+something will use it — the `--until-lag` stopping condition or a printed tick — rather than on
+every submission; 119 of the take's 162 rows were that read and nothing looked at most of them.
+
+**A verdict reaches the console with the step that produced it.** In the fifth take the
+`verify_judge` thinking steps were live but the `verification` entries they announced arrived
+with the terminal report, 22 seconds after the readings they judged (F3). Report 11 of 13 in this
+rehearsal carried step 6 (`report verify_judge`, stamped 12:23:04.130) **and** that step's
+verdict in the same payload, and it landed at 12:23:04.132 — **2 ms**. The report that closes the
+run carries no verification, deliberately: the platform never clears that field on omission
+([platform ADR 0037](https://github.com/kudratsingh/incident-platform)), so re-sending it would
+append the same verdict to the append-only `verifications` ledger twice and the console would
+draw the last verdict twice. The run record holds exactly one entry.
+
+**The finished run stays on screen.** Step 6 prints the run id, the deep link and the artefact
+paths, then HOLDS the world for `HOLD` seconds (default **60**) before it stops the traffic,
+resets and re-audits. The fifth take's run left the page eleven seconds after it resolved,
+because the wind-down's reset writes the next take's boundary and the page follows the newest
+take. Ctrl-C during the hold skips the rest of it and the world still goes back — it is the
+operator saying "I have read it", not a reason to leave a dirty world. `HOLD=0` resets at once
+and a negative value is refused at parse time.
+
 ## What the operator endpoints showed, per phase
 
 `consumer_outage`, the same rehearsal, polled every 2 s as the operator console polls. All four
@@ -302,8 +413,10 @@ excludes them by principal (they are not the run's), which is why they were left
 1. **Stack, reset, audit, console URL.** Brings the stack up if it is down, resets the world,
    and runs `make world-audit` as a **gate**: a demo that starts from a world somebody else
    left dirty shows the audience a fault that is not yours. Non-zero stops the demo.
-2. **Baseline.** In `consumer_outage`, starts `make traffic` and waits for a healthy reading
-   (lag known, small). In `dlq_backlog`, nothing — the world is seeded and quiet. Prints
+2. **Baseline.** In `consumer_outage`, starts `make traffic` at the mode's one rate (`RATE=2.0`,
+   the platform's own sustained ceiling for creating jobs) and waits for a healthy reading (lag
+   known, small). That producer is never restarted, so the fault changes what the arrivals MEAN
+   and not how fast they come. In `dlq_backlog`, nothing — the world is seeded and quiet. Prints
    **BASELINE — START RECORDING NOW**.
 3. **The fault, and then the page.** Ten-second countdown, then the scenario's own chaos plan
    fires under the chaos principal — printed, so you can say what fired. Then TWO waits, and
@@ -322,9 +435,12 @@ excludes them by principal (they are not the run's), which is why they were left
    starts from the alert ROW's payload verbatim rather than from the scenario file's `alert:`
    block (O-36, [ADR 0076](ADR/0076-the-demo-takes-the-platforms-page.md)); the grade does not
    move, because the graders key on the terminal state, the audit log and the readings.
-6. **Wind down.** Stops traffic, prints the trajectory / briefing / human-report / trace
-   paths, waits for the backlog in a traffic mode, resets and re-audits. Prints **DONE — STOP
-   RECORDING**.
+6. **Wind down.** Prints the run id, its deep link and the trajectory / briefing / human-report
+   / trace paths, then **HOLDS the world for `HOLD` seconds (default 60)** so the finished run
+   stays on the page — the reset opens the next take and the page follows the newest one, which
+   is how the fifth take's run left the screen eleven seconds after it resolved. Then it stops
+   traffic, waits for the backlog in a traffic mode, resets and re-audits. Ctrl-C during the hold
+   skips the rest of it; the world still goes back. Prints **DONE — STOP RECORDING**.
 
 **Every failure path stops the traffic, resets and re-audits** — including a bug in the demo
 machine itself. The one case with no audit after it is a reset that *failed*: auditing a world

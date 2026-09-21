@@ -539,8 +539,13 @@ traffic: export PLATFORM_SMOKE_TOKEN := $(PLATFORM_SMOKE_TOKEN)
 # a stack that is really running 30 is the one way to get the 429s back.
 # `MAX_PER_WINDOW=0` switches the pacing off for anyone who wants to meet the
 # limit head-on.
+#
+# `python -u` because `scripts/demo_live.py` redirects this to a file and stops it
+# with SIGTERM: a block-buffered stdout loses every line the loop printed, so the
+# log of a take read `Error 143` and nothing else — including the tally that says
+# whether the platform refused a submission.
 traffic:
-	uv run python scripts/traffic_loop.py $(if $(RATE),--interval $(RATE)) $(if $(MAX_PER_WINDOW),--max-per-window $(MAX_PER_WINDOW)) $(if $(UNTIL_LAG),--until-lag $(UNTIL_LAG)) $(if $(COUNT),--count $(COUNT))
+	uv run python -u scripts/traffic_loop.py $(if $(RATE),--interval $(RATE)) $(if $(MAX_PER_WINDOW),--max-per-window $(MAX_PER_WINDOW)) $(if $(UNTIL_LAG),--until-lag $(UNTIL_LAG)) $(if $(COUNT),--count $(COUNT))
 
 chaos-help:
 	PYTHONPATH=. uv run python scripts/chaos_setup.py --help

@@ -74,6 +74,17 @@ _NON_SETTINGS_TOKENS: Final[frozenset[str]] = frozenset(
         # (backend/app/core/consumer_lag.py), quoted in the runbook's pin walk because it is
         # the guard that binds only below a 3.75 s interval.
         "LAG_SAMPLES_MAX_ENTRIES",
+        # Platform-side job-creation allowance, a SETTING since platform v0.6.20 (plat #236)
+        # and raised to 240 on the demo stack's `api` service in demo/compose.yml — the
+        # process that serves `POST /jobs`. Not a commander setting: the agent creates no
+        # jobs, and the only thing on this side that cares is the traffic loop's pacer.
+        "JOB_CREATE_RATE_LIMIT",
+        "JOB_CREATE_RATE_WINDOW_SECONDS",
+        # `make traffic` flag for the allowance above (scripts/traffic_loop.py's pacer).
+        "MAX_PER_WINDOW",
+        # Platform-side eval-fixture seeder flag, set on the `api` service in
+        # demo/compose.yml — the REST app whose startup hook is its only reader.
+        "SEED_EVAL_FIXTURES",
         # Settings on the PLATFORM, quoted in docs/safety-model.md (platform #169).
         "MCP_RATE_LIMIT_PER_PRINCIPAL",
         "MCP_RATE_LIMIT_WINDOW_SECONDS",

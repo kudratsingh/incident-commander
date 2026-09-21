@@ -98,6 +98,7 @@ class ReflectionStrategy:
         Straight-line: the single pass is taken through a ``RevisionPass``, so a later edit that
         added a loop would raise instead of billing again.
         """
+        # 1. The critic needs its own metered client, or "added tokens" is unreportable.
         if ctx.critic_llm_client is None:
             raise ValueError(
                 f"{NO_CRITIC_CLIENT}. The critic is its own metered role "
@@ -105,10 +106,12 @@ class ReflectionStrategy:
                 "would report the critique's tokens under the planner's role, and "
                 '"added tokens" is the number this arm exists to report.'
             )
+        # 2. `baseline`'s planner call, verbatim.
         step_model = ctx.step_model(InvestigationStep)
         planned, initial_step, planner = _plan_next_step(
             run_state, at, ctx.llm_client, ctx.model, step_model
         )
+        # 3. One critique of the step it produced.
         budget = RevisionPass()
         try:
             critic = critique_step(
@@ -127,6 +130,7 @@ class ReflectionStrategy:
                 "updated_at": at,
             }
         )
+        # 4. Nothing found: the first step stands, and this arm cost one critique.
         if critique.verdict is RevisionVerdict.KEEP:
             record = self._record(
                 before=run_state,
@@ -145,8 +149,9 @@ class ReflectionStrategy:
             if ctx.record_step is not None:
                 ctx.record_step(record)
             return after_critic, initial_step, record
+        # 5. A finding: spend the ONE pass and re-ask the planner with the critique appended.
+        #    A local, not inline, because the record measures the string that was SENT.
         budget.spend()
-        # A local, not inline: the record measures the string that was SENT.
         revision_context = format_revision_context(run_state, initial_step, critique)
         try:
             revision = revise_step(
@@ -163,6 +168,7 @@ class ReflectionStrategy:
                 err,
                 sum_usage(planner.billed_usage, _billed(critic), usage_of(err)),
             ) from err
+        # 6. The revised step is what the loop gets; both steps reach the record.
         revised_step = revision.result.output
         updated = after_critic.model_copy(
             update={

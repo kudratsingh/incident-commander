@@ -139,9 +139,9 @@ class BestOfNEnumeratedStrategy:
         An exhausted repair propagates — a real finding, never retried into a smaller N.
         ``grounded_in`` wraps the CALL, so an ungrounded citation gets ADR 0035's one re-ask.
         """
-        # A local, because the record measures the string that was SENT; re-rendering to
-        # measure would measure a second render.
+        # 1. Render the context once. A local, because the record measures the string SENT.
         user_message = format_planner_context(run_state, show_evidence_ids=True)
+        # 2. One call for N candidates, grounded so a bad citation is an ordinary repair.
         with grounded_in(run_state.evidence):
             call = call_with_output_repair(
                 ctx.llm_client,
@@ -152,11 +152,13 @@ class BestOfNEnumeratedStrategy:
                 output_model=ctx.step_model(self._output_model),
                 model=ctx.model,
             )
+        # 3. The set becomes an ordinary ranking; index 0 is the emitted diagnosis.
         candidates = call.result.output.candidates
         step = InvestigationStep(
             hypotheses=tuple(_hypothesis_of(candidate) for candidate in candidates),
             next_action=call.result.output.next_action,
         )
+        # 4. Charge the call and hand back the set, the step and the record.
         updated = run_state.model_copy(
             update={
                 # The same function ``baseline`` uses: it bills a repair's rejected leg too, so

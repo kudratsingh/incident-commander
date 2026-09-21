@@ -405,6 +405,7 @@ def evaluate(
     Four of the seven read the run alone; the three needing a candidate set or a selector's
     number come in through ``reading``. No measurement is reported UNMEASURED, never "not fired".
     """
+    # 1. The operating point, the reading, and the three lists a caller reads back.
     bars = thresholds if thresholds is not None else UncertaintyThresholds()
     seen = reading if reading is not None else UncertaintyReading()
     fired: list[EscalationSignal] = []
@@ -415,6 +416,8 @@ def evaluate(
         fired.append(signal)
         reasons.append(f"{signal.value}: {reason}")
 
+    # 2. Three signals off the RANKING: top-1's confidence, its margin over top-2, and its
+    #    confidence after K probes. With no ranking, all three are unmeasured.
     ranked = iter(run_state.hypotheses)
     top = next(ranked, None)
     second = next(ranked, None)
@@ -452,6 +455,7 @@ def evaluate(
                 f"{bars.confidence_floor_after_probes} floor",
             )
 
+    # 3. The selector's own uncertainty — only an arm that ran one can report it.
     if seen.selector_uncertainty is None:
         unmeasured.append(EscalationSignal.SELECTOR_UNCERTAINTY_HIGH)
     elif seen.selector_uncertainty > bars.selector_uncertainty_ceiling:
@@ -461,6 +465,8 @@ def evaluate(
             f"{bars.selector_uncertainty_ceiling} ceiling",
         )
 
+    # 4. Two signals off the candidate SET: how much of it disagrees with the leader, and how
+    #    much evidence the leader cites against itself.
     if seen.candidate_disagreement is None:
         unmeasured.append(EscalationSignal.CANDIDATE_DISAGREEMENT_HIGH)
     elif seen.candidate_disagreement > bars.candidate_disagreement_ceiling:
@@ -479,6 +485,7 @@ def evaluate(
             f"against itself, at or over the {bars.contradictory_evidence_count} that fires",
         )
 
+    # 5. The one signal about the RUN rather than this step, which no rung can clear (ADR 0056).
     if (failed := failed_attempts(run_state)) >= bars.failed_attempt_count:
         fire(
             EscalationSignal.REMEDIATION_ATTEMPT_FAILED,

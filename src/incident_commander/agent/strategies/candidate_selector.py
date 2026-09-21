@@ -114,13 +114,16 @@ class CandidateSelectorStrategy:
     ) -> tuple[RunState, InvestigationStep, StepRecord]:
         """Generate the set, select from it, emit the selection's step. Order matters: the
         generation is charged before the selector is asked."""
+        # 1. The selector needs its own metered client, or its cost folds into generation's.
         if ctx.selector_llm_client is None:
             raise ValueError(
                 f"{NO_SELECTOR_CLIENT}. The selector is its own metered role "
                 "(agent/selection.SELECTOR_ROLE); falling back to the planner's "
                 "client would report selection's tokens under generation's role."
             )
+        # 2. Generate the set — charged before the selector is asked.
         generation = self._generator.generate(run_state, at, ctx)
+        # 3. Select from it. A failure carries the generation's bill too (ADR 0045).
         try:
             call = select_candidate(
                 ctx.selector_llm_client,
@@ -134,6 +137,7 @@ class CandidateSelectorStrategy:
                 err,
                 sum_usage(generation.billed_usage, usage_of(err)),
             ) from err
+        # 4. Turn the decision into the step the loop runs, and charge the selector call.
         decision = call.result.output
         step = self._step_for(decision, generation)
         updated = generation.run_state.model_copy(

@@ -200,22 +200,27 @@ class _Walk:
 
     def run(self, run_state: RunState) -> tuple[RunState, InvestigationStep, StepRecord]:
         """Root, then one level per bound, then the chosen path's handoff."""
+        # 1. Seed the ONE shared ledger, then score the root — the step as generated.
         self.ledger = run_state.budget
         root = self._root(run_state)
         best = root
         frontier = root
+        # 2. One level per allowed depth, best-first.
         for level in range(self.walk.depth_allowed):
             self.walk.descend()
+            # 3. Branch on the frontier's proposed reads; no affordable branch ends the walk.
             children = self._branch_out(frontier)
             if not children:
                 break
             frontier = _best_of(children)
             best = _best_of((best, frontier))
+            # 4. Re-generate over the new evidence, so the next level has fresh reads to pick.
             if level + 1 < self.walk.depth_allowed:
                 regrown = self._regrow(frontier)
                 if regrown is None:
                     break
                 frontier = regrown
+        # 5. Hand the loop the best-scoring path, carrying the WHOLE walk's ledger.
         return self._handoff(run_state, best)
 
     # --- the walk ---------------------------------------------------------
@@ -246,20 +251,25 @@ class _Walk:
         children: list[_Path] = []
         taken: set[str] = set()
         for candidate in parent.candidates:
+            # 1. This node's branch allowance.
             if allowance.exhausted:
                 break
+            # 2. A candidate proposing no read opens no branch.
             probe = candidate.next_probe
             if probe is None:
                 continue
+            # 3. Two candidates naming the same read are one decision, so the second is refused.
             fingerprint = _probe_fingerprint(probe)
             if fingerprint in taken:
                 self._refused(parent, probe, candidate, DUPLICATE_BRANCH_PROBE)
                 continue
+            # 4. The SHARED ledger, which stops the walk rather than this candidate.
             reason = room_for_a_branch(self._budget(), token_reserve=self.token_reserve)
             if reason is not None:
                 self._refused(parent, probe, candidate, reason)
                 self.pruned_by_ledger += 1
                 break
+            # 5. Take the branch: one read, then score what the reading says.
             taken.add(fingerprint)
             child = self._branch(parent, candidate, probe, allowance)
             if child is not None:
@@ -400,11 +410,14 @@ class _Walk:
         ``cost_from`` is the ledger before this node's first charge, so a branch's own cost
         includes its read; the score reads the PATH's cost, which is what paths differ by.
         """
+        # 1. One selector call over this node's set, and the step its path would emit.
         selection, after, selector_call_id = self._select(run_state, candidates)
         chosen = chosen_candidate(selection, candidates)
         step = step_for_selection(selection, candidates, committed_action=committed_action)
+        # 2. This node's own ledger delta, and the whole path's.
         own = cost_between(cost_from, after.budget)
         accumulated = path_cost.plus(own)
+        # 3. Score the PATH: confidence minus the two cost terms minus the safety risk.
         node = SearchNode(
             node_id=new_node_id(),
             parent_id=parent_id,
@@ -423,6 +436,7 @@ class _Walk:
             ),
             cost=accumulated,
         )
+        # 4. Carry the live objects the next level needs, and record the node.
         path = _Path(
             node=node,
             run_state=after,

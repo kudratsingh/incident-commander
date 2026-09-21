@@ -414,13 +414,14 @@ def make_llm_plan(
     """
 
     def transition_plan(run_state: RunState, at: datetime) -> RunState:
+        # 1. Preconditions, before a planner token is spent: a ranking to plan from …
         if not run_state.hypotheses:
             return _escalate_remediation(
                 run_state, at, "planning entered with no hypotheses on RunState"
             )
+        # 2. … an attempt left (ADR 0056 lets VERIFYING hand back, so PLANNING can be entered
+        #    with attempts already spent) …
         if run_state.remediation_attempts >= max_attempts:
-            # A real limit since ADR 0056: VERIFYING may hand back to INVESTIGATING, so PLANNING
-            # can be entered with attempts spent. The backstop, against the same number.
             return _escalate_remediation(
                 run_state,
                 at,
@@ -429,9 +430,9 @@ def make_llm_plan(
                 f"max_attempts={max_attempts}. No further Tier-1 action is planned; "
                 "this incident needs a human.",
             )
+        # 3. … and budget for BOTH legs: an action nobody can afford to verify is worse than none.
         remaining_calls = run_state.budget.max_tool_calls - run_state.budget.tool_calls_used
         if remaining_calls < 2:
-            # An action nobody can afford to verify is worse than no action.
             return _escalate_remediation(
                 run_state,
                 at,
@@ -439,6 +440,7 @@ def make_llm_plan(
                 f"(remaining={remaining_calls}); escalating without executing",
             )
 
+        # 4. One refusal budget per guard, then plan-and-check until a plan survives.
         top = run_state.hypotheses[0]
         refusals_spent = 0
         unread_refusals_spent = 0
@@ -447,10 +449,9 @@ def make_llm_plan(
         subject_refusals_spent = 0
         while True:
             run_state, outcome = _plan_once(run_state, at, llm_client, model, top.name)
+            # 5. A mis-transcribed id (ADR 0030), first: it fails the read-before-act guards
+            #    too, and their steer is the wrong repair for a typo.
             if isinstance(outcome, ArgumentRefusal):
-                # ADR 0030, checked before anything else in the loop: a mis-transcribed
-                # id fails the read-before-act guards too, and their steer ("drop the id
-                # you have no row for") is the wrong repair for a typo.
                 if argument_refusals_spent >= _MAX_ARGUMENT_REFUSALS:
                     return _escalate_remediation(
                         run_state,
@@ -471,20 +472,19 @@ def make_llm_plan(
                         "evidence-sourced resource id; nothing was executed",
                     )
                 continue
+            # 6. A guard inside `_plan_once` escalated.
             if isinstance(outcome, RunState):
                 return outcome
             plan = outcome
 
-            # ADR 0056's structural half, and it escalates rather than re-asking: an identical
-            # call is the first attempt again with worse justification. Compared on the WIRED
-            # form, because ``wire_arguments`` default-fills every omitted optional.
+            # 7. An identical second attempt escalates rather than re-asking (ADR 0056): it is
+            #    the first attempt again with worse justification. Compared on the WIRED form.
             repeated = _repeated_attempt(plan, run_state)
             if repeated is not None:
                 return _escalate_remediation(run_state, at, repeated)
 
-            # FIRST of the plan-shape guards, because the order IS the priority of the diagnoses
-            # (ADR 0032) — but after `_plan_once`'s argument guards, since a mis-transcribed id
-            # names no resource and the typo is the better diagnosis (ADR 0030).
+            # 8. Not aimed at the alert's own subject (ADR 0032) — the first plan-shape guard,
+            #    because the order of these IS the priority of the diagnoses.
             missed_subject = _unaddressed_alert_subject(plan, run_state)
             if missed_subject is not None:
                 if subject_refusals_spent >= _MAX_SUBJECT_TARGET_REFUSALS:
@@ -510,15 +510,14 @@ def make_llm_plan(
                     )
                 continue
 
-            # SECOND, and the only guard here that never re-asks (O-29, ADR 0071): is the fault
-            # this action would fix still there? When the resource already reads healthy the
-            # answer is no plan at all — report that it cleared on its own and escalate.
+            # 9. The fault already cleared (O-29, ADR 0071) — the only guard here that never
+            #    re-asks, because the answer is no plan at all rather than a better one.
             cleared = _cleared_before_action(plan, run_state)
             if cleared is not None:
                 return _refuse_cleared_before_action(run_state, at, plan, cleared)
 
-            # Before the verify-leg guard, by priority: "should this action happen at all"
-            # outranks "how would you check it", or the planner fixes a replay it must not make.
+            # 10. Acting on a dead-letter row nobody read (ADR 0027). Before the verify-leg
+            #     guard: "should this happen at all" outranks "how would you check it".
             unread = _unread_action_rows(plan, run_state)
             if unread is not None:
                 source, unread_ids = unread
@@ -544,8 +543,8 @@ def make_llm_plan(
                     )
                 continue
 
-            # The other half of the same rule (ADR 0028): a call naming a category is still an
-            # action on rows nobody read. Disjoint tool sets, so at most one of the two fires.
+            # 11. The same rule for a call naming a CATEGORY (ADR 0028). Disjoint tool sets, so
+            #     at most one of these two fires on any plan.
             unlisted = _unlisted_action_scope(plan, run_state)
             if unlisted is not None:
                 listing, readings = unlisted
@@ -571,11 +570,11 @@ def make_llm_plan(
                     )
                 continue
 
+            # 12. A verify leg that cannot observe the acted-on resource (ADR 0025). Last, and
+            #     the plan survives here. The refusal names the probe it should have picked.
             unobserved = _unobserved_action_resource(plan)
             if not unobserved:
                 break
-            # Refuse and steer, never escalate: the planner is sent back with the probe it
-            # should have picked named for it.
             if refusals_spent >= _MAX_VERIFY_TARGET_REFUSALS:
                 values = _resource_values(plan.action_tool, plan.action_arguments)
                 acted = ", ".join(sorted(values))
@@ -599,6 +598,7 @@ def make_llm_plan(
                     "observable verify leg; nothing was executed",
                 )
 
+        # 13. Store the surviving plan and hand off to REMEDIATING.
         entry = EvidenceEntry(
             tool_name=PLAN_MARKER,
             arguments={"target_hypothesis": plan.target_hypothesis},
@@ -634,6 +634,7 @@ def _plan_once(
     Three outcomes by type: the plan survived, a guard escalated, or one re-ask repairs a resource
     id (ADR 0030). The argument checks stay here, before ``_misdirected_verify_args``.
     """
+    # 1. One planner call, with one bounded repair (ADR 0035).
     try:
         call = call_with_output_repair(
             llm_client,
@@ -650,8 +651,8 @@ def _plan_once(
             run_state, at, f"{REMEDIATION_PLANNER_INVALID}: {err}"
         )
 
-    # Charged the moment it returns, BEFORE the plan is judged: a rejected plan is still a billed
-    # call, and the meter may over-report but never under-report (ADR 0015).
+    # 2. Charged BEFORE the plan is judged: a rejected plan is still a billed call, and the meter
+    #    may over-report but never under-report (ADR 0015).
     run_state = run_state.model_copy(
         update={"budget": accrue_structured_call(run_state.budget, call, model)}
     )
@@ -660,6 +661,7 @@ def _plan_once(
     def refuse(reason: str) -> tuple[RunState, RunState]:
         return run_state, _escalate_remediation(run_state, at, reason)
 
+    # 3. Both tools exist and sit at the tier their leg requires.
     if plan.action_tool not in TOOL_REGISTRY:
         return refuse(f"planner picked unknown action tool: {plan.action_tool}")
     if tier_of(plan.action_tool) is not Tier.TIER_1:
@@ -671,9 +673,10 @@ def _plan_once(
         return refuse(f"planner picked unknown verify tool: {plan.verify_tool}")
     if tier_of(plan.verify_tool) is not Tier.READ:
         return refuse(f"verify tool must be read-only, got tier={tier_of(plan.verify_tool).value}")
+    # 4. Every resource-naming field is present: an omitted one is default-filled at wire time,
+    #    so the call would target the schema's default instead of this incident (ADR 0024).
     absent = _absent_resource_args(plan)
     if absent:
-        # An omitted field is default-filled from the platform's input schema (WO-R2-15, ADR 0024).
         return refuse(
             "plan rejected before execution: resource argument(s) not "
             f"named by the plan: {', '.join(absent)}. An omitted resource "
@@ -681,19 +684,17 @@ def _plan_once(
             "at wire time, so the call would target that default's "
             "resource instead of this incident's."
         )
-    # These two REFUSE rather than escalate (ADR 0030). Position is load-bearing: before
-    # ``_misdirected_verify_args``, because a mangled action id makes a correct verify id look bad.
+    # 5. The two argument checks, which REFUSE rather than escalate (ADR 0030). Before step 6,
+    #    because a mangled action id makes a correct verify id look misdirected.
     malformed = _malformed_resource_args(plan)
     if malformed:
         return run_state, _argument_refusal(plan, run_state, "malformed", malformed)
     unsourced = _unsourced_resource_args(plan, _evidence_value_corpus(run_state))
     if unsourced:
-        # Copy, do not re-type: a resource name the platform never uttered is a hallucination
-        # risk, and the first offence buys a re-ask carrying the candidates (ADR 0030).
         return run_state, _argument_refusal(plan, run_state, "unsourced", unsourced)
+    # 6. Verify what you changed: an untouched system reads healthy (ADR 0024).
     misdirected = _misdirected_verify_args(plan)
     if misdirected:
-        # Verify what you changed: an untouched system reads healthy (ADR 0024).
         return refuse(
             "plan rejected before execution: verify probe targets "
             f"resource(s) the action does not: {', '.join(misdirected)}. "
@@ -1266,6 +1267,7 @@ def _unaddressed_alert_subject(plan: RemediationPlan, run_state: RunState) -> Su
     ``None`` means the plan is fine. NOT inert for an action naming no resource at all under a
     RESOURCE subject, which is the live-run shape ADR 0032 was written from.
     """
+    # 1. What the alert is about, and what kind of thing that is (``_subject_kind``).
     subject = alert_subject(run_state.alert)
     if subject is None:
         return None
@@ -1273,12 +1275,12 @@ def _unaddressed_alert_subject(plan: RemediationPlan, run_state: RunState) -> Su
     acted = _resource_values(plan.action_tool, plan.action_arguments)
     rendered = f"{plan.action_tool}({json.dumps(plan.action_arguments, sort_keys=True)})"
 
+    # 2. A RESOURCE subject: the action's own resource argument must equal it …
     if kind is SubjectKind.RESOURCE:
         if subject.value in acted:
             return None
-        # ADR 0070: a node of the graph the subject ROOTS is the subject's own incident. Grounded
-        # in a reading THIS RUN HOLDS whose `seed_id` is the subject, so an invented id, another
-        # chain's node and a batch reaching outside the graph are all still refused.
+        # 3. … or name a node of the graph that subject ROOTS (ADR 0070), grounded in a reading
+        #    THIS RUN HOLDS, so another chain's node is still refused.
         nodes = _graph_nodes_in_evidence(run_state.evidence, subject)
         off_graph = sorted(acted - nodes)
         if acted and not off_graph:
@@ -1324,6 +1326,7 @@ def _unaddressed_alert_subject(plan: RemediationPlan, run_state: RunState) -> Su
             f"reported.",
         )
 
+    # 4. A SLICE subject: which rows the listing in evidence put in that slice.
     source = _row_source_for_subject(subject)
     if source is None:
         return None
@@ -1332,9 +1335,9 @@ def _unaddressed_alert_subject(plan: RemediationPlan, run_state: RunState) -> Su
     in_slice = sorted(row for row, hint in decisions.items() if hint == wanted)
     slice_names = ", ".join(in_slice) if in_slice else None
 
+    # 5. UNCLASSIFIED rows are reachable BY ID only: `remediation_hint=null` on the read means
+    #    "every category", so no filter names them.
     if kind is SubjectKind.UNCLASSIFIED:
-        # No `category=` route exists: `remediation_hint=null` means "every
-        # category", so unclassified rows are reachable by explicit id only.
         off_slice = sorted(acted - set(in_slice))
         if acted and not off_slice:
             return None
@@ -1371,6 +1374,7 @@ def _unaddressed_alert_subject(plan: RemediationPlan, run_state: RunState) -> Su
             f"reason to act on a different slice instead.",
         )
 
+    # 6. A CATEGORY subject: the action replays that category, or names rows in it.
     action_field = _subject_action_field(plan, subject)
     if action_field is not None and _scope_value(plan.action_arguments, action_field) == (
         subject.value
@@ -1829,6 +1833,7 @@ def make_remediate(
     """
 
     def transition_remediate(run_state: RunState, at: datetime) -> RunState:
+        # 1. Re-validate the stored plan (it crossed a checkpoint as a dict).
         try:
             plan = _load_plan(run_state)
         except ValidationError as err:
@@ -1838,8 +1843,8 @@ def make_remediate(
                 run_state, at, "REMEDIATING entered with no remediation_plan"
             )
 
-        # Crash-recovery contract (ADR 0008): re-entering REMEDIATING re-invokes with the SAME
-        # idempotency_key, and the platform's store replays the cached response.
+        # 2. Mint the idempotency key and wire the arguments. Re-entering REMEDIATING mints the
+        #    SAME key, so the platform's store replays the cached response (ADR 0008).
         spec = TOOL_REGISTRY[plan.action_tool]
         idempotency_key = build_idempotency_key(
             str(run_state.incident_id), plan.action_tool, plan.action_arguments
@@ -1852,6 +1857,8 @@ def make_remediate(
                 run_state, at, f"remediation args invalid for {plan.action_tool}: {err}"
             )
 
+        # 3. Execute. A transport failure and a refusal both mean the platform did NOT act, so
+        #    neither charges an attempt — only the reason carries the attempted call.
         try:
             result = mcp_client.call_tool(
                 plan.action_tool,
@@ -1876,11 +1883,11 @@ def make_remediate(
                 attempted_arguments=arguments,
             )
 
+        # 4. Parse the response. is_error=False means the action EXECUTED, so an unreadable
+        #    response still charges the attempt — unlike step 3.
         try:
             output_summary = _summarize_output(spec.output_model, result.content)
         except (ValueError, ValidationError) as err:
-            # is_error=False, so the Tier-1 action EXECUTED and only the parse failed. Charged
-            # here, unlike the two branches above, where the platform said it did NOT act.
             return _escalate_remediation(
                 run_state,
                 at,
@@ -1890,6 +1897,8 @@ def make_remediate(
                 executed=True,
             )
 
+        # 5. Record the executed call under its own tool name, charge one call and one attempt,
+        #    and hand off to VERIFYING.
         entry = EvidenceEntry(
             tool_name=plan.action_tool,
             arguments=arguments,
@@ -2047,6 +2056,7 @@ def make_llm_verify(
     """
 
     def transition_verify(run_state: RunState, at: datetime) -> RunState:
+        # 1. Re-validate the stored plan and wire the verify leg.
         try:
             plan = _load_plan(run_state)
         except ValidationError as err:
@@ -2064,17 +2074,16 @@ def make_llm_verify(
                 run_state, at, f"verify args invalid for {plan.verify_tool}: {err}"
             )
 
-        # Seeded with the transition's `at` so the clock=None path is unchanged (#59).
+        # 2. Poll state. `at_attempt` is seeded with the transition's `at` so the clock=None path
+        #    is unchanged; the last reading and reasoning feed ADR 0056's attempt record.
         at_attempt = at
-        # The last poll's reading and the judge's words, for the attempt record ADR 0056 writes.
-        # Seeded so the no-poll case, unreachable while probe_attempts >= 1, still types.
         last_reading = ""
         last_reasoning = ""
         for attempt in range(probe_attempts):
+            # 3. Every poll after the first needs budget. ADR 0006 blesses ONE extra probe over
+            #    budget, not `probe_attempts` of them, so the gate is before the sleep.
             if attempt > 0:
                 if run_state.budget.is_exhausted:
-                    # ADR 0006 blesses "one extra probe over budget", not
-                    # `verify_probe_attempts` of them. Gate BEFORE the sleep.
                     return _escalate_remediation(
                         run_state,
                         at_attempt,
@@ -2088,6 +2097,7 @@ def make_llm_verify(
 
             at_attempt = clock() if clock is not None else at
 
+            # 4. Read the world.
             try:
                 result = mcp_client.call_tool(plan.verify_tool, arguments)
             except MCPError as err:
@@ -2108,6 +2118,8 @@ def make_llm_verify(
                     run_state, at_attempt, f"verify output parse failed ({plan.verify_tool}): {err}"
                 )
 
+            # 5. Ask the judge whether the reading meets the plan's expectation. A billed judge
+            #    call that then failed is spend, not a free escalation.
             try:
                 judge_call = judge_verification(
                     llm_client,
@@ -2117,8 +2129,6 @@ def make_llm_verify(
                     model=model,
                 )
             except (ValueError, ValidationError, LLMError) as err:
-                # A billed judge call that then failed is spend, not a free escalation.
-                # ``OutputRepairExhausted`` is an ``LLMError`` carrying BOTH legs' totals.
                 run_state = run_state.model_copy(
                     update={"budget": accrue_llm_error(run_state.budget, err, model)}
                 )
@@ -2126,11 +2136,11 @@ def make_llm_verify(
                     run_state, at_attempt, f"{VERIFY_JUDGE_INVALID}: {err}"
                 )
 
+            # 6. Record the poll and its verdict. `{attempt, of}` is what lets a reader tell
+            #    poll 2/4 from 4/4.
             judgment = judge_call.result.output
             last_reading = probe_summary
             last_reasoning = judgment.reasoning
-            # {attempt, of} on the evidence arguments is what lets a reader tell poll
-            # #2/4 from #4/4 (issue #59); ordinals stay authoritative for canned runs.
             ordinal = {"attempt": attempt + 1, "of": probe_attempts}
             probe_entry = EvidenceEntry(
                 tool_name=plan.verify_tool,
@@ -2158,8 +2168,8 @@ def make_llm_verify(
                     "updated_at": at_attempt,
                 }
             )
-            # ADR 0075: the verdict goes out now, not when the leg ends — a leg that polls for
-            # minutes with nothing on the page reads as a hung run.
+            # 7. Report the verdict NOW, not when the leg ends (ADR 0075) — a leg that polls for
+            #    minutes with nothing on the page reads as a hung run.
             if planner_log is not None:
                 planner_log.verdict(
                     hypotheses=tuple(run_state.hypotheses),
@@ -2169,8 +2179,8 @@ def make_llm_verify(
                     of=probe_attempts,
                 )
             if judgment.verdict == "verified":
-                # "Did the action work?" is not "is the incident over?": a STABILIZE-ONLY pause
-                # reads verified and leaves the chain stuck. Here, because such a plan is legal.
+                # 8. "Did the action work?" is not "is the incident over?": a STABILIZE-ONLY
+                #    pause reads verified and leaves the chain stuck (ADR 0026).
                 try:
                     policy = resolution_class_of(plan.action_tool)
                 except PolicyCoverageError as err:
@@ -2206,8 +2216,8 @@ def make_llm_verify(
                         attempted_tool=plan.action_tool,
                         attempted_arguments=plan.action_arguments,
                     )
-                # One question left, about the INCIDENT not the action: is the alerted condition
-                # cleared (ADR 0032, WO-R2-164), and what about the other causes (ADR 0059)?
+                # 9. One question left, about the INCIDENT rather than the action: is the alerted
+                #    condition cleared (WO-R2-164), and what of the other causes (ADR 0059)?
                 condition = _uncleared_alert_condition(plan, run_state) or (
                     _unaddressed_second_cause(plan, run_state)
                 )
@@ -2240,9 +2250,10 @@ def make_llm_verify(
                         attempted_tool=plan.action_tool,
                         attempted_arguments=plan.action_arguments,
                     )
+                # 10. Verified, and nothing left standing.
                 return run_state.with_state(IncidentState.RESOLVED, at_attempt)
 
-        # Every poll spent on ``not_verified``. One more attempt, or hand off (ADR 0056).
+        # 11. Every poll spent on ``not_verified``: one more attempt, or hand off (ADR 0056).
         declined = _retry_declined(
             run_state, plan, max_attempts=max_attempts, verdict="not_verified"
         )

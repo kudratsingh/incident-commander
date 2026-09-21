@@ -250,6 +250,7 @@ class _Climb:
 
     def run(self, run_state: RunState) -> tuple[RunState, InvestigationStep, StepRecord]:
         """The ladder, one rung at a time, each entered only by the one below's signals."""
+        # 1. Rung 0, `baseline`: one planner call, then read the signals off what it produced.
         before = run_state
         planned, step, planner = self._baseline_rung(run_state)
         fired = self._note(
@@ -260,9 +261,11 @@ class _Climb:
             calls=1,
         )
         candidate_set: tuple[CandidateRecord, ...] = (_baseline_candidate(step, planner.record_id),)
+        # 2. Nothing fired: an easy step costs one planner call, which is the cheapness claim.
         if not fired.escalate:
             return self._handoff(before, planned, step, Rung.BASELINE, candidate_set=candidate_set)
 
+        # 3. Rung 1, `best_of_n_enumerated(4)`: N candidates over the same ledger.
         generation = self._generate(planned)
         enumerated, candidates = generation.run_state, generation.candidates
         generation_call_id = _generation_call_id(generation)
@@ -290,6 +293,7 @@ class _Climb:
                 candidate_set=candidate_set,
             )
 
+        # 4. Rung 2, `candidate_selector`: one selection over the set rung 1 paid for.
         selection, selected, selector_call_id = self._select(enumerated, candidates)
         step = step_for_selection(
             selection, candidates, committed_action=generation.proposed_step.next_action
@@ -315,7 +319,7 @@ class _Climb:
             spent=(enumerated.budget, selected.budget),
             calls=1,
         )
-        # The tail is decided by the signals a rung COULD have cleared: see ``UNCLEARABLE``.
+        # 5. The tail is decided by the signals a rung COULD have cleared (``UNCLEARABLE``).
         if not fired.fired - UNCLEARABLE:
             return self._handoff(
                 before,
@@ -326,6 +330,7 @@ class _Climb:
                 selector=selector,
             )
 
+        # 6. Rung 3: a bounded walk where the mode allows one, else stop and say what fired.
         if self.ladder[-1] is Rung.SEARCH:
             return self._search_rung(before, selected, entered_because=fired.fired)
         return self._escalate_rung(

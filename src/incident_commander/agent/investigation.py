@@ -401,14 +401,13 @@ def make_investigate(
     """Bind an MCP client to the INVESTIGATING transition function."""
 
     def transition_investigate(run_state: RunState, at: datetime) -> RunState:
+        # 1. The alerted group, accepting legacy `group` beside `consumer_group`. Read-only, so
+        #    ``wire_arguments``' default-fill is deliberate here; a remediation leg may NOT.
         spec = TOOL_REGISTRY[_TOOL_NAME]
-        # Accept legacy `group` field for backward-compat with older alert
-        # producers; platform's tool arg is `consumer_group`.
         raw = run_state.alert.get("consumer_group") or run_state.alert.get("group")
-        # One canonical serialization for every outgoing call (wire.py). Read-only, so
-        # the default-fill is deliberate; the remediation legs may NOT (ADR 0024).
         arguments = wire_arguments(spec, {"consumer_group": str(raw)} if raw else {})
 
+        # 2. One read, with transport failure and refusal named apart.
         try:
             result = mcp_client.call_tool(_TOOL_NAME, arguments)
         except MCPError as err:
@@ -417,11 +416,13 @@ def make_investigate(
         if result.is_error:
             return _escalate(run_state, at, "tool reported is_error=True", arguments)
 
+        # 3. Parse it through the tool's own output model.
         try:
             output = _parse_output(spec.output_model, result.content)
         except (ValueError, ValidationError) as err:
             return _escalate(run_state, at, f"output parse failed: {err}", arguments)
 
+        # 4. Phase 0 always escalates: one probe is the whole investigation here.
         entry = EvidenceEntry(
             tool_name=_TOOL_NAME,
             arguments=arguments,
@@ -535,21 +536,22 @@ def make_llm_investigate(
     )
 
     def transition_llm_investigate(run_state: RunState, at: datetime) -> RunState:
+        # 1. Per-run bookkeeping: the alert's subject, and one budget per refusal guard.
         last_probe: ProbeAction | None = None
         reprobes_spent: dict[str, int] = {}
         subject = alert_subject(run_state.alert)
         refusals_spent = 0
         whole_queue_refusals_spent = 0
         confirming_refusals_spent = 0
-        # Consecutive steps that ranked the same actionable answer first (ADR 0073). A streak,
-        # never a total: a run whose ranking moved has earned another reading.
+        # A streak, never a total: a run whose ranking moved has earned another reading (ADR 0073).
         settled_steps = 0
         for iteration in range(max_iterations):
+            # 2. Out of budget mid-investigation.
             if run_state.budget.is_exhausted:
                 return _escalate_investigation(run_state, at, "budget exhausted mid-investigation")
 
-            # ADR 0074, and BEFORE the call, so this call's context carries why its choice shrank:
-            # a settled ranking over a fresh fault-present reading makes another read worthless.
+            # 3. Withdraw the probe BEFORE the call (ADR 0074), so this call's own context
+            #    carries the reason its choice is narrower than it was.
             withdrawn = (
                 _probe_withdrawn(run_state, subject, settled_steps) if subject is not None else None
             )
@@ -558,10 +560,10 @@ def make_llm_investigate(
                     run_state, at, subject, *withdrawn, settled_steps
                 )
 
+            # 4. Ask the planner. The third value is the ``StepRecord``, which the loop never
+            #    reads: research data must not change the run.
             prior_hypotheses = run_state.hypotheses
             try:
-                # Third value is the ``StepRecord``, already written to ``record_step``; the loop
-                # never reads it, because research data must not change the run.
                 run_state, step, _ = chosen.plan_next_step(
                     run_state,
                     at,
@@ -579,13 +581,12 @@ def make_llm_investigate(
                     ),
                 )
             except (ValueError, ValidationError, LLMError) as err:
-                # ``_plan_next_step`` accrues on the way out, so a raising call accrued
-                # nothing. Charge what it billed (ADR 0015).
+                # 5. A failed planner call is still a billed one (ADR 0015).
                 run_state = run_state.model_copy(
                     update={"budget": accrue_llm_error(run_state.budget, err, model)}
                 )
-                # The planner asked for the probe the narrowed schema withdrew (ADR 0074): not a
-                # reason to escalate, so it keeps its turn under ADR 0073's own cap.
+                # 6. It asked for the probe the narrowed schema withdrew (ADR 0074): not a reason
+                #    to escalate, so it keeps its turn under ADR 0073's own cap.
                 if (
                     isinstance(err, OutputNotOffered)
                     and withdrawn is not None
@@ -605,8 +606,8 @@ def make_llm_investigate(
                     run_state, at, f"{INVESTIGATION_PLANNER_INVALID}: {err}"
                 )
 
-            # ADR 0075, and the ONE place a ranking is accepted. Written before the loop's guards
-            # look at the step, because a refused proposal is still thinking worth watching.
+            # 7. Report the accepted ranking, the ONE place one is accepted (ADR 0075). Before the
+            #    guards below, because a refused proposal is still thinking worth watching.
             if planner_log is not None:
                 planner_log.ranking(
                     tool=thinking_tool,
@@ -615,15 +616,17 @@ def make_llm_investigate(
                     reason=_action_reason(step.next_action),
                 )
 
+            # 8. Update the settled-ranking streak.
             settled_steps = settled_steps + 1 if _ranks_an_actionable_answer(step.hypotheses) else 0
 
+            # 9. An actionable hypothesis died on a possibly-stale sensor: re-read it first
+            #    (ADR 0009), before taking the contradiction as a finding.
             killed = _cached_probe_contradiction(prior_hypotheses, step.hypotheses, last_probe)
             if (
                 killed is not None
                 and last_probe is not None
                 and reprobes_spent.get(last_probe.tool_name, 0) < reprobe_attempts
             ):
-                # The hypothesis died on a possibly-stale sensor: re-read it first.
                 reprobes_spent[last_probe.tool_name] = (
                     reprobes_spent.get(last_probe.tool_name, 0) + 1
                 )
@@ -641,11 +644,12 @@ def make_llm_investigate(
                 continue
 
             action = step.next_action
+            # 10. `stop` — hand off with the planner's own reason.
             if isinstance(action, StopAction):
                 return _finalize(run_state, at, action.reason)
+            # 11. `remediate` — four gates, in priority order, before PLANNING sees it.
             if isinstance(action, RemediateAction):
-                # Structural guard before handing off to PLANNING: the category must be
-                # a key in FIX_MAP and confidence must clear the threshold, or escalate.
+                # 11a. The category has a Tier-1 fix, and the confidence clears the bar.
                 top = step.hypotheses[0]
                 if top.category not in FIX_MAP:
                     return _finalize(
@@ -667,8 +671,8 @@ def make_llm_investigate(
                             f"{REMEDIATE_CONFIDENCE_THRESHOLD}; escalating"
                         ),
                     )
-                # Third guard: no remediation of an incident whose alerted signal nobody has
-                # read. REFUSES rather than escalates, so the planner gets another turn.
+                # 11b. Nobody has read the alerted signal (ADR 0032). REFUSES rather than
+                #      escalates, so the planner gets another turn.
                 if subject is not None and not _alert_subject_probed(run_state, subject):
                     if refusals_spent >= _MAX_SUBJECT_PROBE_REFUSALS:
                         return _finalize(
@@ -685,8 +689,8 @@ def make_llm_investigate(
                     refusals_spent += 1
                     run_state = _refuse_handoff(run_state, at, subject)
                     continue
-                # Fourth guard, the mirror of the third (ADR 0041): no replaying or fencing PART
-                # of a queue nobody read WHOLE. Here, not in PLANNING, which never probes.
+                # 11c. Nobody has read the dead-letter queue WHOLE (ADR 0041). Here, not in
+                #      PLANNING, which never probes.
                 if top.category in DLQ_ACTING_CATEGORIES and not _whole_queue_listed(run_state):
                     if whole_queue_refusals_spent >= _MAX_WHOLE_QUEUE_REFUSALS:
                         return _finalize(
@@ -704,18 +708,18 @@ def make_llm_investigate(
                     whole_queue_refusals_spent += 1
                     run_state = _refuse_whole_queue_handoff(run_state, at, top.category)
                     continue
+                # 11d. Every gate cleared.
                 return _handoff_to_planning(run_state, at, action.reason)
 
-            # ProbeAction — tool_name is Literal-validated at schema time; this check
-            # catches a registry that drifted after startup.
+            # 12. `probe` — the schema's Literal already checked the name; this catches a
+            #     registry that drifted after startup.
             if action.tool_name not in TOOL_REGISTRY:
                 return _escalate_investigation(
                     run_state, at, f"planner proposed unknown tool: {action.tool_name}"
                 )
 
-            # Fifth guard, and the only one that refuses a READ (ADR 0073, INC-004): the bound is
-            # here, where the reads are counted, because a model can satisfy "re-read before you
-            # conclude" forever. Either arm fires; see each one's own docstring.
+            # 13. Refuse a confirming re-read (ADR 0073), the only guard here that refuses a READ.
+            #     The bound is here, where the reads are counted; a prompt rule cannot hold it.
             confirming = withdrawn or (
                 _confirming_read_exhausted(run_state, subject, action, settled_steps)
                 if subject is not None
@@ -730,22 +734,22 @@ def make_llm_investigate(
                     )
                 confirming_refusals_spent += 1
                 if withdrawn is None:
-                    # ADR 0073's path writes its refusal now, because only the proposal revealed
-                    # it; the narrowed path already wrote one before the call.
+                    # Only the proposal revealed it; step 3's path already wrote its own.
                     run_state = _refuse_confirming_read(
                         run_state, at, subject, *confirming, settled_steps
                     )
                 continue
 
+            # 14. Run the probe. A failure has already escalated with its reason.
             if run_state.budget.is_exhausted:
                 return _escalate_investigation(run_state, at, "budget exhausted before probe")
 
             run_state = _execute_probe(run_state, at, mcp_client, action)
             if run_state.state is IncidentState.ESCALATED:
-                # Probe failed; already escalated with the reason.
                 return run_state
             last_probe = action
 
+        # 15. Out of iterations, with the ranking the run ran out holding (ADR 0073).
         return _escalate_investigation(
             run_state, at, _iterations_exhausted_reason(run_state, max_iterations)
         )
@@ -821,8 +825,8 @@ def _execute_probe(
 ) -> RunState:
     """Call the tool the planner picked. On any failure, escalate with the reason."""
     spec = TOOL_REGISTRY[action.tool_name]
-    # Runtime tier guard (B-06): only tier_of() catches a READ→TIER_1 reclassification made after
-    # the Literal was hand-listed. Here, so both call sites are covered (ADR 0009).
+    # 1. Runtime tier guard (B-06): only ``tier_of`` catches a READ→TIER_1 reclassification made
+    #    after the Literal was hand-listed.
     if tier_of(action.tool_name) is not Tier.READ:
         return _escalate_investigation(
             run_state,
@@ -830,14 +834,15 @@ def _execute_probe(
             f"planner proposed non-read tool as probe: {action.tool_name} "
             f"(tier={tier_of(action.tool_name).value})",
         )
+    # 2. Wire the arguments, through the same serialization the remediation legs use.
     try:
-        # Same canonical serialization the remediation legs use — no second copy.
         arguments = wire_arguments(spec, action.arguments)
     except ValidationError as err:
         return _escalate_investigation(
             run_state, at, f"probe arguments invalid for {action.tool_name}: {err}"
         )
 
+    # 3. Call the platform, and read a transport failure and a tool-level refusal apart.
     try:
         result = mcp_client.call_tool(action.tool_name, arguments)
     except MCPError as err:
@@ -848,6 +853,7 @@ def _execute_probe(
             run_state, at, f"tool reported is_error=True ({action.tool_name})"
         )
 
+    # 4. Parse the response through the tool's own output model.
     try:
         summary = _summarize_probe(spec.output_model, result)
     except (ValueError, ValidationError) as err:
@@ -855,6 +861,7 @@ def _execute_probe(
             run_state, at, f"output parse failed ({action.tool_name}): {err}"
         )
 
+    # 5. Append the reading and charge the tool call.
     entry = EvidenceEntry(
         tool_name=action.tool_name,
         arguments=arguments,
@@ -890,11 +897,12 @@ def make_branch_prober(mcp_client: MCPClientProtocol) -> BranchProber:
     """
 
     def probe(run_state: RunState, action: ProbeAction) -> BranchProbeOutcome:
+        # 1. The tool exists.
         spec = TOOL_REGISTRY.get(action.tool_name)
         if spec is None:
             return BranchProbeOutcome(run_state=run_state, refused=BRANCH_PROBE_UNKNOWN_TOOL)
-        # The same runtime guard `_execute_probe` makes (B-06), and the reason a branch can never
-        # act: "no world-changing action inside a branch" is not a promise about what is proposed.
+        # 2. The same runtime tier guard `_execute_probe` makes, and the reason a branch can
+        #    never act however a strategy proposes it (B-06).
         if tier_of(action.tool_name) is not Tier.READ:
             return BranchProbeOutcome(
                 run_state=run_state,
@@ -905,12 +913,14 @@ def make_branch_prober(mcp_client: MCPClientProtocol) -> BranchProber:
                     "audit log to grade the change from (invariant 6)"
                 ),
             )
+        # 3. Wire the arguments.
         try:
             arguments = wire_arguments(spec, action.arguments)
         except ValidationError as err:
             return BranchProbeOutcome(
                 run_state=run_state, refused=f"{BRANCH_PROBE_BAD_ARGUMENTS} ({err})"
             )
+        # 4. Call the platform; a transport failure and a refusal are named apart.
         try:
             result = mcp_client.call_tool(action.tool_name, arguments)
         except MCPError as err:
@@ -921,20 +931,21 @@ def make_branch_prober(mcp_client: MCPClientProtocol) -> BranchProber:
             return BranchProbeOutcome(
                 run_state=run_state, refused=f"{BRANCH_PROBE_TOOL_ERROR}: is_error=True"
             )
+        # 5. Parse the response.
         try:
             summary = _summarize_probe(spec.output_model, result)
         except (ValueError, ValidationError) as err:
             return BranchProbeOutcome(
                 run_state=run_state, refused=f"{BRANCH_PROBE_UNPARSED}: {err}"
             )
+        # 6. Append the reading and charge the run's OWN ledger — the shared ceiling is what
+        #    makes exploring a trade-off.
         entry = EvidenceEntry(
             tool_name=action.tool_name,
             arguments=arguments,
             result_summary=summary,
             timestamp=run_state.updated_at,
         )
-        # The read is charged to the run's OWN ledger, the one the chosen path spends from:
-        # that shared ceiling is what makes exploring a trade-off (plan 02 § 8).
         return BranchProbeOutcome(
             run_state=run_state.model_copy(
                 update={

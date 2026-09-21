@@ -635,16 +635,19 @@ class RunReporter:
         One call per pending verdict, plus the run's own state on the last of them. Upsert by
         ``run_id``, so repeating a state appends nothing to the platform's phase history.
         """
-        # Set before the pending list is built: a step reported from here on stamps itself with
-        # this state, and a call made during the NEXT transition belongs to that one.
+        # 1. Publish the state a live step will stamp itself with, before the pending list is
+        #    built: a call made during the NEXT transition belongs to that transition.
         self._last_state = run_state
+        # 2. What has happened since the last report.
         pending = self._pending(run_state)
         if not self._widened:
-            # The narrow payload carries no step, so N of them would say the same thing N times.
+            # A narrow payload carries no step, so N of them would say the same thing N times.
             pending = pending[-1:]
+        # 3. Nothing pending: one report carrying the state alone.
         if not pending:
             self._deliver(self._payload(run_state, item=None, final=True), narrow_retry=True)
             return
+        # 4. Otherwise one report per item, the run's own state riding on the last of them.
         for position, item in enumerate(pending, start=1):
             final = position == len(pending)
             if not self._widened and not final:
@@ -717,11 +720,13 @@ class RunReporter:
         The verdicts come from the evidence ledger, the only place they exist. Since ADR 0074 the
         steps are normally already sent; what is left is what the live path could not.
         """
+        # 1. The ledger slice nobody has reported yet, and whatever the client seam buffered.
         entries = run_state.evidence[self._reported_entries :]
         self._reported_entries = len(run_state.evidence)
         observed = deque(self._tool_log.drain() if self._tool_log is not None else [])
         live_steps = self._tool_log is not None
         pending: list[_Pending] = []
+        # 2. Walk the slice: a verdict is a verification, a real call is a step.
         for entry in entries:
             if entry.tool_name == VERIFY_JUDGE_MARKER:
                 pending.append(
@@ -740,6 +745,7 @@ class RunReporter:
                 # under a second `seq`.
                 continue
             pending.append(self._step(entry, _take(observed, entry.tool_name)))
+        # 3. Anything the live path could not send, in the order the calls happened.
         pending.extend(self._step_of(call) for call in observed)
         return pending
 
@@ -826,10 +832,13 @@ class RunReporter:
         ``final`` carries the run's NEW state; earlier items carry the state it was in while it
         made those calls, which keeps a terminal transition's backlog reportable.
         """
+        # 1. The state and the stamp: an intermediate report carries the state the run was in
+        #    while it made the call, and the call's own moment.
         state = run_state.state.value
         if not final and self._state_reported is not None:
             state = self._state_reported
         at = run_state.updated_at if (final or item is None) else item.at
+        # 2. What the console draws from the run itself.
         payload: dict[str, Any] = {
             "run_id": self._run_id,
             "state": state,
@@ -841,6 +850,7 @@ class RunReporter:
             "hypotheses": ranked_hypotheses(run_state),
             "budget": budget_payload(run_state),
         }
+        # 3. The one pending item, and the old ``last_step`` field walked forward with it.
         if item is not None:
             payload.update(item.payload)
             step = item.payload.get("step")
@@ -853,12 +863,13 @@ class RunReporter:
                     "tool": step["tool"],
                     "at": step["at"],
                 }
+        # 4. The plan, once per distinct plan, on the report that carries the new state.
         if final:
             plan = plan_payload(run_state)
             if plan is not None and json.dumps(plan, sort_keys=True) != self._plan_sent:
                 payload["plan"] = plan
-        # On every report, not just the first: the tool fills them in once and never clears
-        # them, so repeating costs nothing and a dropped first report is recoverable.
+        # 5. The identifying fields, on EVERY report: the tool fills them in once and never
+        #    clears them, so repeating costs nothing and a dropped first report is recoverable.
         if self._run_label is not None:
             payload["run_label"] = _capped(self._run_label, _MAX_NAME_CHARS)
         if self._alert_id is not None:
@@ -875,6 +886,7 @@ class RunReporter:
         ``narrow_retry`` is False where the narrow form carries only a state the next report sends.
         ``may_narrow`` is False for a thinking report, where latching punishes one row (ADR 0075).
         """
+        # 1. The widened form, while this platform still accepts one.
         if self._widened:
             body = self._validated(payload)
             if body is not None:
@@ -882,9 +894,8 @@ class RunReporter:
                 if delivery.ok:
                     self._accept(body)
                     return
+                # 2. A transport, scope or run-level failure: fewer fields help none of them.
                 if not delivery.shape_refusal:
-                    # A transport, scope or run-level failure: already logged, and none of them
-                    # is helped by sending fewer fields.
                     return
                 if not may_narrow:
                     return
@@ -895,6 +906,7 @@ class RunReporter:
                 self._narrow("the reporter's own widened payload failed local validation")
             if not narrow_retry:
                 return
+        # 3. The narrow form, so the state at least lands.
         narrow = self._validated(_narrow_payload(payload))
         if narrow is None:
             return

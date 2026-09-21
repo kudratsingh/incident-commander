@@ -9,6 +9,11 @@ where it was configured.** Each stage probes the one scope it needs —
 The agent's chaos-blindness is load-bearing: the platform hides the ``chaos.%``
 audit rows only from principals that genuinely lack the scope, so a token holding
 it reads the answer key out of ``list_audit_events`` (owner decision O-4).
+
+Three of the four probes must wear the AGENT's token — that is what they prove — so
+since platform v0.6.17 each one also SAYS it is the lab's (``lab_principal_token``,
+platform ADR 0038). Without the label the platform writes ``agent.tool_invoked`` and
+the demo page reads a run nobody made (finding F4, WO-R3-335).
 """
 
 from __future__ import annotations
@@ -19,7 +24,11 @@ from typing import Any, Final
 
 from pydantic import ValidationError
 
-from incident_commander.tools.mcp_client import MCPClientProtocol, MCPError
+from incident_commander.tools.mcp_client import (
+    LabProbeCapableClient,
+    LabProbeRefused,
+    MCPError,
+)
 from incident_commander.tools.policies import Tier, tools_at_or_below
 from incident_commander.tools.registry import TOOL_REGISTRY, AuditEventEntry
 
@@ -75,11 +84,43 @@ _AUDIT_PAGE_LIMIT: Final[int] = 200
 _AUDIT_SCAN_ROW_CAP: Final[int] = 2000
 
 
+# Every probe below is a call the LAB makes on a service account's token — three of
+# them on the AGENT's, on purpose, because what they prove is what that token can and
+# cannot do. Since platform v0.6.17 the lab says so on the call itself (``_lab_probe``
+# + ``X-Lab-Principal``, platform ADR 0038) and the platform writes ``lab.probe``
+# instead of ``agent.tool_invoked``; without it these rows read as a run nobody made
+# (demo finding F4). The reason is one short sentence naming what the probe proves,
+# because it is what an operator reads in the audit stream months later.
+_READ_ONLY_PROBE_REASON: Final[str] = (
+    "principal guard: proves this token cannot execute a Tier-1 action"
+)
+_WRITE_PROBE_REASON: Final[str] = (
+    "principal guard: proves the agent token can execute a Tier-1 action"
+)
+_CHAOS_BLIND_PROBE_REASON: Final[str] = "principal guard: proves the agent token cannot seed chaos"
+_CHAOS_CAPABLE_PROBE_REASON: Final[str] = (
+    "principal guard: proves the evaluator token can seed chaos"
+)
+_AUDIT_SCAN_REASON: Final[str] = "principal guard: reads the audit window for Tier-1 successes"
+
+
 class PrincipalGuardError(RuntimeError):
     """The effective principal is not the one the run requires."""
 
 
-def assert_read_only_principal(client: MCPClientProtocol) -> None:
+def _label(reason: str, lab_principal_token: str | None) -> tuple[str | None, str | None]:
+    """The label pair to send: the reason rides with the lab's credential or not at all.
+
+    No credential means no label — an unlabelled probe on a platform that would have
+    refused a credential-less one, not a call sent twice. Callers with a token pass it;
+    the offline fakes and the pre-v0.6.17 path pass None.
+    """
+    return (reason, lab_principal_token) if lab_principal_token else (None, None)
+
+
+def assert_read_only_principal(
+    client: LabProbeCapableClient, *, lab_principal_token: str | None = None
+) -> None:
     """Hard-fail unless the client's token genuinely lacks write scope.
 
     Negative probe on a Tier-1 tool with invalid arguments: a ``-32002`` scope
@@ -97,10 +138,14 @@ def assert_read_only_principal(client: MCPClientProtocol) -> None:
             "write-capable principal. Use PLATFORM_SMOKE_TOKEN, not "
             "PLATFORM_TOKEN."
         ),
+        lab_probe_reason=_READ_ONLY_PROBE_REASON,
+        lab_principal_token=lab_principal_token,
     )
 
 
-def assert_write_capable_principal(client: MCPClientProtocol) -> None:
+def assert_write_capable_principal(
+    client: LabProbeCapableClient, *, lab_principal_token: str | None = None
+) -> None:
     """Hard-fail unless the client's token genuinely CARRIES write scope.
 
     The mirror of ``assert_read_only_principal``: only an argument refusal
@@ -126,11 +171,15 @@ def assert_write_capable_principal(client: MCPClientProtocol) -> None:
             f"Most likely {_PROBE_TOOL} no longer exists on the platform, or "
             "the handler errored before the scope check."
         ),
+        lab_probe_reason=_WRITE_PROBE_REASON,
+        lab_principal_token=lab_principal_token,
     )
-    assert_chaos_blind_principal(client)
+    assert_chaos_blind_principal(client, lab_principal_token=lab_principal_token)
 
 
-def assert_chaos_blind_principal(client: MCPClientProtocol) -> None:
+def assert_chaos_blind_principal(
+    client: LabProbeCapableClient, *, lab_principal_token: str | None = None
+) -> None:
     """Hard-fail unless the AGENT's token genuinely lacks ``chaos:invoke``.
 
     Carrying it is a read of the answer key, not merely a wider grant:
@@ -154,10 +203,14 @@ def assert_chaos_blind_principal(client: MCPClientProtocol) -> None:
             "has not re-scoped yet: run `make bootstrap-token` and paste the "
             "PLATFORM_TOKEN line it prints."
         ),
+        lab_probe_reason=_CHAOS_BLIND_PROBE_REASON,
+        lab_principal_token=lab_principal_token,
     )
 
 
-def assert_chaos_capable_principal(client: MCPClientProtocol) -> None:
+def assert_chaos_capable_principal(
+    client: LabProbeCapableClient, *, lab_principal_token: str | None = None
+) -> None:
     """Hard-fail unless the client's token genuinely carries ``chaos:invoke``.
 
     A ``chaos_setup``-only scenario declares no ``expected_action_tools``, so the
@@ -183,17 +236,21 @@ def assert_chaos_capable_principal(client: MCPClientProtocol) -> None:
             f"so {_CHAOS_PROBE_TOOL} is not registered at all — in which case "
             "seeding cannot work either."
         ),
+        lab_probe_reason=_CHAOS_CAPABLE_PROBE_REASON,
+        lab_principal_token=lab_principal_token,
     )
 
 
 def _assert_scope_absent(
-    client: MCPClientProtocol,
+    client: LabProbeCapableClient,
     *,
     label: str,
     probe_tool: str,
     probe_args: dict[str, Any],
     scope: str,
     carried_consequence: str,
+    lab_probe_reason: str,
+    lab_principal_token: str | None,
 ) -> None:
     """Shared body of the two negative guards: prove one scope is NOT carried.
 
@@ -202,8 +259,17 @@ def _assert_scope_absent(
     switched off" send an operator to different files. Shared, not copied: the
     fail-open bug that made the write guard vacuous is what a second copy reintroduces.
     """
+    reason, token = _label(lab_probe_reason, lab_principal_token)
     try:
-        result = client.call_tool(probe_tool, probe_args)
+        result = client.call_tool(
+            probe_tool, probe_args, lab_probe=reason, lab_principal_token=token
+        )
+    except LabProbeRefused:
+        # A refused LABEL is a request bug, not a verdict about the scope: the call
+        # never ran, and its -32602 is the code the clause below reads as "the scope
+        # check passed". Loud, unretried, and never re-sent unlabelled — a silent
+        # unlabelled retry is exactly how F4's rows became the agent's.
+        raise
     except MCPError as err:
         if err.code == _SCOPE_REFUSAL_CODE and "scope" in str(err).lower():
             return
@@ -240,7 +306,7 @@ def _assert_scope_absent(
 
 
 def _assert_scope_carried(
-    client: MCPClientProtocol,
+    client: LabProbeCapableClient,
     *,
     label: str,
     probe_tool: str,
@@ -248,14 +314,24 @@ def _assert_scope_carried(
     scope: str,
     refusal_consequence: str,
     unreached_hint: str,
+    lab_probe_reason: str,
+    lab_principal_token: str | None,
 ) -> None:
     """Shared body of the two positive guards: prove one scope is carried.
 
     One implementation, two configurations, because the fail-open bug the write guard
     shipped with is what a second hand-written copy would reintroduce.
     """
+    reason, token = _label(lab_probe_reason, lab_principal_token)
     try:
-        result = client.call_tool(probe_tool, probe_args)
+        result = client.call_tool(
+            probe_tool, probe_args, lab_probe=reason, lab_principal_token=token
+        )
+    except LabProbeRefused:
+        # Same reason as the negative guard: here a -32602 is the PASS condition, so a
+        # refused label would read as "the principal can act" — the most misleading
+        # outcome of the four. Raised as itself.
+        raise
     except MCPError as err:
         if err.code == _SCOPE_REFUSAL_CODE and "scope" in str(err).lower():
             raise PrincipalGuardError(
@@ -302,8 +378,12 @@ class AuditWindowScan:
     ROWS, never off a clock, so the guard needs no agreement about the time.
     """
 
-    def __init__(self, since: datetime) -> None:
+    def __init__(self, since: datetime, *, lab_principal_token: str | None = None) -> None:
         self.since = since
+        # The scan's own reads are the lab's too, on the same token as the stage, so
+        # they carry the same label: rows this guard writes while reading must not
+        # show up as the agent's work on the demo page.
+        self._lab_principal_token = lab_principal_token
         self.checkpoints = 0
         # Only in-window rows are retained: an older row can never be a violation,
         # and its timestamp has already extended coverage by the time it is dropped.
@@ -314,8 +394,9 @@ class AuditWindowScan:
         self._overflowed = False
         self._last_page: tuple[int, int] = (0, 0)
 
-    def checkpoint(self, client: MCPClientProtocol) -> None:
+    def checkpoint(self, client: LabProbeCapableClient) -> None:
         """Read one page and fold it into the scan. Raises what the client raises."""
+        reason, token = _label(_AUDIT_SCAN_REASON, self._lab_principal_token)
         result = client.call_tool(
             "list_audit_events",
             {
@@ -323,6 +404,8 @@ class AuditWindowScan:
                 "principal_type": "service_account",
                 "limit": _AUDIT_PAGE_LIMIT,
             },
+            lab_probe=reason,
+            lab_principal_token=token,
         )
         total, events = _parse_events(result)
         self.checkpoints += 1
@@ -410,11 +493,12 @@ class AuditWindowScan:
 
 
 def assert_no_tier1_successes(
-    client: MCPClientProtocol,
+    client: LabProbeCapableClient,
     since: datetime,
     *,
     principal_ids: Collection[str] | None = None,
     scan: AuditWindowScan | None = None,
+    lab_principal_token: str | None = None,
 ) -> list[AuditEventEntry]:
     """Fail if the platform audit records any successful Tier-1 call since ``since``.
 
@@ -426,7 +510,7 @@ def assert_no_tier1_successes(
     200 rows. Returns the offending rows, or raises ``PrincipalGuardError``.
     """
     if scan is None:
-        scan = AuditWindowScan(since)
+        scan = AuditWindowScan(since, lab_principal_token=lab_principal_token)
     elif scan.since != since:
         raise ValueError(
             f"scan covers {scan.since.isoformat()} but the assertion was asked "

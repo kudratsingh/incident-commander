@@ -1662,7 +1662,7 @@ class TestMainExitCodes:
         monkeypatch.setattr(
             runner_module,
             "assert_read_only_principal",
-            lambda _client: guard_calls.append("principal"),
+            lambda _client, **_kwargs: guard_calls.append("principal"),
         )
         audit_kwargs: list[dict[str, Any]] = []
 
@@ -1697,7 +1697,9 @@ class TestMainExitCodes:
         audit_kwargs: list[dict[str, Any]] = []
         monkeypatch.setattr(runner_module, "preflight_auth", lambda _key: None)
         monkeypatch.setattr(runner_module, "make_client", lambda *_a, **_kw: _StubGuardClient())
-        monkeypatch.setattr(runner_module, "assert_read_only_principal", lambda _client: None)
+        monkeypatch.setattr(
+            runner_module, "assert_read_only_principal", lambda _client, **_kwargs: None
+        )
         monkeypatch.setattr(
             runner_module,
             "assert_no_tier1_successes",
@@ -1719,7 +1721,9 @@ class TestMainExitCodes:
         audit_kwargs: list[dict[str, Any]] = []
         monkeypatch.setattr(runner_module, "preflight_auth", lambda _key: None)
         monkeypatch.setattr(runner_module, "make_client", lambda *_a, **_kw: _StubGuardClient())
-        monkeypatch.setattr(runner_module, "assert_read_only_principal", lambda _client: None)
+        monkeypatch.setattr(
+            runner_module, "assert_read_only_principal", lambda _client, **_kwargs: None
+        )
         monkeypatch.setattr(
             runner_module,
             "assert_no_tier1_successes",
@@ -1834,7 +1838,9 @@ class TestSmokeRefusesChaosSeeding:
         run_all_calls = _stub_run_pipeline(monkeypatch, tmp_path)
         monkeypatch.setattr(runner_module, "preflight_auth", lambda _key: None)
         monkeypatch.setattr(runner_module, "make_client", lambda *_a, **_kw: _StubGuardClient())
-        monkeypatch.setattr(runner_module, "assert_read_only_principal", lambda _client: None)
+        monkeypatch.setattr(
+            runner_module, "assert_read_only_principal", lambda _client, **_kwargs: None
+        )
         monkeypatch.setattr(runner_module, "assert_no_tier1_successes", lambda *_a, **_kw: None)
         monkeypatch.setattr(
             runner_module,
@@ -1855,7 +1861,9 @@ class TestSmokeRefusesChaosSeeding:
         run_all_calls = _stub_run_pipeline(monkeypatch, tmp_path)
         monkeypatch.setattr(runner_module, "preflight_auth", lambda _key: None)
         monkeypatch.setattr(runner_module, "make_client", lambda *_a, **_kw: _StubGuardClient())
-        monkeypatch.setattr(runner_module, "assert_read_only_principal", lambda _client: None)
+        monkeypatch.setattr(
+            runner_module, "assert_read_only_principal", lambda _client, **_kwargs: None
+        )
         monkeypatch.setattr(runner_module, "assert_no_tier1_successes", lambda *_a, **_kw: None)
         monkeypatch.setattr(
             runner_module,
@@ -1911,7 +1919,9 @@ class TestSmokeRefusesAnythingOutsideTheDerivedSet:
         _isolate_settings_env(monkeypatch, tmp_path, _REAL_LOOKING_LIVE_ENV)
         _forbid_run_all(monkeypatch)
         monkeypatch.setattr(runner_module, "preflight_auth", lambda _key: None)
-        monkeypatch.setattr(runner_module, "assert_read_only_principal", lambda _client: None)
+        monkeypatch.setattr(
+            runner_module, "assert_read_only_principal", lambda _client, **_kwargs: None
+        )
 
     def test_a_write_scenario_cannot_be_smuggled_in_by_only(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
@@ -1955,7 +1965,9 @@ class TestSmokeRefusesAnythingOutsideTheDerivedSet:
         # narrowing is the point of the override, and only widening is refused.
         _isolate_settings_env(monkeypatch, tmp_path, _REAL_LOOKING_LIVE_ENV)
         monkeypatch.setattr(runner_module, "preflight_auth", lambda _key: None)
-        monkeypatch.setattr(runner_module, "assert_read_only_principal", lambda _client: None)
+        monkeypatch.setattr(
+            runner_module, "assert_read_only_principal", lambda _client, **_kwargs: None
+        )
         monkeypatch.setattr(
             runner_module, "assert_no_tier1_successes", lambda _client, _since, **_kw: None
         )
@@ -1974,7 +1986,9 @@ class TestSmokeRefusesAnythingOutsideTheDerivedSet:
         # on a bare --smoke. If it ever does, the two have drifted apart.
         _isolate_settings_env(monkeypatch, tmp_path, _REAL_LOOKING_LIVE_ENV)
         monkeypatch.setattr(runner_module, "preflight_auth", lambda _key: None)
-        monkeypatch.setattr(runner_module, "assert_read_only_principal", lambda _client: None)
+        monkeypatch.setattr(
+            runner_module, "assert_read_only_principal", lambda _client, **_kwargs: None
+        )
         monkeypatch.setattr(
             runner_module, "assert_no_tier1_successes", lambda _client, _since, **_kw: None
         )
@@ -3123,7 +3137,9 @@ class TestLiveOnlyMatchesByFullScenarioName:
         # read-only stage neither spends on Tier-1 actions nor shares mutable state.
         _isolate_settings_env(monkeypatch, tmp_path, _REAL_LOOKING_LIVE_ENV)
         monkeypatch.setattr(runner_module, "preflight_auth", lambda _key: None)
-        monkeypatch.setattr(runner_module, "assert_read_only_principal", lambda _client: None)
+        monkeypatch.setattr(
+            runner_module, "assert_read_only_principal", lambda _client, **_kwargs: None
+        )
         monkeypatch.setattr(
             runner_module, "assert_no_tier1_successes", lambda _client, _since, **_kw: None
         )
@@ -3404,7 +3420,9 @@ class TestLiveRefusesCannedOnlySelection:
         monkeypatch.setattr(runner_module, "load_scenarios", lambda _d: [_passing_scenario()])
         monkeypatch.setattr(runner_module, "preflight_auth", lambda _key: None)
         monkeypatch.setattr(runner_module, "make_client", lambda *_a, **_kw: _StubGuardClient())
-        monkeypatch.setattr(runner_module, "assert_read_only_principal", lambda _client: None)
+        monkeypatch.setattr(
+            runner_module, "assert_read_only_principal", lambda _client, **_kwargs: None
+        )
         monkeypatch.setattr(
             runner_module, "assert_no_tier1_successes", lambda _client, _since, **_kw: None
         )
@@ -3767,11 +3785,20 @@ class _StubAuditClient:
 
     def __init__(self) -> None:
         self.audit_reads = 0
+        #: The lab label each checkpoint carried (WO-R3-335); None with no credential.
+        self.labels: list[tuple[str | None, str | None]] = []
 
     def call_tool(
-        self, name: str, arguments: Any, *, timeout_seconds: float | None = None
+        self,
+        name: str,
+        arguments: Any,
+        *,
+        timeout_seconds: float | None = None,
+        lab_probe: str | None = None,
+        lab_principal_token: str | None = None,
     ) -> ToolResult:
         self.audit_reads += 1
+        self.labels.append((lab_probe, lab_principal_token))
         return ToolResult(
             content=[{"type": "text", "text": json.dumps({"total": 0, "events": []})}]
         )
@@ -3806,7 +3833,9 @@ class TestPostStageAuditIsCheckpointed:
         monkeypatch.setattr(runner_module, "archive_scenario", lambda *_a, **_kw: None)
         monkeypatch.setattr(runner_module, "preflight_auth", lambda _key: None)
         monkeypatch.setattr(runner_module, "make_client", lambda *_a, **_kw: audit_client)
-        monkeypatch.setattr(runner_module, "assert_read_only_principal", lambda _client: None)
+        monkeypatch.setattr(
+            runner_module, "assert_read_only_principal", lambda _client, **_kwargs: None
+        )
         monkeypatch.setattr(
             runner_module,
             "assert_no_tier1_successes",
@@ -3832,7 +3861,13 @@ class TestPostStageAuditIsCheckpointed:
 
         class _AngryClient(_StubAuditClient):
             def call_tool(
-                self, name: str, arguments: Any, *, timeout_seconds: float | None = None
+                self,
+                name: str,
+                arguments: Any,
+                *,
+                timeout_seconds: float | None = None,
+                lab_probe: str | None = None,
+                lab_principal_token: str | None = None,
             ) -> ToolResult:
                 raise MCPError(-32603, "audit is having a moment")
 
@@ -3844,7 +3879,9 @@ class TestPostStageAuditIsCheckpointed:
         monkeypatch.setattr(runner_module, "archive_scenario", lambda *_a, **_kw: None)
         monkeypatch.setattr(runner_module, "preflight_auth", lambda _key: None)
         monkeypatch.setattr(runner_module, "make_client", lambda *_a, **_kw: _AngryClient())
-        monkeypatch.setattr(runner_module, "assert_read_only_principal", lambda _client: None)
+        monkeypatch.setattr(
+            runner_module, "assert_read_only_principal", lambda _client, **_kwargs: None
+        )
         monkeypatch.setattr(runner_module, "assert_no_tier1_successes", lambda *_a, **_kw: None)
         monkeypatch.setattr(sys, "argv", ["evals.runner", "--live", "--smoke", *_SMOKE_ONLY_ARGS])
         assert runner_module.main() == 0

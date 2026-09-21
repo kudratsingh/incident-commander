@@ -1183,10 +1183,11 @@ and on `main` until the other half lands. Bless the new snapshot locally
 from the new pinned stack, then commit the compose bump, the snapshot, and
 any registry realignment together.
 
-Platform ships a new digest → nine steps on the agent side (the sixth arrived
+Platform ships a new digest → ten steps on the agent side (the sixth arrived
 with v0.6.11, the first pin to make an existing tool's output field required; the
 seventh with v0.6.12; the eighth with v0.6.13; the ninth with v0.6.14, the first
-pin whose re-record would rewrite a graded trajectory):
+pin whose re-record would rewrite a graded trajectory; the tenth with v0.6.17, the
+first pin that moved the REQUEST and left `tools/list` byte-identical):
 
 1. Update `demo/compose.yml` — **all THREE platform-code services**
    (`migrate`, `platform`, `api`) and the prose that names the version:
@@ -1461,6 +1462,12 @@ pin whose re-record would rewrite a graded trajectory):
    that moved and the 676 that did not are one reading of the same filter, and
    subtracting them is cheaper than re-reading a 29,000-character diff.
 
+   v0.6.17 (WO-R3-333/335) is the quietest reading there is and worth recording
+   as such: `make snapshot` produced **no diff at all** — not one tool, not one
+   description, not one byte — so the block was untouched and its hash did not
+   move. The pin is real all the same, which is step 10's subject: what v0.6.17
+   changed is the REQUEST envelope, and `tools/list` does not describe it.
+
    The lab-vocabulary assertion in that file is the one part to write
    carefully, and v0.6.11 is the example. Its two hooks are `saturate_db_pool`
    and `degrade_downstream`, and a filter on their word stems went red
@@ -1623,6 +1630,59 @@ pin whose re-record would rewrite a graded trajectory):
    healthy control field for field" (ADR 0066). After v0.6.14 it does not — a
    held pool in the api/worker process now shows up in `pools`. That world is
    buildable again, which is a scenario decision and not a pin's.
+
+10. A pin can change the REQUEST rather than the tool surface, and v0.6.17 is the
+    first one: `make snapshot` produced no diff at all, and the pin still matters.
+    `tools/call` now reads an optional `_lab_probe` reason string **beside**
+    `arguments` in `params` (never inside it, so it reaches no input model and no
+    prompt), honoured only when the same request carries
+    `X-Lab-Principal: Bearer <chaos-or-smoke token>` on a `CHAOS_ENABLED` stack;
+    then that call's audit row is `lab.probe` instead of `agent.tool_invoked`
+    (platform ADR 0038, the amendment to platform ADR 0012). The commander sends
+    both halves from `evals/guards.py` (the evaluator's token) and
+    `evals/world_audit.py` (the smoke token) — WO-R3-335. Four things follow for a
+    re-pin.
+
+    **The label needs the v0.6.17 pin, and an older platform says nothing.**
+    `_lab_probe` is an unknown key on the envelope to every earlier build, so it is
+    ignored in silence: no error, no warning, and every one of those rows records
+    as the agent's own work. So a commander that sends the label while pinned to
+    v0.6.16 or earlier has exactly the bug the field exists to fix, and nothing
+    fails to tell you. The tell is a query, not a log line: after `make world-audit`
+    on a v0.6.17 stack, `GET /admin/audit-logs?action_prefix=lab.probe` (operator
+    login, `scripts/bootstrap_agent_token.py`'s dev pair) returns the audit's reads,
+    and `action_prefix=agent.` returns none of them. On an older pin the first query
+    is empty and the second holds them all. Run both after any pin that moves this
+    seam.
+
+    **A refused label arrives as `-32602`, which is also what an argument refusal
+    carries** — and `-32602` is precisely what the principal guards read as "the
+    scope check passed". Reading a refusal as a verdict would therefore invert the
+    write guard's answer. That is why the client raises `LabProbeRefused` as its own
+    type, the guards re-raise it before they interpret any code, and nothing retries
+    it or re-sends the call unlabelled: a silent unlabelled retry is how the
+    mislabelled rows come back. `data.reason_code` says which half of the rule the
+    request failed (`not_available`, `credential_missing`, `credential_invalid`,
+    `credential_not_authorised`, `reason_invalid`) — `not_available` means the stack
+    was booted without the lab, which is a stack decision and not a request bug.
+
+    **`lag_samples_cleared: 0` in the reset's JSON is now permanent, and is not a
+    broken reset.** v0.6.17's `make eval-reset` keeps the 15-minute lag sample ring
+    (history is history, and the demo chart reads it) while still clearing the VALUE
+    key, so backpressure reads fresh-or-absent exactly as before. The world audit's
+    `lag: 0` check reads the value, not the ring, so it is unaffected. So is the
+    fixture-drift stack context: `evals/fixture_probe.py` decides `warm` or `cold`
+    from whether `get_consumer_lag` answers `lag_known: true` with a `measured_at`
+    — the value key, which the reset still clears — so the minute-after-a-reset
+    `cold` reading of step 4's notes still happens.
+
+    **The rows are withheld from the agent, so its own audit totals move DOWN when
+    the lab is busy.** `lab.probe` joins `chaos.`/`lab.` in what the agent's
+    `list_audit_events` and `get_trace` cannot see — same direction as v0.6.13's
+    `agent.run_reported` note in step 8, and the same consequence: a canned
+    `list_audit_events` fixture recorded before this pin counts rows the agent can
+    no longer see. None needed re-recording at v0.6.17 (`make fixture-drift` read
+    `0 new / 0 stale`), because no canned fixture's world has a lab probe in it.
 
 ## Connection pool and run capacity ([ADR 0022](ADR/0022-connection-pool-sizing-and-the-run-concurrency-ceiling.md))
 

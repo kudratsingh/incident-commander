@@ -107,6 +107,7 @@ from incident_commander.llm.repair import (
 )
 from incident_commander.persistence.memory import InMemoryCheckpointer
 from incident_commander.tools.mcp_client import (
+    LabProbeRefused,
     MCPClient,
     MCPClientProtocol,
     MCPError,
@@ -764,6 +765,36 @@ def _is_offline_placeholder(url: str) -> bool:
 
 def _is_offline_api_key(key: str) -> bool:
     return key in {_EVAL_PLACEHOLDER_API_KEY, "placeholder", ""}
+
+
+def _lab_probe_credential(settings: Settings) -> str | None:
+    """The lab's own credential for labelling the principal guards' probes.
+
+    The EVALUATOR's token: the guards are the evaluator's probes even when they wear
+    the agent's Authorization header, which is the whole reason the platform needs a
+    second credential before it will relabel a row (platform ADR 0038). An unset or
+    blank one means no label — the probes still run, their rows still read as the
+    agent's, and ``_lab_probe_note`` says so rather than letting it pass unremarked.
+    """
+    token = settings.platform_chaos_token
+    if token is None or not token.get_secret_value().strip():
+        return None
+    return token.get_secret_value()
+
+
+def _lab_probe_note(lab_probe_token: str | None) -> str:
+    """One line saying whether the guards' own audit rows are the lab's or the agent's."""
+    if lab_probe_token is not None:
+        return (
+            "principal guard: every probe above is labelled lab.probe in the platform "
+            "audit (the lab's own credential travels with it), so none of them reads "
+            "as the agent's work"
+        )
+    return (
+        "principal guard: probes NOT labelled — PLATFORM_CHAOS_TOKEN is unset, so the "
+        "platform records them as agent.tool_invoked and the demo page will read them "
+        "as a run nobody made (finding F4)"
+    )
 
 
 class ScenarioCrash(Exception):
@@ -3517,18 +3548,33 @@ def main() -> int:
             "there is no live principal to guard"
         )
         return 3
+    # The credential that lets the platform label these probes as the LAB's rather than
+    # the agent's (platform v0.6.17, ADR 0038, WO-R3-335). Resolved once, here, because
+    # every guard below needs it and an unset one is a reported fact rather than a
+    # surprise mid-stage.
+    lab_probe_token = _lab_probe_credential(settings)
     if guard_required:
         try:
             guard_client = make_client(settings, token=mcp_token)
             try:
-                assert_read_only_principal(guard_client)
+                assert_read_only_principal(guard_client, lab_principal_token=lab_probe_token)
             finally:
                 guard_client.close()
         except PrincipalGuardError as err:
             print(f"PRINCIPAL GUARD FAIL: {err}")
             print("no scenarios ran, nothing was spent")
             return 4
+        except LabProbeRefused as err:
+            print(f"LAB PROBE REFUSED ({err.reason_code}): {err}")
+            print(
+                "the platform would not label this probe as the lab's, so its audit "
+                "row would read as the agent's. Fix the request (PLATFORM_CHAOS_TOKEN, "
+                "the smoke account's name, CHAOS_ENABLED) — it is never retried "
+                "unlabelled. No scenarios ran, nothing was spent."
+            )
+            return 4
         print("principal guard: token is read-scoped (negative probe refused on scope)")
+        print(_lab_probe_note(lab_probe_token))
     # The mirror, for the stage that must be able to ACT. Every principal check used to
     # be gated on `smoke`, leaving the one stage that spends AND mutates unguarded — and
     # a read-scoped token there does not fail fast, it grades every scenario red after
@@ -3567,23 +3613,36 @@ def main() -> int:
             try:
                 if write_guard_required:
                     # Carries actions:execute AND lacks chaos:invoke.
-                    assert_write_capable_principal(guard_client)
+                    assert_write_capable_principal(
+                        guard_client, lab_principal_token=lab_probe_token
+                    )
                 else:
                     # A chaos-only selection declares no Tier-1 action, so there is no
                     # write scope to assert — but there is still an agent, and the leak
                     # does not care whether anything was remediated.
-                    assert_chaos_blind_principal(guard_client)
+                    assert_chaos_blind_principal(guard_client, lab_principal_token=lab_probe_token)
             finally:
                 guard_client.close()
             if chaos_token is not None:
                 chaos_guard_client = make_client(settings, token=chaos_token)
                 try:
-                    assert_chaos_capable_principal(chaos_guard_client)
+                    assert_chaos_capable_principal(
+                        chaos_guard_client, lab_principal_token=lab_probe_token
+                    )
                 finally:
                     chaos_guard_client.close()
         except PrincipalGuardError as err:
             print(f"PRINCIPAL GUARD FAIL: {err}")
             print("no scenarios ran, nothing was spent")
+            return 4
+        except LabProbeRefused as err:
+            print(f"LAB PROBE REFUSED ({err.reason_code}): {err}")
+            print(
+                "the platform would not label these probes as the lab's, so their "
+                "audit rows would read as the agent's own work on the demo page. Fix "
+                "the request rather than dropping the label — it is never retried "
+                "unlabelled. No scenarios ran, nothing was spent."
+            )
             return 4
         if write_guard_required:
             print("principal guard: token can act (negative probe refused on arguments, not scope)")
@@ -3596,6 +3655,8 @@ def main() -> int:
                 "principal guard: PLATFORM_CHAOS_TOKEN can seed chaos (negative probe "
                 "refused on arguments, not scope)"
             )
+        # Last, so it reads as a statement about the probes just reported.
+        print(_lab_probe_note(lab_probe_token))
 
     # Created BEFORE the suite runs, so each scenario streams its evidence in as it
     # finishes and a Ctrl-C costs at most the in-flight one (ADR 0017). ``exist_ok=False``
@@ -3614,7 +3675,11 @@ def main() -> int:
     # moment the stage ends. The one window the guard CAN cover is the one it watches
     # while it happens: a page after every scenario, and the assertion takes the union.
     # Without it a stage louder than 200 rows exits 5 "inconclusive" on a paid run.
-    audit_scan = AuditWindowScan(stage_started_at) if guard_required else None
+    audit_scan = (
+        AuditWindowScan(stage_started_at, lab_principal_token=lab_probe_token)
+        if guard_required
+        else None
+    )
     scan_client = make_client(settings, token=mcp_token) if guard_required else None
 
     def _after_scenario(result: ScenarioResult) -> None:
@@ -3623,6 +3688,12 @@ def main() -> int:
             return
         try:
             audit_scan.checkpoint(scan_client)
+        except LabProbeRefused as err:
+            # NOT best-effort: the checkpoint's own read would be recorded as the
+            # agent's, and a swallowed refusal is the silent unlabelled fallback this
+            # design forbids. Loud, and it stops the stage.
+            print(f"LAB PROBE REFUSED ({err.reason_code}) on the audit checkpoint: {err}")
+            raise
         except Exception as err:  # noqa: BLE001 — a checkpoint is best-effort
             # Not fatal: a missed checkpoint only narrows coverage, which fails closed
             # on its own. Printed so a systematically broken one stays visible.
@@ -3686,11 +3757,17 @@ def main() -> int:
                     stage_started_at,
                     principal_ids=principal_ids,
                     scan=audit_scan,
+                    lab_principal_token=lab_probe_token,
                 )
             finally:
                 audit_client.close()
         except PrincipalGuardError as err:
             print(f"POST-STAGE AUDIT FAIL: {err}")
+            return 5
+        except LabProbeRefused as err:
+            # Before the MCPError clause below, which it would otherwise be read as: a
+            # refused label is a request bug, not an unreadable audit.
+            print(f"POST-STAGE AUDIT FAIL (lab probe refused, {err.reason_code}): {err}")
             return 5
         except MCPError as err:
             print(f"POST-STAGE AUDIT INCONCLUSIVE (audit read failed): {err}")

@@ -41,13 +41,16 @@ def world(monkeypatch: pytest.MonkeyPatch) -> dict[str, object]:
         },
     }
     client = Mock()
-    client.call_tool.side_effect = lambda tool, args: ToolResult(
+    # ``**kwargs`` because every read now goes through ``LabProbeClient``, which adds
+    # the lab label and the credential to each call (WO-R3-335); the answers are the
+    # same, and ``tests/unit/test_lab_probe.py`` is where the label itself is asserted.
+    client.call_tool.side_effect = lambda tool, args, **_kwargs: ToolResult(
         content=[{"type": "text", "text": json.dumps(payloads[tool])}]
     )
     settings = _eval_defaults().model_copy(update={"platform_smoke_token": SecretStr("read-test")})
     monkeypatch.setattr(audit, "Settings", lambda: settings)
     monkeypatch.setattr(audit, "make_client", lambda settings, *, token: client)
-    monkeypatch.setattr(audit, "assert_read_only_principal", lambda client: None)
+    monkeypatch.setattr(audit, "assert_read_only_principal", lambda client, **_kwargs: None)
     monkeypatch.setattr(audit, "chaos_key_count", lambda: (0, "none"))
     monkeypatch.setattr(audit, "process_count", lambda: (0, "none"))
     return payloads
@@ -198,7 +201,7 @@ def test_baseline_constants_match_runbook() -> None:
 def test_write_principal_fails_before_audit(
     world: dict[str, object], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    def refuse(client: object) -> None:
+    def refuse(client: object, **_kwargs: object) -> None:
         raise PrincipalGuardError("write token")
 
     monkeypatch.setattr(audit, "assert_read_only_principal", refuse)

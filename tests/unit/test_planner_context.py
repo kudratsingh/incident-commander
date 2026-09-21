@@ -63,8 +63,20 @@ _EXPECTED_READ_TOOLS: Final[frozenset[str]] = frozenset(
 #: the `[commander:` filter doing the job ADR 0068 § 4 gave it — the tool the agent's own
 #: token can call stays off the planner's page, and a hash that ignores 676 characters of
 #: telemetry description is the evidence.
+#: v0.6.18 (WO-R3-339) moves it for the same single cause and the arithmetic closes again:
+#: 29,168 → 29,452, +284 characters, and `get_consumer_lag`'s description grew 3,444 →
+#: 3,728 — the same +284. Read surface still 16, no tier moved, and this pin's WHOLE
+#: contract delta is that one tool. Three of its `outputSchema` field descriptions moved
+#: too (`source`, `age_seconds`, `recent_samples`) and none of those characters are here,
+#: because the block renders a tool's description and its input arguments, never its
+#: output schema — so the +284 being exactly the description's growth is also the proof
+#: that the output half stayed off the planner's page. What the platform re-described is
+#: the freshness claim: the sampling interval is deployment-configured now (this stack
+#: runs it at 5 s), so the old text's `every ~60s` / `90s TTL` / `up to a minute stale`
+#: would have been three false promises, and the new text points at `age_seconds` and the
+#: gaps between `recent_samples` instead of naming a number (platform ADR 0039).
 _EXPECTED_TOOL_BLOCK_HASH: Final[str] = (
-    "9ed97579e6f239f8eee6f629f4b444134be6ccaaf953648dfd9bfc3d595562fd"
+    "217d6dbb9a57ae88a335c9742bb49ad08b5278fbf231edd85dfd08130bb0027a"
 )
 
 

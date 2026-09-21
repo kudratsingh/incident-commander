@@ -12,9 +12,8 @@ from enum import StrEnum
 class StrategyName(StrEnum):
     """Every value ``INFERENCE_STRATEGY`` accepts.
 
-    ``baseline`` is the control group (plan 04 working rule 5). A member lands only *with* its
-    implementation and its registry entry, never in advance. ``StrEnum``, so the value
-    serializes as a plain string into the run's provenance record.
+    ``baseline`` is the control group. A member lands only *with* its implementation and its
+    registry entry, never in advance.
     """
 
     BASELINE = "baseline"

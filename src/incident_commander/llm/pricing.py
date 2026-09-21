@@ -13,13 +13,15 @@ from decimal import ROUND_HALF_UP, Decimal
 from typing import TYPE_CHECKING, Final
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
-    # Type-only: a runtime import would drag the Anthropic SDK in (WO-R2-118).
+    # Imported for type checking only. At runtime this line would pull in the Anthropic SDK,
+    # which nothing in the cost meter needs and offline tooling should not have to install.
     from incident_commander.llm.client import LLMUsage
 
 _LOG: Final = logging.getLogger(__name__)
 
 _TOKENS_PER_MILLION: Final[Decimal] = Decimal(1_000_000)
-# Sub-cent resolution: cents would read zero for a whole investigation.
+# Costs are rounded to millionths of a dollar, not to cents: a whole cheap investigation can come
+# to less than one cent, and rounding to cents would report it as free.
 _USD_QUANTUM: Final[Decimal] = Decimal("0.000001")
 
 

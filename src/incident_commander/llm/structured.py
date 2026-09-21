@@ -14,12 +14,14 @@ from typing import Any, Final, Literal, get_args, get_origin
 
 from pydantic import BaseModel, model_validator
 
-#: Allowed to trail a decoded value: container terminators — a delimiter leak, never content.
+#: Characters a decoded value may be followed by and still be accepted: a spare ``]`` or ``}`` is
+#: a closing bracket the model repeated by mistake, never content that changes what it meant.
 TRAILING_DELIMITERS: Final[str] = "]}"
 
 _WHITESPACE: Final[str] = " \t\r\n"
 
-# Sentinel for "not a stringified container"; ``None`` is a value ``json.loads`` returns.
+# Stands for "this string was not a container after all". It cannot be ``None``, because ``None``
+# is a value ``json.loads`` legitimately returns and the two must stay distinguishable.
 _UNDECODED: Final[object] = object()
 
 _MAPPING_ORIGINS: Final[frozenset[Any]] = frozenset({dict, Mapping})

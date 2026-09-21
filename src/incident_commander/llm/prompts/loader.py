@@ -19,9 +19,10 @@ class PromptNotFoundError(RuntimeError):
 
 
 def raw_prompt(name: str) -> str:
-    """``prompts/<name>.md`` exactly as authored, shared rules unexpanded.
+    """``prompts/<name>.md`` exactly as authored, with ``{{rule:...}}`` left in place.
 
-    For tests that assert a prompt file *delegates* the shared rule; not for a role.
+    For tests that check a prompt file delegates to a shared rule. Never use it to build a
+    real prompt: the placeholder would reach the model as literal text.
     """
     path = _PROMPTS_DIR / f"{name}.md"
     if not path.is_file():
@@ -36,8 +37,9 @@ def load_prompt(name: str) -> str:
 
 
 def available_prompts() -> tuple[str, ...]:
-    """Every name ``load_prompt`` can serve: file *stems*, sorted, uncached so it cannot stale.
+    """Every name ``load_prompt`` can serve: the ``.md`` file names without the extension, sorted.
 
-    Lets ``tests/unit/test_prompts_snapshot.py`` walk the directory, not a hand-kept dict.
+    Read from disk on every call, never cached, so a prompt file added during a test run shows
+    up: ``tests/unit/test_prompts_snapshot.py`` walks this instead of a hand-kept list.
     """
     return tuple(sorted(path.stem for path in _PROMPTS_DIR.glob("*.md")))

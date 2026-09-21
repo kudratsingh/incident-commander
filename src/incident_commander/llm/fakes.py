@@ -36,7 +36,8 @@ class CannedLLMClient:
         self._index = 0
         self.calls: list[tuple[str, str]] = []
         self.repair_of: list[str | None] = []
-        #: The ``temperature`` each call carried; ``None`` is "none sent" (WP-5.3).
+        #: The ``temperature`` each call carried, in call order; ``None`` records that the call
+        #: sent no temperature field at all, which is what the newer model ids require.
         self.temperatures: list[float | None] = []
 
     @property
@@ -54,7 +55,8 @@ class CannedLLMClient:
         repair_of: str | None = None,
         temperature: float | None = None,
     ) -> LLMResult[T]:
-        # Recorded, not replayed: a test asserts the call carried them (ADR 0035, WP-5.3).
+        # These three are recorded rather than acted on, so a test can assert what the caller
+        # sent: the prompts, the id of the record a re-ask repairs, and the temperature.
         self.calls.append((system_prompt, user_message))
         self.repair_of.append(repair_of)
         self.temperatures.append(temperature)

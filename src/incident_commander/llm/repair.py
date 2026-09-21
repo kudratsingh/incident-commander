@@ -22,16 +22,18 @@ from incident_commander.llm.client import (
 from incident_commander.llm.prompts.loader import load_prompt
 from incident_commander.llm.structured import StructuredOutput
 
-#: Re-asks before escalating; cap as in ``remediation._MAX_ARGUMENT_REFUSALS`` (ADR 0030).
+#: How many times one call may be re-asked before the run escalates instead. One, the same cap
+#: ``remediation._MAX_ARGUMENT_REFUSALS`` uses: a second re-ask buys the same answer twice.
 MAX_OUTPUT_REPAIRS: Final[int] = 1
 
-#: Quoted back to the model: it needs the complaint, not the echo.
+#: Longest slice of the validation error quoted back to the model. It needs the complaint, not
+#: the whole echo of what it sent, and the re-ask has to fit beside the original turn.
 _MAX_ERROR_CHARS: Final[int] = 800
 
 _ERROR_PLACEHOLDER: Final[str] = "{error}"
 
-# Escalation-reason prefixes for an unreadable output: the transitions format
-# their reason from these and ``evals.runner._classify_failure`` buckets by them.
+# How a run's escalation reason begins when the model's own output could not be read. The state
+# transitions build their reason from these, and ``evals.runner._classify_failure`` sorts by them.
 INVESTIGATION_PLANNER_INVALID: Final[str] = "planner output invalid"
 REMEDIATION_PLANNER_INVALID: Final[str] = "planner LLM invalid"
 VERIFY_JUDGE_INVALID: Final[str] = "verify judge LLM invalid"
@@ -41,10 +43,12 @@ OUTPUT_INVALID_PREFIXES: Final[tuple[str, ...]] = (
     VERIFY_JUDGE_INVALID,
 )
 
-#: ``failure_class`` for a run whose only defect was its output shape, not ``transport``.
+#: The ``failure_class`` an eval report gives a run that failed only because the model's output
+#: did not fit the schema — as opposed to ``transport``, where the call itself never came back.
 PLANNER_OUTPUT_INVALID_CLASS: Final[str] = "planner_output_invalid"
 
-# ``ValidationError`` subclasses ``ValueError``; both listed for the reader.
+# The failures a re-ask can plausibly fix, meaning "the model sent us something we could not
+# read". ``ValidationError`` already subclasses ``ValueError``; both are listed to say so.
 _REPAIRABLE: Final[tuple[type[Exception], ...]] = (
     LLMOutputError,
     ValidationError,
@@ -111,30 +115,39 @@ def call_with_output_repair[T: BaseModel](
     Raises ``OutputRepairExhausted`` when the repair fails too; a transport ``LLMError`` passes
     through, and a REFUSED move (``StructuredOutput.output_refused``) raises ``OutputNotOffered``.
     """
+    # 1. One first ask plus at most ``MAX_OUTPUT_REPAIRS`` re-asks, hence the cap plus one.
     failures: list[Exception] = []
     message = user_message
     repair_of: str | None = None
     for _ in range(MAX_OUTPUT_REPAIRS + 1):
         try:
+            # 2. Ask the model: the first time with the caller's own message, after a failure with
+            #    the repair message built below, which names the record the re-ask is repairing.
             result = llm_client.call(
                 system_prompt=system_prompt,
                 user_message=message,
                 output_model=output_model,
                 model=model,
                 repair_of=repair_of,
-                # SAME temperature as the call it repairs: ADR 0035 asks for the
-                # same answer in the right shape, not a different draw (WP-5.3).
+                # The SAME temperature as the call being repaired: ADR 0035 asks for that answer
+                # in the right shape, not a fresh draw that might say something different.
                 temperature=temperature,
             )
+        # 3. The reply could not be read. If the schema itself refused the move the model asked
+        #    for, re-asking would hear the same answer, so stop and name the refused move.
         except _REPAIRABLE as err:
             if _refused_by(output_model, err):
                 raise OutputNotOffered(err) from err
+            # 4. Any other unreadable reply: keep it for the cost accounting, then build the next
+            #    ask from the ORIGINAL turn plus this one error, never a growing stack of them.
             failures.append(err)
-            # Each re-ask carries the ORIGINAL turn plus the latest error, not a stack.
             message = repair_message(user_message, err)
             repair_of = getattr(err, "record_id", None)
             continue
+        # 5. The reply parsed. Return it together with whatever the failed calls before it billed.
         return RepairedCall(result=result, failures=tuple(failures))
+    # 6. The first ask and every permitted re-ask failed validation: raise one error carrying the
+    #    sum of what they all billed, which is what the caller escalates on.
     raise OutputRepairExhausted(failures) from failures[-1]
 
 

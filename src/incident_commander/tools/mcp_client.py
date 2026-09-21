@@ -23,6 +23,19 @@ _DEFAULT_RETRY_BASE_DELAY: Final[float] = 1.0
 # Ceiling on a server-supplied Retry-After: a hint, not an instruction.
 _MAX_RETRY_AFTER_SECONDS: Final[float] = 60.0
 _JSON_RPC_INTERNAL_ERROR: Final[int] = -32603
+_JSON_RPC_INVALID_PARAMS: Final[int] = -32602
+
+# The lab's label on a call it makes with the agent's token (platform v0.6.17,
+# platform ADR 0038). The field sits BESIDE ``arguments`` in ``params``, so it
+# reaches no tool's input model and no prompt; the header carries the lab's own
+# credential, without which the platform refuses rather than mislabels.
+LAB_PROBE_PARAM: Final[str] = "_lab_probe"
+LAB_PRINCIPAL_HEADER: Final[str] = "X-Lab-Principal"
+#: The platform refuses an over-long reason rather than truncating it.
+LAB_PROBE_REASON_MAX_CHARS: Final[int] = 200
+#: ``data.error_code`` on the refusal. The CODE is -32602, which is also what an
+#: argument-validation refusal carries, so the distinguishing mark is this string.
+LAB_PROBE_REFUSED_ERROR_CODE: Final[str] = "lab_probe_refused"
 
 
 class MCPError(RuntimeError):
@@ -32,6 +45,25 @@ class MCPError(RuntimeError):
         super().__init__(f"MCP error {code}: {message}")
         self.code = code
         self.data = data
+
+
+class LabProbeRefused(MCPError):
+    """The platform refused to label this call as the lab's own, and did not run it.
+
+    Its own type because the refusal arrives as ``-32602`` — the same code an
+    argument-validation refusal carries, which the principal guards read as "the
+    scope check passed". A caller that cannot tell them apart would report the
+    wrong verdict; one that retries without the label re-creates the mislabelled
+    row the field exists to prevent (demo finding F4).
+    """
+
+    @property
+    def reason_code(self) -> str:
+        """Which half of the rule the request failed, per the platform's closed set."""
+        data = self.data
+        if isinstance(data, Mapping):
+            return str(data.get("reason_code", "unknown"))
+        return "unknown"
 
 
 def _error_from_member(member: object) -> MCPError:
@@ -53,7 +85,42 @@ def _error_from_member(member: object) -> MCPError:
     message = str(member.get("message", "unknown error"))
     if code != raw_code:
         message = f"{message} (uncoercible error code {raw_code!r:.100})"
-    return MCPError(code, message, member.get("data"))
+    data = member.get("data")
+    refused = (
+        code == _JSON_RPC_INVALID_PARAMS
+        and isinstance(data, Mapping)
+        and data.get("error_code") == LAB_PROBE_REFUSED_ERROR_CODE
+    )
+    return (LabProbeRefused if refused else MCPError)(code, message, data)
+
+
+def _lab_probe_envelope(reason: str | None, principal_token: str | None) -> dict[str, str]:
+    """Validate the label pair and return the header it travels with.
+
+    Both or neither: a reason without the credential is refused by the platform and
+    a credential without a reason labels nothing, so either alone is a request bug
+    and raises here rather than spending a round trip to be told so.
+    """
+    if reason is None or principal_token is None:
+        raise ValueError(
+            "lab probe: pass both lab_probe and lab_principal_token or neither — "
+            f"got reason={'set' if reason is not None else 'None'}, "
+            f"credential={'set' if principal_token is not None else 'None'}. "
+            "The platform honours the label only with the lab's own credential."
+        )
+    if not 1 <= len(reason) <= LAB_PROBE_REASON_MAX_CHARS:
+        raise ValueError(
+            f"lab probe: the reason is {len(reason)} characters; the platform takes "
+            f"1 to {LAB_PROBE_REASON_MAX_CHARS} and REFUSES anything longer rather "
+            "than truncating it."
+        )
+    if not principal_token.strip():
+        raise ValueError(
+            "lab probe: the lab credential is empty — refusing to send an "
+            "unlabelled call instead, which is how the row goes back to being the "
+            "agent's."
+        )
+    return {LAB_PRINCIPAL_HEADER: f"Bearer {principal_token}"}
 
 
 class ToolResult(BaseModel):
@@ -118,15 +185,31 @@ class MCPClient:
         arguments: Mapping[str, Any],
         *,
         timeout_seconds: float | None = None,
+        lab_probe: str | None = None,
+        lab_principal_token: str | None = None,
     ) -> ToolResult:
-        """Invoke one platform tool and return its result; the call is traced either way."""
+        """Invoke one platform tool and return its result; the call is traced either way.
+
+        ``lab_probe`` labels this call as one the LAB makes on the caller's token, so
+        the platform writes ``lab.probe`` instead of ``agent.tool_invoked``; it travels
+        beside ``arguments``, never inside it, and is honoured only with
+        ``lab_principal_token`` (the evaluator's or the smoke account's). The agent's
+        own path passes neither — see ``MCPClientProtocol``, which has no such
+        parameter.
+        """
         started = time.monotonic()
         args_dict = dict(arguments)
+        params: dict[str, Any] = {"name": name, "arguments": args_dict}
+        extra_headers: dict[str, str] | None = None
+        if lab_probe is not None or lab_principal_token is not None:
+            extra_headers = _lab_probe_envelope(lab_probe, lab_principal_token)
+            params[LAB_PROBE_PARAM] = lab_probe
         try:
             result = self._call(
                 "tools/call",
-                {"name": name, "arguments": args_dict},
+                params,
                 timeout_seconds=timeout_seconds,
+                extra_headers=extra_headers,
             )
             # Inside the wrapper on purpose: transitions catch MCPError and
             # nothing else, so a raw ValidationError would walk past every
@@ -163,6 +246,7 @@ class MCPClient:
         params: Mapping[str, Any],
         *,
         timeout_seconds: float | None = None,
+        extra_headers: Mapping[str, str] | None = None,
     ) -> dict[str, Any]:
         """One JSON-RPC round trip, retrying transient failures, returning the result object."""
         body = {
@@ -171,8 +255,11 @@ class MCPClient:
             "method": method,
             "params": dict(params),
         }
+        # A per-request copy: the lab credential belongs to one call, and mutating
+        # ``self._headers`` would put it on every later call from this client.
+        headers = self._headers if extra_headers is None else {**self._headers, **extra_headers}
         # Per-request timeout override for Tier-1 action tools; None = client default.
-        post_kwargs: dict[str, Any] = {"json": body, "headers": self._headers}
+        post_kwargs: dict[str, Any] = {"json": body, "headers": headers}
         if timeout_seconds is not None:
             post_kwargs["timeout"] = timeout_seconds
         for attempt in range(self._max_attempts):
@@ -238,7 +325,13 @@ def make_client(
 
 
 class MCPClientProtocol(Protocol):
-    """Structural type for anything a transition can call to invoke a tool."""
+    """Structural type for anything a transition can call to invoke a tool.
+
+    It has NO lab-probe parameter, deliberately: this is the seam the orchestrator
+    and every transition hold, so the agent's own path has no way to label one of
+    its calls as the lab's. Labelling is offered by ``LabProbeCapableClient`` below,
+    which only the evaluator's code asks for.
+    """
 
     def call_tool(
         self,
@@ -247,3 +340,54 @@ class MCPClientProtocol(Protocol):
         *,
         timeout_seconds: float | None = None,
     ) -> ToolResult: ...
+
+
+class LabProbeCapableClient(Protocol):
+    """Structural type for a transport that CAN label a call as the lab's own."""
+
+    def call_tool(
+        self,
+        name: str,
+        arguments: Mapping[str, Any],
+        *,
+        timeout_seconds: float | None = None,
+        lab_probe: str | None = None,
+        lab_principal_token: str | None = None,
+    ) -> ToolResult: ...
+
+
+class LabProbeClient:
+    """A client whose every call is labelled as the lab's, with one reason.
+
+    It satisfies ``MCPClientProtocol``, which is the point: a read walk shared with
+    code that knows nothing about the lab (``evals/world_audit.py``'s probe set, which
+    the dossier and the recorder also drive) labels every call without the credential
+    being threaded through five signatures. The pair is validated at construction, so
+    a malformed one fails before the first read rather than on the tenth.
+    """
+
+    def __init__(self, inner: LabProbeCapableClient, *, reason: str, principal_token: str) -> None:
+        _lab_probe_envelope(reason, principal_token)
+        self._inner = inner
+        self._reason = reason
+        self._principal_token = principal_token
+
+    @property
+    def reason(self) -> str:
+        """The label every call from this client carries."""
+        return self._reason
+
+    def call_tool(
+        self,
+        name: str,
+        arguments: Mapping[str, Any],
+        *,
+        timeout_seconds: float | None = None,
+    ) -> ToolResult:
+        return self._inner.call_tool(
+            name,
+            arguments,
+            timeout_seconds=timeout_seconds,
+            lab_probe=self._reason,
+            lab_principal_token=self._principal_token,
+        )

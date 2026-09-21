@@ -179,19 +179,39 @@ the poisoned one alone; and the whole phase walk finishes inside **81 ms** (`04:
 endpoint never moves in that mode.
 
 **Reading `/audit/logs?action_prefix=agent.` correctly:** `agent.tool_invoked` is written for
-every MCP read by ANY service account, so the world audit's own reads are in there too. The
-principal id is what separates them — the agent acts under
-`PLATFORM_AGENT_PRINCIPAL_ID`, the audit reads under `PLATFORM_SMOKE_PRINCIPAL_ID`, and
+every unlabelled MCP read by ANY service account, so the demo runner's own polling reads are in
+there too. The principal id is what separates them — the agent acts under
+`PLATFORM_AGENT_PRINCIPAL_ID`, the runner polls under `PLATFORM_SMOKE_PRINCIPAL_ID`, and
 `agent.run_reported` only ever comes from the agent.
 
-Measured on the 2026-09-20 rehearsal after ADR 0074 (`consumer_outage`, run
-`459f8a15-12da-5283-81f4-eed3c65b40c4`): **five** rows under the agent principal and nothing
-else — `get_consumer_lag` ×3 (the precondition probe, the pre-action re-read, the verify read),
-`restart_consumer_group` ×1, and one `mark_dlq_permanent` that ERRORED, which is the eval
-runner's own principal guard proving what that token cannot do (`evals/guards.py`). Every
-polling read the runner made is under the smoke principal. That last row is the one thing this
-still needs from the platform: it is the lab's probe wearing the agent's token on purpose, and
-WO-R3-333 gives it its own `lab.probe` action so the page can leave it out.
+**Since platform v0.6.17 the lab's own probes are in a different stream** (`lab.probe`, platform
+ADR 0038; the commander sends the label from `evals/guards.py` and `evals/world_audit.py`,
+WO-R3-335), so the query to read first is `action_prefix=lab.probe`: it holds every read
+`make world-audit` made and every principal-guard probe, including the one that wears the
+AGENT's token on purpose, and none of them can be mistaken for the agent's work any more.
+
+Measured on the 2026-09-20 rehearsals on v0.6.17 (`consumer_outage`, run
+`bfae3a5e-fad5-548b-8d2a-218b8220b12e`; `dlq_backlog`, run
+`24d6b1de-c057-5017-90cc-884329e3da4b`), per mode, over the whole walk:
+
+- `action_prefix=lab.probe` — **15 rows**: 13 world-audit reads (`world audit read`, smoke
+  principal, two audits per walk — before and after) plus the read-only guard's own
+  `mark_dlq_permanent` in each of them, and **one `mark_dlq_permanent` under the AGENT
+  principal** carrying `principal guard: proves the agent token can execute a Tier-1 action`.
+  That last row is the one this used to need from the platform, and it is now labelled.
+- `action_prefix=agent.` — **only the run and the runner's polling.** `consumer_outage`: the
+  agent's `get_consumer_lag` ×3 and `restart_consumer_group` ×1, ten report rows, and 59
+  `get_consumer_lag` reads under the SMOKE principal (the runner's 5-second lag watch plus
+  `make traffic --until-lag`). `dlq_backlog`: the agent's `list_dlq_messages` ×5 and
+  `replay_dlq_by_category` ×1, eleven report rows, and 3 smoke-principal `list_dlq_messages`
+  (the runner's DLQ watch). **Nothing from the guards or the world audit.**
+- `action_prefix=chaos.` — 4 rows: the two hook firings, plus the chaos guard's `inject_latency`
+  error and the agent's denied `inject_latency`, both carrying their guard's reason in
+  `extra_data`. A `chaos.*` row keeps its own action and is never relabelled: to the `/demo`
+  page the newest `chaos.*` row IS the fault.
+
+The runner's own polling reads stay `agent.tool_invoked` under the smoke principal — the page
+excludes them by principal (they are not the run's), which is why they were left unlabelled.
 
 ## Steps 1–6, and what each is for
 

@@ -31,11 +31,20 @@ class _Client:
     def __init__(self, behavior: ToolResult | Exception) -> None:
         self._behavior = behavior
         self.calls: list[tuple[str, dict[str, Any]]] = []
+        #: The lab label each call carried, in order — (reason, credential).
+        self.labels: list[tuple[str | None, str | None]] = []
 
     def call_tool(
-        self, name: str, arguments: Any, *, timeout_seconds: float | None = None
+        self,
+        name: str,
+        arguments: Any,
+        *,
+        timeout_seconds: float | None = None,
+        lab_probe: str | None = None,
+        lab_principal_token: str | None = None,
     ) -> ToolResult:
         self.calls.append((name, dict(arguments)))
+        self.labels.append((lab_probe, lab_principal_token))
         if isinstance(self._behavior, Exception):
             raise self._behavior
         return self._behavior
@@ -51,11 +60,20 @@ class _ByTool:
     def __init__(self, behavior: dict[str, ToolResult | Exception]) -> None:
         self._behavior = behavior
         self.calls: list[tuple[str, dict[str, Any]]] = []
+        #: The lab label each call carried, in order — (reason, credential).
+        self.labels: list[tuple[str | None, str | None]] = []
 
     def call_tool(
-        self, name: str, arguments: Any, *, timeout_seconds: float | None = None
+        self,
+        name: str,
+        arguments: Any,
+        *,
+        timeout_seconds: float | None = None,
+        lab_probe: str | None = None,
+        lab_principal_token: str | None = None,
     ) -> ToolResult:
         self.calls.append((name, dict(arguments)))
+        self.labels.append((lab_probe, lab_principal_token))
         try:
             behavior = self._behavior[name]
         except KeyError:  # pragma: no cover - a test wired the wrong tool
@@ -633,11 +651,20 @@ class _SequenceClient:
     def __init__(self, pages: list[ToolResult]) -> None:
         self._pages = pages
         self.calls: list[tuple[str, dict[str, Any]]] = []
+        #: The lab label each call carried, in order — (reason, credential).
+        self.labels: list[tuple[str | None, str | None]] = []
 
     def call_tool(
-        self, name: str, arguments: Any, *, timeout_seconds: float | None = None
+        self,
+        name: str,
+        arguments: Any,
+        *,
+        timeout_seconds: float | None = None,
+        lab_probe: str | None = None,
+        lab_principal_token: str | None = None,
     ) -> ToolResult:
         self.calls.append((name, dict(arguments)))
+        self.labels.append((lab_probe, lab_principal_token))
         # Past the end, keep serving the final page — the post-stage read
         # sees the same log the last checkpoint did.
         return self._pages[min(len(self.calls) - 1, len(self._pages) - 1)]

@@ -19,9 +19,22 @@ from pydantic import ValidationError
 
 from evals.guards import PrincipalGuardError, assert_read_only_principal
 from incident_commander.config import Settings
-from incident_commander.tools.mcp_client import MCPClientProtocol, MCPError, ToolResult, make_client
+from incident_commander.tools.mcp_client import (
+    LabProbeClient,
+    MCPClientProtocol,
+    MCPError,
+    ToolResult,
+    make_client,
+)
 
 _REPO_ROOT: Final[Path] = Path(__file__).resolve().parents[1]
+
+#: What every read this command makes says about itself in the platform's audit log
+#: (``lab.probe``, platform v0.6.17 / ADR 0038). The audit reads the world under the
+#: SMOKE account, which is a service account like the agent's, so without the label
+#: its rows land as ``agent.tool_invoked`` after the reset boundary and the demo page
+#: reads them as a new run (finding F4, WO-R3-335).
+LAB_PROBE_REASON: Final[str] = "world audit read"
 
 # The seeded baseline the world must return to after the reset. One copy of these
 # numbers, mirrored from the runbook's "Pre-run checklist" table, which
@@ -360,15 +373,22 @@ def main(argv: Sequence[str] | None = None) -> int:
     if token is None or not token.get_secret_value().strip():
         print("[FAIL] PLATFORM_SMOKE_TOKEN is required; no write-token fallback")
         return 3
-    client = make_client(settings, token=token.get_secret_value())
+    credential = token.get_secret_value()
+    client = make_client(settings, token=credential)
     try:
         try:
-            assert_read_only_principal(client)
+            assert_read_only_principal(client, lab_principal_token=credential)
         except PrincipalGuardError:
             print("[FAIL] token is not verified read-only; audit refused")
             return 3
         print("[PASS] token is read-only")
-        lines, rows = audit_world(client, roots)
+        # Every read from here on is labelled `lab.probe` by the platform. The smoke
+        # account is its own lab credential (platform ADR 0038 honours it by name and
+        # re-checks that it holds no write scope), so the Authorization and the
+        # X-Lab-Principal header carry the same token: the call is the smoke
+        # principal's, and the label says the lab made it.
+        lab_client = LabProbeClient(client, reason=LAB_PROBE_REASON, principal_token=credential)
+        lines, rows = audit_world(lab_client, roots)
         for line in lines:
             print(
                 f"[{'PASS' if line.passed else 'FAIL'}] {line.name}: "

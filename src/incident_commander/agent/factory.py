@@ -15,12 +15,12 @@ from incident_commander.config import Settings
 
 _log = logging.getLogger(__name__)
 
-# Fixed forever (ADR 0016). Regenerating it would re-point every existing
-# fingerprint at a different incident id and silently un-dedupe the fleet.
+# This namespace must never change: incident ids are derived from it, so a new one would point
+# every existing alert fingerprint at a different incident and quietly break deduplication.
 _INCIDENT_NAMESPACE: Final[UUID] = UUID("d0f7dd54-e4fc-49f6-b507-f4becc6886a3")
 
-# Cap on the recurrence walk: a pathological flapping fingerprint degrades to
-# a fresh uuid4 rather than looping over an unbounded generation chain.
+# How far the search below will walk for a recurrence. An alert that flaps endlessly falls back
+# to a random id rather than walking an unbounded chain of past incidents.
 _MAX_RECURRENCE_GENERATIONS: Final[int] = 64
 
 
@@ -30,7 +30,8 @@ def derive_incident_id(alert: Mapping[str, object], checkpointer: Checkpointer) 
     """
     raw_fingerprint = alert.get("fingerprint")
     if not isinstance(raw_fingerprint, str) or not raw_fingerprint.strip():
-        # Keyed on the RAW field: the hash would fuse every fingerprint-less alert.
+        # Checked on the raw field before hashing: hashing an absent fingerprint would give
+        # every alert without one the same incident id.
         return uuid4()
 
     key = dedup_key(alert)
@@ -38,8 +39,8 @@ def derive_incident_id(alert: Mapping[str, object], checkpointer: Checkpointer) 
         candidate = uuid5(_INCIDENT_NAMESPACE, key if generation == 0 else f"{key}|{generation}")
         latest = checkpointer.load(candidate)
         if latest is None or not latest.state.is_terminal:
-            # Absent → fresh incident. Non-terminal → join it: a duplicate
-            # delivery, or a crashed run for the single-flight lease to resume.
+            # No run under this id means a new incident. A run still in progress means join
+            # it: either the alert was delivered twice, or a crashed run needs resuming.
             return candidate
     _log.warning(
         "recurrence chain for dedup key %s exhausted %d generations; "

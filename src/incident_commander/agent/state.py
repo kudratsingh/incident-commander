@@ -86,9 +86,11 @@ class RunState(BaseModel):
     evidence: tuple[EvidenceEntry, ...] = ()
     hypotheses: tuple[Hypothesis, ...] = ()
     pending_approval_id: str | None = None
-    # v3+: untyped so state.py stays free of remediation imports; validated on read.
+    # Held as a plain dict so this module need not import the remediation models; whoever reads
+    # it validates it back into a plan first.
     remediation_plan: dict[str, object] | None = None
-    # v3+: incremented per executed action; at the cap PLANNING forces ESCALATED.
+    # Counts Tier-1 actions this run has actually executed. Once it reaches the cap, PLANNING
+    # escalates instead of planning another one.
     remediation_attempts: int = Field(default=0, ge=0)
     created_at: datetime
     updated_at: datetime

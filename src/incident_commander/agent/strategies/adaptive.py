@@ -54,29 +54,32 @@ from incident_commander.agent.strategies.records import (
 from incident_commander.llm.client import LLMError, LLMUsage
 from incident_commander.llm.repair import RepairedCall, sum_usage, usage_of
 
-#: Same role string, and so the same trace label, as ``baseline``'s planner call — for every
-#: rung's planner call. A split by rung would stop the token total being comparable.
+#: Every rung's planner call is labelled with the same role as ``baseline``'s, so its cost lands
+#: in the same bucket. Labelling each rung separately would stop the totals being comparable.
 _PLANNER_ROLE: Final[str] = "investigation_planner"
 
-#: N the enumerated rung generates. In code, not in ``StrategyKnobs``: an environment that could
-#: set this to 1 would report an adaptive number for a run whose second rung was a baseline call.
+#: How many candidate diagnoses the second rung asks for. Fixed in code rather than configurable:
+#: set to 1, the second rung would be an ordinary baseline call reported as an adaptive one.
 LADDER_N: Final[int] = 4
 
-#: Named so a test asserts the guard's own marker rather than that something raised (F-007).
+#: The exact message this arm refuses with, named so a test can assert the reason rather than
+#: merely that something raised.
 NO_SELECTOR_CLIENT: Final[str] = "no selector client is on the strategy context"
 
-#: Why the ``escalate`` rung exists, and what it means when a step lands on it.
+#: What the run is told when the ladder is exhausted: every rung ran and the step is still
+#: uncertain, so there is nothing further to try.
 LADDER_EXHAUSTED: Final[str] = (
     "adaptive escalated: every rung of the ladder ran and the step is still uncertain"
 )
 
-#: Why the tail is ``escalate`` rather than ``search`` on this run (ADR 0060).
+#: What the run is told when the top rung cannot be reached because this run has no way to
+#: read the world in a branch (ADR 0060's rule).
 SEARCH_RUNG_UNAVAILABLE: Final[str] = (
     "the search rung reads the world and runs in recorded mode only (ADR 0060); this run has no "
     "branch prober, so the ladder ends one rung short"
 )
 
-#: Which rung's call failed, for ``AdaptiveFailed``'s message.
+#: Names for the rungs, so a failure message can say which one of them the failed call was in.
 ENUMERATED_STAGE: Final[str] = "best_of_n_enumerated rung"
 SELECTOR_STAGE: Final[str] = "candidate_selector rung"
 SEARCH_STAGE: Final[str] = "search rung"
@@ -89,18 +92,17 @@ class Rung(StrEnum):
     ENUMERATED = "best_of_n_enumerated"
     SELECTOR = "candidate_selector"
     SEARCH = "search"
-    #: Not a strategy: the tail taken when ``search`` cannot run. It buys no inference and
-    #: emits a ``StopAction``, which the loop turns into an escalation with a briefing.
+    #: Not a strategy of its own: the last rung taken when ``search`` cannot run. It makes no
+    #: model call and emits a stop, which the loop turns into an escalation with a briefing.
     ESCALATE = "escalate"
 
 
-#: The rungs every climb shares. The tail (``search`` or ``escalate``) is resolved per step,
-#: because whether a branch may read is a property of the MODE.
+#: The rungs every climb shares. The last rung — ``search`` or ``escalate`` — is chosen per step,
+#: because whether a branch may read the world depends on how the run is being executed.
 CLIMB: Final[tuple[Rung, ...]] = (Rung.BASELINE, Rung.ENUMERATED, Rung.SELECTOR)
 
-#: Signals about the RUN rather than this step, so no rung clears them (ADR 0056). They buy the
-#: climb but do NOT decide the tail: a tail decided by an unclearable signal is taken
-#: unconditionally, which would cut ADR 0056's reinvestigation short.
+#: Signals about the whole RUN rather than this step, which no rung can clear. They can send the
+#: step up the ladder, but must not decide the last rung, or it would be taken every time.
 UNCLEARABLE: Final[frozenset[EscalationSignal]] = frozenset(
     {EscalationSignal.REMEDIATION_ATTEMPT_FAILED}
 )
@@ -159,23 +161,24 @@ class AdaptiveStrategy:
         )
         self.config: Mapping[str, Any] = MappingProxyType(
             {
-                # The ladder as configured, tail included as the pair it can be; which one a
-                # step ran is in its ``LadderRecord``.
+                # The ladder as configured, with the last rung named as the pair it may be;
+                # which of the two a step actually ran is recorded per step.
                 "ladder": [rung.value for rung in CLIMB]
                 + [f"{Rung.SEARCH.value}_or_{Rung.ESCALATE.value}"],
                 "n": LADDER_N,
                 "generator": generator.name,
                 "selector": SELECTOR_ROLE,
-                # How the ladder is held: a sequence in code, not a number an operator sets.
+                # The ladder's length is fixed by the sequence in code above, not by a
+                # number an operator can raise.
                 "cap": "structural",
-                # Per RUNG here (ADR 0044), so a table must read ``ladder.terminated_on`` before
-                # it puts this arm beside another.
+                # Whether the planner saw evidence ids differs per rung, so a report comparing
+                # this arm with another must first read which rung the step ended on.
                 "evidence_ids_rendered": "baseline rung no, every rung above it yes",
                 "search_rung_requires": "recorded mode (ADR 0060)",
                 "depth": resolved.search_depth,
                 "branch": resolved.search_branch,
-                # The operating point, with the split behind each default (ADR 0061). Plain
-                # dicts: this block is stamped into the run's provenance record as JSON.
+                # The thresholds this arm compares against, and which data split each default
+                # came from. Plain dicts, because this block is stored as JSON with the run.
                 "thresholds": {
                     name: dict(row) for name, row in self._thresholds.as_strategy_config().items()
                 },
@@ -250,7 +253,8 @@ class _Climb:
 
     def run(self, run_state: RunState) -> tuple[RunState, InvestigationStep, StepRecord]:
         """The ladder, one rung at a time, each entered only by the one below's signals."""
-        # 1. Rung 0, `baseline`: one planner call, then read the signals off what it produced.
+        # 1. First rung, `baseline`: make one ordinary planner call, then measure how uncertain
+        #    the ranking it produced is.
         before = run_state
         planned, step, planner = self._baseline_rung(run_state)
         fired = self._note(
@@ -261,11 +265,13 @@ class _Climb:
             calls=1,
         )
         candidate_set: tuple[CandidateRecord, ...] = (_baseline_candidate(step, planner.record_id),)
-        # 2. Nothing fired: an easy step costs one planner call, which is the cheapness claim.
+        # 2. No uncertainty signal fired, so hand this step back now: an easy step costs one
+        #    planner call, which is the whole claim of this arm.
         if not fired.escalate:
             return self._handoff(before, planned, step, Rung.BASELINE, candidate_set=candidate_set)
 
-        # 3. Rung 1, `best_of_n_enumerated(4)`: N candidates over the same ledger.
+        # 3. Second rung: ask one call for four competing diagnoses over the same evidence, then
+        #    measure the uncertainty again and stop here if nothing fires.
         generation = self._generate(planned)
         enumerated, candidates = generation.run_state, generation.candidates
         generation_call_id = _generation_call_id(generation)
@@ -293,7 +299,8 @@ class _Climb:
                 candidate_set=candidate_set,
             )
 
-        # 4. Rung 2, `candidate_selector`: one selection over the set rung 1 paid for.
+        # 4. Third rung: one extra call that chooses between the candidates the rung above
+        #    already paid for, then measure the uncertainty once more.
         selection, selected, selector_call_id = self._select(enumerated, candidates)
         step = step_for_selection(
             selection, candidates, committed_action=generation.proposed_step.next_action
@@ -319,7 +326,8 @@ class _Climb:
             spent=(enumerated.budget, selected.budget),
             calls=1,
         )
-        # 5. The tail is decided by the signals a rung COULD have cleared (``UNCLEARABLE``).
+        # 5. Stop here unless a signal a rung could actually have cleared is still firing: the
+        #    run-level signals in ``UNCLEARABLE`` must not by themselves force the last rung.
         if not fired.fired - UNCLEARABLE:
             return self._handoff(
                 before,
@@ -330,7 +338,8 @@ class _Climb:
                 selector=selector,
             )
 
-        # 6. Rung 3: a bounded walk where the mode allows one, else stop and say what fired.
+        # 6. Last rung: a bounded search where this run is allowed to branch, otherwise stop and
+        #    escalate, naming the signals that were still firing.
         if self.ladder[-1] is Rung.SEARCH:
             return self._search_rung(before, selected, entered_because=fired.fired)
         return self._escalate_rung(
@@ -342,7 +351,7 @@ class _Climb:
             selector=selector,
         )
 
-    # --- the rungs --------------------------------------------------------
+    # --- one function per rung of the ladder -------------------------------
 
     def _baseline_rung(
         self, run_state: RunState
@@ -357,7 +366,8 @@ class _Climb:
             self.at,
             self.ctx.llm_client,
             self.ctx.model,
-            # As the control group runs it, narrowing included (ADR 0074).
+            # The same step schema the control group is given, including the loop's
+            # withdrawal of the probe option when it made one.
             self.ctx.step_model(InvestigationStep),
         )
         self.billed = (planner.billed_usage,)
@@ -367,7 +377,8 @@ class _Climb:
             LLMCallRecord(
                 role=_PLANNER_ROLE,
                 model=self.ctx.model,
-                # The ledger's own delta, the number ADR 0015 holds the run to.
+                # What the run's own budget moved by across this call, which is the number
+                # the budget rules hold a run to.
                 tokens_used=planned.budget.tokens_used - run_state.budget.tokens_used,
                 usd_used=planned.budget.usd_used - run_state.budget.usd_used,
                 input_tokens=planner.input_tokens,
@@ -518,7 +529,7 @@ class _Climb:
             selector=selector,
         )
 
-    # --- the record -------------------------------------------------------
+    # --- assembling the research record for this step ----------------------
 
     def _note(
         self,
@@ -578,8 +589,8 @@ class _Climb:
                 ladder=tuple(rung.value for rung in self.ladder),
                 terminated_on=terminated_on.value,
                 rungs_used=len(rungs),
-                # Every call the step made beyond the baseline rung's one. Zero is the
-                # cheapness claim, and it is a subtraction rather than a sentence.
+                # How many model calls this step made beyond the first rung's one. Zero is
+                # the arm's claim that an easy step stays cheap, measured rather than asserted.
                 extra_llm_calls=len(self.calls) - 1,
                 search_available=self.ladder[-1] is Rung.SEARCH,
                 unclearable=tuple(sorted(still_firing)),

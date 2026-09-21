@@ -69,76 +69,75 @@ from incident_commander.tools.registry import TOOL_REGISTRY
 from incident_commander.tools.wire import wire_arguments
 
 _TOOL_NAME: Final[str] = "get_consumer_lag"
-# Bookkeeping marker for a Phase-1 escalation, distinct from the tool that failed. The
-# underscore is the repo-wide marker convention `briefing._terminal_marker` reads (WO-R2-119).
+# Ledger row name for an escalation raised by this module, written in place of a real tool name.
+# The leading underscore is how `briefing.py` tells bookkeeping rows from real tool calls.
 _ESCALATION_MARKER: Final[str] = "_investigate_escalate"
-# ADR 0041's refusal, distinct from `_handoff_refused` (ADR 0031/0032): a run can collect one
-# of each, naming different missing reads.
+# Ledger row name for refusing a handoff because nobody listed the dead-letter queue whole
+# (ADR 0041's rule). Its own name, so one run can carry this refusal and the subject one at once.
 _WHOLE_QUEUE_REFUSED_MARKER: Final[str] = "_handoff_refused_unlisted_queue"
-# ADR 0073's refusal, and the only one of the three that refuses a READ rather than a handoff.
+# Ledger row name for refusing one more read of the alert's subject once the ranking has settled
+# (ADR 0073's rule) — the only one of these three markers that refuses a read, not a handoff.
 _CONFIRMING_READ_REFUSED_MARKER: Final[str] = "_probe_refused_confirming_read"
 _DEFAULT_MAX_ITERATIONS: Final[int] = 5
-# The bar a hypothesis must clear before the loop acts on it. Public because three other
-# readers need the SAME number (`remediation.py`'s resolve gate, ADR 0059; the slots, ADR 0065).
+# How confident the top hypothesis must be before the loop will remediate on it. Public because
+# remediation's resolve gate (ADR 0059) and the briefing's cause slots (ADR 0065) need one number.
 REMEDIATE_CONFIDENCE_THRESHOLD: Final[float] = 0.7
 
-# Remediate handoffs refusable for never probing the alert's subject before the run escalates
-# instead. A refusal steers the planner, but a third ask would not land.
+# How often the loop may refuse to hand off for remediation because nothing read the alert's own
+# subject, before it escalates instead. Two: a refusal steers the planner, a third would not.
 _MAX_SUBJECT_PROBE_REFUSALS: Final[int] = 2
 
-# Same, for never having read the dead-letter queue whole (ADR 0041). ONE, because
-# `list_dlq_messages()` has no argument to get wrong, so a re-ask adds nothing.
+# The same allowance for never having listed the dead-letter queue whole (ADR 0041). One, because
+# `list_dlq_messages()` takes no argument to get wrong, so asking a second time adds nothing.
 _MAX_WHOLE_QUEUE_REFUSALS: Final[int] = 1
 
-# Readings of the alert's subject allowed before a further one is refused (ADR 0073): the
-# investigation, then the confirming re-read. INC-004 is what an unbounded "re-read" cost.
+# Reads of the alert's subject allowed before one more is refused (ADR 0073): the investigating
+# read, then a single confirming re-read. Incident INC-004 was a run that re-read without end.
 _CONFIRMING_READS_ALLOWED: Final[int] = 2
 
-# Consecutive steps that must rank the same actionable answer first before the guard arms. TWO:
-# a ranking that did not move, where a run whose top is still changing may read again.
+# Consecutive steps that must put the same actionable diagnosis first before that read guard
+# arms. Two means the ranking stopped moving; a run still changing its mind may read again.
 _SETTLED_RANKING_STEPS: Final[int] = 2
 
-# Further reads refusable before the run escalates instead. Two, like the subject-probe sibling:
-# the first names the moves that remain, the second allows for a mis-read, a third is not landing.
+# How many further reads the loop may refuse before it escalates instead. Two: the first refusal
+# names what is left to do, the second allows for a misread, a third would not land either.
 _MAX_CONFIRMING_READ_REFUSALS: Final[int] = 2
 
 
-# Single source of truth for category → Tier-1 tool routing: categories here auto-remediate above
-# the confidence threshold, absent ones always escalate. Load-bearing — the planner prompt is
-# written FROM it, and `TestFixMapMatchesTheSuite` checks each steered tool against the suite.
+# The one place a diagnosis category is mapped to the Tier-1 tool that fixes it; a category not
+# listed here always escalates. The planner prompt is written from this map, so edits move both.
 FIX_MAP: Final[dict[HypothesisCategory, str]] = {
     HypothesisCategory.CONSUMER_SATURATION: "restart_consumer_group",
     HypothesisCategory.POISON_MESSAGE: "replay_dlq_by_ids",
     HypothesisCategory.STALE_CACHE: "invalidate_cache_key",
-    # Replay the dead-lettered root, NOT `pause_dag` — a pause never un-sticks a chain and
-    # blocks the replay. Hint-routed since WO-R3-263, so the root's own row picks the tool.
+    # A stuck chain is fixed by replaying its dead-lettered root job, never by `pause_dag`:
+    # pausing leaves the chain stuck and blocks the replay. The root's own row picks the tool.
     HypothesisCategory.RUNAWAY_SAGA: "replay_dlq_by_ids",
 }
 
 
-# Categories whose SPECIFIC tool comes from the platform's per-row `remediation_hint` rather than
-# FIX_MAP's value: `human_required` rows route to `mark_dlq_permanent`, `replay_safe` ones to a
-# replay. `RUNAWAY_SAGA` joined under ADR 0054, pinned by `TestStuckChainRootRule`.
+# Categories where the exact tool comes from the queue row's own `remediation_hint` rather than
+# from FIX_MAP above: a `human_required` row is fenced, a `replay_safe` one is replayed.
 HINT_ROUTED_CATEGORIES: Final[frozenset[HypothesisCategory]] = frozenset(
     {HypothesisCategory.POISON_MESSAGE, HypothesisCategory.RUNAWAY_SAGA}
 )
 
 
-# The routing the set above defers to: per-row `remediation_hint` → the Tier-1 tools it admits;
-# `unclassified` is keyed on the alerted SLICE, because a null hint IS a finding (ADR 0032).
-# NOT read at runtime — the prompt is written FROM it (`TestHintRoutedToolsMatchTheSuite`).
+# The routing those categories defer to: each `remediation_hint` value, and the Tier-1 tools it
+# allows. Nothing reads it at runtime — the planner prompt is written from it, so edits move both.
 HINT_ROUTED_TOOLS: Final[dict[str, frozenset[str]]] = {
     "replay_safe": frozenset({"replay_dlq_by_ids", "replay_dlq_by_category"}),
     "wait_and_replay": frozenset({"replay_dlq_by_ids", "replay_dlq_by_category"}),
-    # One tool; the fence is `Resolution.STABILIZES`, so success is a handoff (WO-R2-140).
+    # A row needing a human may only be fenced, and fencing merely stabilizes the incident, so
+    # even a successful fence still hands the incident to a person.
     "human_required": frozenset({"mark_dlq_permanent"}),
-    # Keyed on `AlertPayload.dlq_scope`, not a row hint: an unclassified row has none.
+    # This key comes from the alert's own `dlq_scope`, not from a row hint: a row the platform
+    # never classified has no hint to read, and that absence is itself a finding (ADR 0032).
     "unclassified": frozenset({"mark_dlq_permanent"}),
 }
 
-# WHEN THE LABEL AND THE EVIDENCE DISAGREE, THE ROUTING ABOVE DOES NOT APPLY: the ERROR wins, the
-# row is not replayed, and the briefing reports it (WO-R2-167). NOT read at runtime (ADR 0034) — a
-# refusal keyed on error text would derive a control from tool output, which invariant 4 forbids.
+# Where a row's hint says "replay safe" but its own error text contradicts that, the error wins:
+# fence the row, never replay it. Prompt-only — a rule keyed on tool text breaks invariant 4.
 CONTRADICTED_HINT_TOOLS: Final[frozenset[str]] = frozenset({"mark_dlq_permanent"})
 
 
@@ -151,17 +150,17 @@ def stuck_chain_root_rule() -> str:
     return STUCK_CHAIN_ROOT_RULE
 
 
-# The read that shows a dead-letter row, and the two arguments that narrow it. Here because
-# `remediation.py` imports this module; pinned by `TestWholeQueueReadBeforeDlqAction`.
+# The read that lists dead-letter rows, and the two arguments that narrow that listing. Named
+# here, not in remediation.py, because remediation.py imports this module and not the reverse.
 DLQ_LISTING_TOOL: Final[str] = "list_dlq_messages"
 
-# `limit` and `offset` are NOT here: paging a listing is not slicing it.
+# `limit` and `offset` are deliberately absent: paging through a listing still reads every row,
+# so it does not narrow which rows the run has seen.
 DLQ_LISTING_FILTERS: Final[frozenset[str]] = frozenset({"remediation_hint", "job_type"})
 
 
-# Every Tier-1 tool that replays or fences a dead-letter row. Declared, not derived:
-# `mark_dlq_permanent` is deliberately inert in the source maps, so deriving would silently drop
-# the fence — half of what ADR 0041 is about.
+# Every Tier-1 tool that replays or fences a dead-letter row, hand-listed rather than derived from
+# the maps above: `mark_dlq_permanent` is absent from those, so deriving would lose the fence.
 DLQ_ACTION_TOOLS: Final[frozenset[str]] = frozenset(
     {
         "replay_dlq_by_ids",
@@ -223,9 +222,8 @@ class SubjectProbe(NamedTuple):
     "unclassified" by default."""
 
 
-# Single source of truth for alert-field → subject-probe routing. Keyed on the alert FIELD because
-# the field carries the VALUE; declaration order is priority order, and the last two entries are
-# SLICES (ADR 0028, ADR 0032) so they rank below every resource. Pinned by `TestAlertSubjectProbes`.
+# The one place an alert field is mapped to the read that observes what that field names. The
+# order is priority order, and the last two entries name a whole slice rather than one resource.
 ALERT_SUBJECT_PROBES: Final[dict[str, SubjectProbe]] = {
     "consumer_group": SubjectProbe("get_consumer_lag", "consumer_group"),
     "group": SubjectProbe("get_consumer_lag", "consumer_group"),
@@ -233,8 +231,8 @@ ALERT_SUBJECT_PROBES: Final[dict[str, SubjectProbe]] = {
     "job_id": SubjectProbe("get_dag_state", "job_id"),
     "trace_id": SubjectProbe("get_trace", "trace_id"),
     "remediation_hint": SubjectProbe("list_dlq_messages", "remediation_hint"),
-    # LAST: an alert naming both is about the category. The admissible-value set is
-    # required — an UNFILTERED probe never compares the value, so any string would pass.
+    # Last, because an alert carrying both fields is about the category. This entry must list
+    # its admissible values: an unfiltered probe compares no value, so any string would pass.
     "dlq_scope": SubjectProbe(
         "list_dlq_messages",
         "remediation_hint",
@@ -270,14 +268,15 @@ def alert_subject(alert: Mapping[str, Any]) -> AlertSubject | None:
             continue
         for field, probe in ALERT_SUBJECT_PROBES.items():
             raw = source.get(field)
-            # str and UUID only: JSON gives strings, Python a real UUID for `job_id`/`trace_id`.
+            # Accept only a string or a UUID: JSON delivers strings, while Python code hands
+            # over a real UUID object for `job_id` and `trace_id`.
             if not isinstance(raw, (str, UUID)):
                 continue
             value = str(raw).strip()
             if not value:
                 continue
-            # Unrecognised is the inert case, not an error: the platform may name a scope
-            # before we can read it.
+            # A value this entry does not recognise is skipped rather than raised on: the
+            # platform may start naming a scope before this code knows how to read it.
             if probe.admissible_values is not None and value not in probe.admissible_values:
                 continue
             return AlertSubject(field, probe.tool_name, probe.argument_field, value, probe.match)
@@ -312,12 +311,11 @@ class FaultPresentReading(NamedTuple):
     never asked to take the predicate on trust."""
 
 
-#: "This reading shows the fault still present". TOTAL over every read tool
-#: ``ALERT_SUBJECT_PROBES`` names; ``None`` is a DECLARED inert entry, never an omission, pinned
-#: by ``TestTheFaultPresentReadingMap``.
+#: For each read tool, how its reading says the alerted fault is still happening right now. Every
+#: tool named above has an entry; ``None`` states on purpose that this tool can never say so.
 FAULT_PRESENT_READING: Final[dict[str, FaultPresentReading | None]] = {
-    # The backlog is still there. `lag_known` guards the measurement's existence and `age_seconds`
-    # makes it current: "present" has to be about NOW to be a reason not to look again.
+    # A non-zero backlog means the fault is present, but only when `lag_known` says the platform
+    # really measured it and `age_seconds` says that measurement is still recent.
     "get_consumer_lag": FaultPresentReading(
         "get_consumer_lag",
         "consumer_group",
@@ -327,28 +325,29 @@ FAULT_PRESENT_READING: Final[dict[str, FaultPresentReading | None]] = {
         "the platform reports the group's own backlog with the age of the measurement, so a "
         "non-zero lag inside its freshness window is the alerted condition happening now",
     ),
-    # INERT: a key's presence is not a fault. Staleness is a judgement over three fields and a
-    # second reading, and `exists: true` would arm this guard on every healthy key.
+    # No entry: a cache key merely existing is not a fault. Staleness takes three fields and a
+    # second reading to judge, and keying on `exists: true` would fire on every healthy key.
     "get_cache_key_info": None,
-    # INERT: a chain's fault is WHICH node is dead-lettered (ADR 0070), and the routing read is
-    # the root's own dead-letter row (ADR 0054), so a bound here would bind the wrong read.
+    # No entry: a chain's fault is which of its nodes is dead-lettered, which this reading never
+    # says — the root's own dead-letter row does, so an entry here would bind the wrong read.
     "get_dag_state": None,
-    # INERT: a trace records work that already finished; two reads return the same record.
+    # No entry: a trace records work that already finished, so reading it twice returns the same
+    # record and can never show the fault as still happening.
     "get_trace": None,
-    # INERT (INC-001, INC-002): an absence proves only that page, a fenced row is still listed
-    # (ADR 0033), and ADR 0041 REQUIRES this read — a bound here would collide with it.
+    # No entry: a row missing from one page proves nothing about the rest of the queue (incidents
+    # INC-001 and INC-002), a fenced row is still listed, and ADR 0041 requires this read anyway.
     "list_dlq_messages": None,
 }
 
 
-#: The field a platform reading carries its own measurement age in (v0.6.7, WO-R3-254). Named
-#: because the freshness test below and the refusal that quotes the number must spell it once.
+#: The field a platform reading carries the age of its own measurement in. Named once here so the
+#: freshness check below and the refusal text that quotes the number cannot spell it differently.
 READING_AGE_FIELD: Final[str] = "age_seconds"
 
 
 def _same_value(value: object, expected: object) -> bool:
-    """Value equality that does not let ``0`` satisfy ``False`` (S-20's lesson). Spelled again
-    rather than imported from ``attribution``, because that module imports this one."""
+    """Equality that will not let ``0`` count as ``False``, which in Python it otherwise does.
+    Written again here rather than imported, because ``attribution`` imports this module."""
     if isinstance(expected, bool):
         return value is expected
     return value == expected
@@ -401,13 +400,14 @@ def make_investigate(
     """Bind an MCP client to the INVESTIGATING transition function."""
 
     def transition_investigate(run_state: RunState, at: datetime) -> RunState:
-        # 1. The alerted group, accepting legacy `group` beside `consumer_group`. Read-only, so
-        #    ``wire_arguments``' default-fill is deliberate here; a remediation leg may NOT.
+        # 1. Build the read's arguments from the consumer group the alert names, accepting the
+        #    older `group` spelling too. Defaulting a missing argument is safe on a read.
         spec = TOOL_REGISTRY[_TOOL_NAME]
         raw = run_state.alert.get("consumer_group") or run_state.alert.get("group")
         arguments = wire_arguments(spec, {"consumer_group": str(raw)} if raw else {})
 
-        # 2. One read, with transport failure and refusal named apart.
+        # 2. Make the one platform read. Both failures escalate, but a call that never landed
+        #    and a call the platform refused are recorded with different reasons.
         try:
             result = mcp_client.call_tool(_TOOL_NAME, arguments)
         except MCPError as err:
@@ -416,13 +416,14 @@ def make_investigate(
         if result.is_error:
             return _escalate(run_state, at, "tool reported is_error=True", arguments)
 
-        # 3. Parse it through the tool's own output model.
+        # 3. Parse the response through the tool's own output model; escalate if it does not fit.
         try:
             output = _parse_output(spec.output_model, result.content)
         except (ValueError, ValidationError) as err:
             return _escalate(run_state, at, f"output parse failed: {err}", arguments)
 
-        # 4. Phase 0 always escalates: one probe is the whole investigation here.
+        # 4. Record the reading, charge one tool call, and escalate. In this Phase-0 transition
+        #    one probe is the whole investigation, so there is never a second step.
         entry = EvidenceEntry(
             tool_name=_TOOL_NAME,
             arguments=arguments,
@@ -473,7 +474,7 @@ def _escalate(
 
 
 # ---------------------------------------------------------------------------
-# Phase 2: LLM-driven multi-probe investigation loop.
+# Phase 2: the LLM-driven loop that probes several times before deciding.
 
 
 def _control_group() -> InvestigationStrategy:
@@ -529,29 +530,31 @@ def make_llm_investigate(
     planner call; every gate around it stays here — strategies propose, the loop decides (ADR 0036).
     """
     chosen: Final[InvestigationStrategy] = strategy if strategy is not None else _control_group()
-    # Which LLM role a console row is filed under. ``reflection``'s step is the REVISED one, so
-    # naming it for the arm names the call that produced the ranking.
+    # Which role the console files this run's thinking rows under. The `reflection` arm hands back
+    # its revised step, so labelling the row with the arm names the call that produced the ranking.
     thinking_tool: Final[str] = (
         REFLECTION_TOOL if chosen.name == StrategyName.REFLECTION.value else PLANNER_TOOL
     )
 
     def transition_llm_investigate(run_state: RunState, at: datetime) -> RunState:
-        # 1. Per-run bookkeeping: the alert's subject, and one budget per refusal guard.
+        # 1. Set up the bookkeeping this loop carries across iterations: what resource the alert
+        #    is about, and a separate refusal allowance for each guard further down.
         last_probe: ProbeAction | None = None
         reprobes_spent: dict[str, int] = {}
         subject = alert_subject(run_state.alert)
         refusals_spent = 0
         whole_queue_refusals_spent = 0
         confirming_refusals_spent = 0
-        # A streak, never a total: a run whose ranking moved has earned another reading (ADR 0073).
+        # A consecutive streak, not a running total: a run whose ranking changed its mind has
+        # earned another look at the world (ADR 0073's rule).
         settled_steps = 0
         for iteration in range(max_iterations):
-            # 2. Out of budget mid-investigation.
+            # 2. Escalate if a budget ran out before this iteration could start.
             if run_state.budget.is_exhausted:
                 return _escalate_investigation(run_state, at, "budget exhausted mid-investigation")
 
-            # 3. Withdraw the probe BEFORE the call (ADR 0074), so this call's own context
-            #    carries the reason its choice is narrower than it was.
+            # 3. Decide whether another read of the alert's subject is still worth making. If it
+            #    is not, withdraw that option and say why BEFORE asking (ADR 0074's rule).
             withdrawn = (
                 _probe_withdrawn(run_state, subject, settled_steps) if subject is not None else None
             )
@@ -560,8 +563,8 @@ def make_llm_investigate(
                     run_state, at, subject, *withdrawn, settled_steps
                 )
 
-            # 4. Ask the planner. The third value is the ``StepRecord``, which the loop never
-            #    reads: research data must not change the run.
+            # 4. Ask the strategy for one planner step. Its third return value is a research
+            #    record the loop deliberately ignores: measurement must not change the run.
             prior_hypotheses = run_state.hypotheses
             try:
                 run_state, step, _ = chosen.plan_next_step(
@@ -576,17 +579,19 @@ def make_llm_investigate(
                         selector_llm_client=selector_llm_client,
                         critic_llm_client=critic_llm_client,
                         branch_prober=branch_prober,
-                        # The narrowing reaches every arm through the context; no arm decides it.
+                        # Every strategy is told about the withdrawal through the
+                        # context; no strategy decides it for itself.
                         offer_probe=withdrawn is None,
                     ),
                 )
             except (ValueError, ValidationError, LLMError) as err:
-                # 5. A failed planner call is still a billed one (ADR 0015).
+                # 5. Charge the failed planner call anyway: the provider billed it, and the
+                #    budget may over-report but must never under-report (ADR 0015's rule).
                 run_state = run_state.model_copy(
                     update={"budget": accrue_llm_error(run_state.budget, err, model)}
                 )
-                # 6. It asked for the probe the narrowed schema withdrew (ADR 0074): not a reason
-                #    to escalate, so it keeps its turn under ADR 0073's own cap.
+                # 6. If it asked for the read step 3 withdrew, spend one refusal and give it
+                #    another turn; once those refusals are gone, escalate with the reason.
                 if (
                     isinstance(err, OutputNotOffered)
                     and withdrawn is not None
@@ -606,8 +611,8 @@ def make_llm_investigate(
                     run_state, at, f"{INVESTIGATION_PLANNER_INVALID}: {err}"
                 )
 
-            # 7. Report the accepted ranking, the ONE place one is accepted (ADR 0075). Before the
-            #    guards below, because a refused proposal is still thinking worth watching.
+            # 7. Send the accepted ranking to the console. Here because this is the only place a
+            #    ranking is accepted, and before the guards, since a refused step is still thinking.
             if planner_log is not None:
                 planner_log.ranking(
                     tool=thinking_tool,
@@ -616,11 +621,12 @@ def make_llm_investigate(
                     reason=_action_reason(step.next_action),
                 )
 
-            # 8. Update the settled-ranking streak.
+            # 8. Count consecutive steps whose top diagnosis is one this loop would act on; a
+            #    step that ranks anything else resets the streak to zero.
             settled_steps = settled_steps + 1 if _ranks_an_actionable_answer(step.hypotheses) else 0
 
-            # 9. An actionable hypothesis died on a possibly-stale sensor: re-read it first
-            #    (ADR 0009), before taking the contradiction as a finding.
+            # 9. An actionable diagnosis was dropped because of a reading that may be out of
+            #    date: read that resource again first (ADR 0009's rule), then re-plan.
             killed = _cached_probe_contradiction(prior_hypotheses, step.hypotheses, last_probe)
             if (
                 killed is not None
@@ -644,12 +650,14 @@ def make_llm_investigate(
                 continue
 
             action = step.next_action
-            # 10. `stop` — hand off with the planner's own reason.
+            # 10. The planner chose to stop: end the run at ESCALATED, quoting its own reason.
             if isinstance(action, StopAction):
                 return _finalize(run_state, at, action.reason)
-            # 11. `remediate` — four gates, in priority order, before PLANNING sees it.
+            # 11. The planner chose to remediate. Four gates must pass, in this order, before
+            #     the run is allowed into PLANNING.
             if isinstance(action, RemediateAction):
-                # 11a. The category has a Tier-1 fix, and the confidence clears the bar.
+                # 11a. Escalate unless the top diagnosis is a category FIX_MAP has a Tier-1 tool
+                #      for, and is confident enough to act on. Asking again would not help.
                 top = step.hypotheses[0]
                 if top.category not in FIX_MAP:
                     return _finalize(
@@ -671,8 +679,8 @@ def make_llm_investigate(
                             f"{REMEDIATE_CONFIDENCE_THRESHOLD}; escalating"
                         ),
                     )
-                # 11b. Nobody has read the alerted signal (ADR 0032). REFUSES rather than
-                #      escalates, so the planner gets another turn.
+                # 11b. Nothing in this run has read the resource the alert is about (ADR 0032's
+                #      rule). Refuse so the planner may try again; escalate when refusals run out.
                 if subject is not None and not _alert_subject_probed(run_state, subject):
                     if refusals_spent >= _MAX_SUBJECT_PROBE_REFUSALS:
                         return _finalize(
@@ -689,8 +697,8 @@ def make_llm_investigate(
                     refusals_spent += 1
                     run_state = _refuse_handoff(run_state, at, subject)
                     continue
-                # 11c. Nobody has read the dead-letter queue WHOLE (ADR 0041). Here, not in
-                #      PLANNING, which never probes.
+                # 11c. The planner may not remediate until the whole dead-letter queue has been
+                #      listed once (ADR 0041's rule); check it here, because PLANNING never probes.
                 if top.category in DLQ_ACTING_CATEGORIES and not _whole_queue_listed(run_state):
                     if whole_queue_refusals_spent >= _MAX_WHOLE_QUEUE_REFUSALS:
                         return _finalize(
@@ -708,18 +716,18 @@ def make_llm_investigate(
                     whole_queue_refusals_spent += 1
                     run_state = _refuse_whole_queue_handoff(run_state, at, top.category)
                     continue
-                # 11d. Every gate cleared.
+                # 11d. All four gates passed: move the run to PLANNING with the planner's reason.
                 return _handoff_to_planning(run_state, at, action.reason)
 
-            # 12. `probe` — the schema's Literal already checked the name; this catches a
-            #     registry that drifted after startup.
+            # 12. The planner chose to probe. Its schema already limited the tool name, so an
+            #     unknown one here means the registry changed after startup — escalate.
             if action.tool_name not in TOOL_REGISTRY:
                 return _escalate_investigation(
                     run_state, at, f"planner proposed unknown tool: {action.tool_name}"
                 )
 
-            # 13. Refuse a confirming re-read (ADR 0073), the only guard here that refuses a READ.
-            #     The bound is here, where the reads are counted; a prompt rule cannot hold it.
+            # 13. Refuse this read if the subject has already been read as often as ADR 0073
+            #     allows. Counted here, in code, because a rule stated only in a prompt fails open.
             confirming = withdrawn or (
                 _confirming_read_exhausted(run_state, subject, action, settled_steps)
                 if subject is not None
@@ -734,13 +742,15 @@ def make_llm_investigate(
                     )
                 confirming_refusals_spent += 1
                 if withdrawn is None:
-                    # Only the proposal revealed it; step 3's path already wrote its own.
+                    # Only the proposed probe revealed this. Where step 3 withdrew the
+                    # probe it already wrote the refusal row, so a second would duplicate it.
                     run_state = _refuse_confirming_read(
                         run_state, at, subject, *confirming, settled_steps
                     )
                 continue
 
-            # 14. Run the probe. A failure has already escalated with its reason.
+            # 14. Escalate if the tool-call budget is spent; otherwise run the read. A failed call
+            #     already escalated, so return as-is, and remember this probe as the last one.
             if run_state.budget.is_exhausted:
                 return _escalate_investigation(run_state, at, "budget exhausted before probe")
 
@@ -749,7 +759,8 @@ def make_llm_investigate(
                 return run_state
             last_probe = action
 
-        # 15. Out of iterations, with the ranking the run ran out holding (ADR 0073).
+        # 15. Every iteration was used without stopping, remediating or escalating: escalate,
+        #     naming the ranking the run was holding when it ran out (ADR 0073's rule).
         return _escalate_investigation(
             run_state, at, _iterations_exhausted_reason(run_state, max_iterations)
         )
@@ -783,7 +794,8 @@ def _plan_next_step(
     ``probe`` under it raises ``OutputNotOffered`` with no re-ask (ADR 0074).
     """
     system_prompt = load_prompt("investigation_planner")
-    # A local, not inline: the step record measures the string that was SENT.
+    # Held in a local rather than passed inline, because the step record below measures the
+    # length of the exact string that was sent.
     user_message = format_planner_context(run_state)
     call = call_with_output_repair(
         llm_client,
@@ -808,10 +820,11 @@ def _plan_next_step(
         cache_read_tokens=result.cache_read_tokens,
         cache_creation_tokens=result.cache_creation_tokens,
         context_chars=len(system_prompt) + len(user_message),
-        # The client's own measurement: a stopwatch here would time the accrual as model time.
+        # The LLM client's own timing. A stopwatch around this code would also count the
+        # budget arithmetic above as time spent waiting on the model.
         elapsed_ms=result.elapsed_ms,
-        # Every leg this call billed. A strategy making a SECOND call in the same step needs it,
-        # or the first call's bill goes uncharged when the second fails (ADR 0045).
+        # Everything this call was billed for, rejected repair attempts included. A strategy
+        # that makes a second call in the same step needs it, or the first bill is lost.
         billed_usage=sum_usage(*(usage_of(err) for err in call.failures), result),
     )
     return updated, result.output, measured
@@ -825,8 +838,8 @@ def _execute_probe(
 ) -> RunState:
     """Call the tool the planner picked. On any failure, escalate with the reason."""
     spec = TOOL_REGISTRY[action.tool_name]
-    # 1. Runtime tier guard (B-06): only ``tier_of`` catches a READ→TIER_1 reclassification made
-    #    after the Literal was hand-listed.
+    # 1. Escalate unless this tool is still a read at runtime. The planner's schema lists read
+    #    tool names by hand, so only this check catches a tool reclassified since (finding B-06).
     if tier_of(action.tool_name) is not Tier.READ:
         return _escalate_investigation(
             run_state,
@@ -834,7 +847,8 @@ def _execute_probe(
             f"planner proposed non-read tool as probe: {action.tool_name} "
             f"(tier={tier_of(action.tool_name).value})",
         )
-    # 2. Wire the arguments, through the same serialization the remediation legs use.
+    # 2. Serialize the arguments the same way a remediation call does, escalating if the
+    #    planner's arguments do not fit the tool's input model.
     try:
         arguments = wire_arguments(spec, action.arguments)
     except ValidationError as err:
@@ -842,7 +856,8 @@ def _execute_probe(
             run_state, at, f"probe arguments invalid for {action.tool_name}: {err}"
         )
 
-    # 3. Call the platform, and read a transport failure and a tool-level refusal apart.
+    # 3. Call the platform. Both failures escalate, but a call that never landed and a call
+    #    the platform refused are recorded with different reasons.
     try:
         result = mcp_client.call_tool(action.tool_name, arguments)
     except MCPError as err:
@@ -853,7 +868,7 @@ def _execute_probe(
             run_state, at, f"tool reported is_error=True ({action.tool_name})"
         )
 
-    # 4. Parse the response through the tool's own output model.
+    # 4. Parse the response through the tool's own output model; escalate if it does not fit.
     try:
         summary = _summarize_probe(spec.output_model, result)
     except (ValueError, ValidationError) as err:
@@ -861,7 +876,7 @@ def _execute_probe(
             run_state, at, f"output parse failed ({action.tool_name}): {err}"
         )
 
-    # 5. Append the reading and charge the tool call.
+    # 5. Add the reading to the evidence ledger and charge one tool call to the budget.
     entry = EvidenceEntry(
         tool_name=action.tool_name,
         arguments=arguments,
@@ -880,8 +895,8 @@ def _execute_probe(
     )
 
 
-#: Why a branch's read did not happen, as ``BranchProbeOutcome.refused`` carries it. Named so a
-#: test asserts the guard's own marker rather than that a string contains a word (F-007).
+#: The reasons a search branch's read did not happen, carried on ``BranchProbeOutcome.refused``.
+#: Named so a test can assert the exact reason rather than that some string contains a word.
 BRANCH_PROBE_NOT_A_READ: Final[str] = "not a read tool"
 BRANCH_PROBE_UNKNOWN_TOOL: Final[str] = "not in the tool registry"
 BRANCH_PROBE_BAD_ARGUMENTS: Final[str] = "arguments invalid"
@@ -897,12 +912,12 @@ def make_branch_prober(mcp_client: MCPClientProtocol) -> BranchProber:
     """
 
     def probe(run_state: RunState, action: ProbeAction) -> BranchProbeOutcome:
-        # 1. The tool exists.
+        # 1. Refuse the branch if the planner named a tool the registry does not have.
         spec = TOOL_REGISTRY.get(action.tool_name)
         if spec is None:
             return BranchProbeOutcome(run_state=run_state, refused=BRANCH_PROBE_UNKNOWN_TOOL)
-        # 2. The same runtime tier guard `_execute_probe` makes, and the reason a branch can
-        #    never act however a strategy proposes it (B-06).
+        # 2. Refuse anything that is not a read, the same runtime check `_execute_probe` makes.
+        #    A branch only gathers evidence, whatever a strategy proposes (finding B-06).
         if tier_of(action.tool_name) is not Tier.READ:
             return BranchProbeOutcome(
                 run_state=run_state,
@@ -913,14 +928,15 @@ def make_branch_prober(mcp_client: MCPClientProtocol) -> BranchProber:
                     "audit log to grade the change from (invariant 6)"
                 ),
             )
-        # 3. Wire the arguments.
+        # 3. Serialize the arguments, refusing the branch if they do not fit the tool.
         try:
             arguments = wire_arguments(spec, action.arguments)
         except ValidationError as err:
             return BranchProbeOutcome(
                 run_state=run_state, refused=f"{BRANCH_PROBE_BAD_ARGUMENTS} ({err})"
             )
-        # 4. Call the platform; a transport failure and a refusal are named apart.
+        # 4. Call the platform. Both failures refuse the branch, but a call that never landed
+        #    and a call the platform refused are reported with different reasons.
         try:
             result = mcp_client.call_tool(action.tool_name, arguments)
         except MCPError as err:
@@ -931,15 +947,15 @@ def make_branch_prober(mcp_client: MCPClientProtocol) -> BranchProber:
             return BranchProbeOutcome(
                 run_state=run_state, refused=f"{BRANCH_PROBE_TOOL_ERROR}: is_error=True"
             )
-        # 5. Parse the response.
+        # 5. Parse the response through the tool's output model, refusing if it does not fit.
         try:
             summary = _summarize_probe(spec.output_model, result)
         except (ValueError, ValidationError) as err:
             return BranchProbeOutcome(
                 run_state=run_state, refused=f"{BRANCH_PROBE_UNPARSED}: {err}"
             )
-        # 6. Append the reading and charge the run's OWN ledger — the shared ceiling is what
-        #    makes exploring a trade-off.
+        # 6. Add the reading to the evidence ledger and charge the tool call to the RUN's own
+        #    budget: branches and the chosen path share one ceiling, so exploring costs the run.
         entry = EvidenceEntry(
             tool_name=action.tool_name,
             arguments=arguments,
@@ -1092,7 +1108,8 @@ def _probe_withdrawn(
     if settled_steps < _SETTLED_RANKING_STEPS:
         return None
     reading = FAULT_PRESENT_READING.get(subject.tool_name)
-    # Keyed by tool, so the entry must also describe a reading of THIS subject's resource.
+    # The map above is keyed by tool name alone, so also check that the entry describes a
+    # reading of the kind of resource this alert is about.
     if reading is None or reading.argument_field != subject.argument_field:
         return None
     reads = subject_reads(run_state, subject)

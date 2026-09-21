@@ -31,9 +31,8 @@ class BranchProbeOutcome:
     refused: str | None = None
 
 
-#: The loop's own read-only prober, handed to a strategy that explores (WP-12.1). NOT a client:
-#: the tier re-check, the wire, the MCP call and the accrual stay in ``investigation.py``
-#: (ADR 0036). ``None`` on the context means nobody may branch — every mode but RECORDED.
+#: A read-only prober the loop hands to a strategy that explores, so the tier check, the call
+#: itself and the charging all stay in the loop. ``None`` means this run may not branch at all.
 BranchProber = Callable[[RunState, ProbeAction], BranchProbeOutcome]
 
 
@@ -47,25 +46,25 @@ class StrategyContext:
 
     llm_client: LLMClientProtocol
     model: str
-    #: 0-based index of the investigation loop's current iteration.
+    #: Which pass of the investigation loop this is, counting from zero.
     iteration: int
-    #: The strategy's own inference settings block (plan 02 § 4). Empty for ``baseline``, and
-    #: stamped into the run's provenance as ``strategy_config``.
+    #: The strategy's own settings, empty for ``baseline``, stored with the run so a later reader
+    #: knows exactly how it was configured.
     config: Mapping[str, Any] = field(default_factory=dict)
-    #: Where this step's ``StepRecord`` goes. ``None`` means nobody is
-    #: recording — see ``records.StepSink``.
+    #: Where this step's research record is sent. ``None`` means nothing is recording, which is
+    #: the case for every run without a trace directory.
     record_step: StepSink | None = None
-    #: The client the ``candidate_selector`` role calls through (WP-6.2). Separate because the
-    #: accounting splits on ROLE; the selector strategy refuses rather than sharing this one.
+    #: A separate client for the selector's calls, because cost is accounted per role. An arm
+    #: that needs one refuses rather than borrow the planner's and misreport its tokens.
     selector_llm_client: LLMClientProtocol | None = None
-    #: The client the ``reflection_critic`` role calls through (WP-9.1), for the same reason:
-    #: "added tokens" is what reflection is judged on. ``reflection`` refuses rather than share.
+    #: A separate client for the critic's calls, for the same reason: how many tokens reflection
+    #: adds is the number it is judged on, so it refuses rather than borrow the planner's.
     critic_llm_client: LLMClientProtocol | None = None
-    #: How a ``search`` branch gathers evidence (WP-12.1), wired ONLY in recorded mode. ``None``
-    #: is the refusal: ``search`` stops rather than explore without reading (ADR 0060).
+    #: How a search branch reads the world, provided only on a replayed run. ``None`` is a
+    #: refusal: the search arm stops rather than explore a world it cannot read (ADR 0060).
     branch_prober: BranchProber | None = None
-    #: Whether a probe is on offer this step (ADR 0074). The LOOP sets it, because the
-    #: conditions are the remediate gate's own inputs and that is policy (ADR 0036).
+    #: Whether this step may propose another read at all. The loop decides it, because the
+    #: conditions are the same ones its remediate gate uses, and that is the loop's policy.
     offer_probe: bool = True
 
     def step_model[T: BaseModel](self, model: type[T]) -> type[T]:
@@ -84,11 +83,11 @@ class InvestigationStrategy(Protocol):
     every budget number a lower bound (ADR 0015).
     """
 
-    #: Registry key and the value stamped into the run's provenance. Matches a ``StrategyName``
-    #: member, since ``INFERENCE_STRATEGY`` is typed as that enum.
+    #: The name this strategy is registered and recorded under. It must match a ``StrategyName``
+    #: member, because the environment variable that selects a strategy is typed as that enum.
     name: str
 
-    #: The knobs this strategy ran with, stamped into ``strategy_config`` (WP-0.3).
+    #: The settings this strategy ran with, stored with the run as ``strategy_config``.
     config: Mapping[str, Any]
 
     def plan_next_step(

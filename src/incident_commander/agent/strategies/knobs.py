@@ -18,23 +18,21 @@ class StrategyKnobs:
     ``start_run`` seeds the ledger; ``TestNoOtherCallSiteScalesABudget`` refuses a second reader.
     """
 
-    #: Candidate diagnoses generated per planner step (plan 02 § 11, N ∈ {1, 2, 4, 8}).
-    #: 1 is the control group's shape.
+    #: How many competing diagnoses a step asks the planner for. One is the control group's
+    #: shape; the arms that compare candidates use 2, 4 or 8.
     n: int = 1
-    #: Sampling temperature for the arms that draw independent samples (plan 02 § 11.2).
-    #: ``None`` means "do not send one" — the provider's default, as every call here has.
+    #: The sampling temperature for arms that take several independent samples. ``None`` means
+    #: send no temperature at all, leaving the provider's default, as every other call does.
     sample_temperature: float | None = None
-    #: Which generator a ``candidate_selector`` decides over (plan 02 § 12, WP-6.2). A plain
-    #: ``str`` — this module imports nothing from its own package — resolved by the registry.
+    #: Which generating arm a selector chooses between the candidates of. A plain string, because
+    #: this module imports nothing from its own package; the registry turns it into an object.
     selector_generator: str = "best_of_n_enumerated"
-    #: How far and how wide a ``search`` walk may go (plan 02 § 14, WP-12.1). REQUESTS only:
-    #: ``agent/search.py`` holds the structural maximums, and the literals here are those
-    #: numbers because this module imports nothing (``TestTheBoundsAreStructural`` pins them).
+    #: How deep and how wide a search walk may go. These are requests only: the real maximums
+    #: live in ``agent/search.py``, which refuses anything larger, and these match them.
     search_depth: int = 2
     search_branch: int = 3
-    #: The ``adaptive`` ladder's escalation thresholds (WP-13.1, WP-13.2), one optional override
-    #: each; ``None`` takes ``strategies/policy.py``'s DECLARED default (ADR 0061). One field per
-    #: threshold rather than a mapping, where a typo would be a silently ignored knob.
+    #: One optional override per uncertainty threshold the ladder compares against; ``None`` takes
+    #: the declared default. A field each, not a mapping, so a misspelling cannot pass unnoticed.
     uncertainty_top1_confidence_floor: float | None = None
     uncertainty_top1_top2_margin_floor: float | None = None
     uncertainty_selector_uncertainty_ceiling: float | None = None

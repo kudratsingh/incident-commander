@@ -17,22 +17,24 @@ from incident_commander.agent.hypothesis import Hypothesis
 
 _LOG: Final = logging.getLogger(__name__)
 
-#: The tool name each kind of thinking is filed under. LLM ROLES, not platform tools: none of
-#: them is in ``TOOL_REGISTRY``, so none can reach the planner's page.
+#: The name the console files each kind of thinking under. These are model roles, not platform
+#: tools: none is in the tool registry, so none can be offered to the planner as something to call.
 PLANNER_TOOL: Final = "investigation_planner"
 REFLECTION_TOOL: Final = "reflection"
 VERIFY_JUDGE_TOOL: Final = "verify_judge"
 
-#: All three, for anything that has to recognise a thinking row without listing them again.
+#: All three names together, for anything that has to recognise a thinking row without
+#: listing them again.
 THINKING_TOOLS: Final[frozenset[str]] = frozenset(
     {PLANNER_TOOL, REFLECTION_TOOL, VERIFY_JUDGE_TOOL}
 )
 
-#: How many ranked entries one thinking row carries — what a person reads at a glance. The
-#: whole ranking travels on the report's own ``hypotheses`` field beside it.
+#: How many ranked diagnoses one thinking row shows, which is what a person can read at a
+#: glance. The full ranking travels beside it on the report's own field.
 RANKING_ENTRIES: Final = 5
 
-#: The platform's cap on a report excerpt, named here so the truncation happens once.
+#: The platform's limit on an excerpt in a report, named here so the trimming happens in one
+#: place rather than at each call site.
 MAX_REASON_CHARS: Final = 280
 
 
@@ -57,18 +59,18 @@ class ObservedThinking:
     run state — a mid-transition report would otherwise carry the last transition's ranking.
     """
 
-    #: One of ``THINKING_TOOLS``.
+    #: Which kind of thinking this was: one of the three names above.
     tool: str
-    #: The ranking this call produced, best first (``InvestigationStep`` normalizes it).
+    #: The ranking this call produced, most likely first; the step schema sorted it.
     hypotheses: tuple[Hypothesis, ...]
-    #: What it decided to do next, or ``None`` where the thinking chose no move — a verify
-    #: verdict judges what already happened.
+    #: What it decided to do next, or ``None`` where this kind of thinking chooses no move: a
+    #: verification verdict judges something that already happened.
     next_action: ThinkingAction | None
-    #: The model's own reason, truncated at ``MAX_REASON_CHARS``.
+    #: The model's own reason for the move, cut to the length limit above.
     reason: str | None
     at: datetime
-    #: What to say in place of a move, for thinking that made none: ``verify 2/4 verified``.
-    #: ``None`` everywhere else, where ``next_action`` is the headline.
+    #: What to show in place of a move, for thinking that made none — for example
+    #: "verify 2/4 verified". ``None`` everywhere else, where the move itself is the headline.
     headline: str | None = None
 
     def ranking(self) -> list[dict[str, Any]]:
@@ -135,8 +137,8 @@ class PlannerLog:
     def __init__(self, *, clock: Callable[[], datetime] = _now) -> None:
         self.clock = clock
         self._sink: Callable[[ObservedThinking], bool] | None = None
-        #: Observations made, and observations nobody could send. Counts, not rails: they exist
-        #: so "the console showed no thinking" has an answer other than a broken frontend.
+        #: How many observations were made, and how many nobody could send. Nothing acts on
+        #: these: they exist so "the console showed no thinking" has a better answer.
         self.observed = 0
         self.dropped = 0
 

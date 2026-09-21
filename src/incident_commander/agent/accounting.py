@@ -92,8 +92,8 @@ class LLMCallAccounting:
 
     role: str
     model: str
-    #: Whether this role's calls reach ``BudgetLedger``. False only for the
-    #: EVALUATOR's own spend; the briefing writer is charged (ADR 0015 § 4).
+    #: Whether this role's calls are charged to the run's budget. False only for the evaluator's
+    #: own spending, which is not the agent's; the briefing writer IS charged.
     charged_to_ledger: bool = True
     input_tokens: int = 0
     output_tokens: int = 0
@@ -103,8 +103,8 @@ class LLMCallAccounting:
     tokens_used: int = 0
     usd_used: Decimal = Decimal("0")
     elapsed_ms: int = 0
-    #: The call was billed and then raised. Recorded, not dropped: a free
-    #: failure is the under-report ADR 0015 exists to prevent.
+    #: The provider billed this call and it then raised. Recorded rather than dropped: treating
+    #: a failure as free is exactly the under-reporting the budget rules exist to prevent.
     failed: bool = False
 
     @classmethod
@@ -137,7 +137,7 @@ class LLMCallAccounting:
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class RoleTotals:
-    """One role's calls, added up. The unit plan 03 § 7.8 asks for."""
+    """Every call one role made, added up: the per-role line a cost report shows."""
 
     role: str
     charged_to_ledger: bool
@@ -162,23 +162,24 @@ class StepAccounting:
 
     iteration: int
     strategy: str
-    #: The provider's count of the context fed to the planner this step. ``0``
-    #: on a canned run, honestly: the fake client bills nothing.
+    #: How many tokens of context the planner was fed this step, as the provider counted them.
+    #: Honestly 0 on an offline run, where the fake client bills nothing.
     planner_input_tokens: int
-    #: The same context in chars (divergence D1) — characters are not tokens.
+    #: The same context measured in characters, so an offline run still has a real number.
+    #: Characters are not tokens and the two are not interchangeable.
     planner_context_chars: int
-    #: How many diagnoses the strategy considered this step. ``baseline``
+    #: How many competing diagnoses the strategy considered this step. The control group
     #: considers one.
     candidates: int
-    #: 1 when a ``candidate_selector`` decided between them, else 0.
+    #: 1 where an extra call chose between those diagnoses this step, otherwise 0.
     selector_calls: int
-    #: 1 when a ``reflection_critic`` read this step, else 0 (WP-9.1).
+    #: 1 where a critic call reviewed this step, otherwise 0.
     critic_calls: int = 0
-    #: 1 when the critique was acted on and a second planner call ran, else 0. Apart from
-    #: ``critic_calls`` because a pass that cost tokens and changed nothing is its own case.
+    #: 1 where the critique led to a second planner call, otherwise 0. Kept apart from the
+    #: count above, because a critique that cost tokens and changed nothing is its own case.
     revised: int = 0
-    #: Branches a ``search`` walk took this step, and the reads the whole walk made, the
-    #: chosen path's included: one shared ceiling paid for all of them (WP-12.1).
+    #: How many branches an exploration took this step, and how many reads the whole walk made,
+    #: the chosen path's included: all of them came out of one shared ceiling.
     search_branches: int = 0
     search_branch_tool_calls: int = 0
 
@@ -220,14 +221,14 @@ class MeteredLLMClient:
                 temperature=temperature,
             )
         except Exception as err:
-            # Only what the failure itself reports: a guess here would be an
-            # over-report invented rather than measured.
+            # Charge only what the failure itself reports it was billed. Estimating here would
+            # be an invented number rather than a measured one.
             usage = getattr(err, "usage", None)
             if isinstance(usage, LLMUsage):
                 self._record(usage, model, started, failed=True)
             raise
-        # ``LLMResult`` IS an ``LLMUsage``, so the happy path is priced by the
-        # same arithmetic as the failing one.
+        # A successful result carries the same usage fields as a failure, so both paths are
+        # priced by exactly the same arithmetic.
         self._record(result, model, started)
         return result
 
@@ -255,7 +256,7 @@ class RunAccounting:
     calls: list[LLMCallAccounting] = field(default_factory=list)
     steps: list[StepAccounting] = field(default_factory=list)
 
-    # --- collection -------------------------------------------------------
+    # --- recording one call or one step -----------------------------------
 
     def record_call(self, call: LLMCallAccounting) -> None:
         self.calls.append(call)
@@ -308,7 +309,7 @@ class RunAccounting:
 
         return sink
 
-    # --- totals -----------------------------------------------------------
+    # --- adding it all up, per role and per run ---------------------------
 
     @property
     def roles(self) -> tuple[RoleTotals, ...]:
@@ -383,7 +384,7 @@ class RunAccounting:
 
     @property
     def search_branches(self) -> int:
-        """Branches taken across the run. 0 for every arm but ``search`` (WP-12.1)."""
+        """How many exploration branches the run took; 0 for every arm but ``search``."""
         return sum(step.search_branches for step in self.steps)
 
     @property
@@ -401,7 +402,7 @@ class RunAccounting:
 
     @property
     def planner_input_tokens(self) -> tuple[int, ...]:
-        """Per step, in order (plan 02 § 17)."""
+        """How much context each planner step was fed, in the order the steps ran."""
         return tuple(step.planner_input_tokens for step in self.steps)
 
     @property

@@ -75,8 +75,8 @@ def _render_arguments(arguments: Mapping[str, Any]) -> str:
     return ", ".join(f"{key}={value!r}" for key, value in arguments.items())
 
 
-#: How the slot block opens, and how its remainder does. Named because ``render_incidents``,
-#: the deterministic grader and the shared prompt rule must all agree on them (ADR 0065).
+#: The two headings the causes block uses. Named once here, because the renderer, the grader and
+#: the shared prompt rule must all use exactly the same words.
 INCIDENTS_HEADING: Final = "Incidents this run named:"
 REMAINDER_HEADING: Final = "Remaining (not addressed by this run):"
 
@@ -125,8 +125,8 @@ def _named_slot(slot: IncidentSlot) -> str:
     return f"{slot.category.value} / {slot.name} (confidence {slot.confidence:.2f})"
 
 
-#: How the attribution slot opens (O-29, ADR 0071). Named for the reason the two headings
-#: above are: three readers must agree on the text.
+#: The heading the recovery-attribution block uses, named here for the same reason as the two
+#: above: three separate readers have to agree on the text.
 ATTRIBUTION_HEADING: Final = "Recovery attribution (from this run's own readings):"
 
 
@@ -168,11 +168,11 @@ class EscalationBriefing(BaseModel):
     alert_summary: str
     escalation_reason: str = ""
     attempted_action: AttemptedAction | None = None
-    # Structural, not prose: the remainder comes from the run's own ranking and attempts,
-    # whatever the writer goes on to say (WP-11.3, ADR 0065).
+    # Computed from the run's own ranking and attempts rather than written by the model, so
+    # what is left unaddressed does not depend on what the writer chooses to say.
     incidents: IncidentSlots = Field(default_factory=IncidentSlots)
-    # Structural for the same reason (O-29, ADR 0071): whose the recovery was is a statement
-    # about two readings, so it is computed, not left to the writer.
+    # Computed for the same reason: whether the action caused the recovery is a statement about
+    # two readings taken either side of it, so it is not left to the writer to judge.
     attribution: AttributionRead | None = None
     investigation_trail: tuple[ProbeSummary, ...] = ()
     findings: str = ""
@@ -191,8 +191,8 @@ def render_briefing(run_state: RunState) -> EscalationBriefing:
         attempted_action=_attempted_action(terminal_marker),
         incidents=incidents_of(run_state),
         attribution=attribution_of(run_state),
-        # ``trail_of`` filters out the escalation marker; its reason is read into
-        # ``escalation_reason`` above, never faked as a probe.
+        # ``trail_of`` leaves the escalation row out of the trail: its reason is already in
+        # ``escalation_reason`` above, and it was never a real probe.
         investigation_trail=trail_of(run_state.evidence),
         findings="",
         recommendation="",
@@ -251,7 +251,8 @@ def _render_alert_summary(run_state: RunState) -> str:
     source = str(alert.get("source", "unknown"))
     severity = str(alert.get("severity", "unknown"))
     fingerprint = alert.get("fingerprint")
-    # Legacy `group`; the tool arg is `consumer_group` (investigation.py too).
+    # Older alerts spell it `group`; the platform's own argument is `consumer_group`, and the
+    # investigation loop accepts both spellings the same way.
     group = alert.get("consumer_group") or alert.get("group")
     parts = [f"source={source}", f"severity={severity}"]
     if fingerprint is not None:

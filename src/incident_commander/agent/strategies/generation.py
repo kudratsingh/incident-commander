@@ -29,16 +29,16 @@ class CandidateGeneration:
     """
 
     run_state: RunState
-    #: The set, ranked by confidence at the schema boundary, so index 0 is the
-    #: top candidate for every generator.
+    #: The candidates, sorted by confidence when they were parsed, so the first entry is the
+    #: top one for every generator.
     candidates: tuple[DiagnosisCandidate, ...]
-    #: The step this generator would have emitted on its own; a selector that fails leaves it
-    #: as what the run does.
+    #: The step this generator would have handed the loop on its own, which is what the run
+    #: falls back to if a selector above it fails.
     proposed_step: InvestigationStep
-    #: The generator's own ``StepRecord``, with ``selector=None``.
+    #: The generator's own research record, which names no selection because it made none.
     record: StepRecord
-    #: Everything the generation billed, ADR-0035 repairs included: a selector can fail AFTER
-    #: this was paid for (ADR 0045).
+    #: Everything this generation was billed, re-asked attempts included, so a selector that
+    #: fails afterwards can still report what the generation cost.
     billed_usage: LLMUsage | None = None
 
 

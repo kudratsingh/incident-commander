@@ -44,15 +44,16 @@ from incident_commander.llm.prompts.loader import load_prompt
 from incident_commander.llm.repair import RepairedCall, call_with_output_repair
 from incident_commander.llm.structured import StructuredOutput
 
-#: Same role string, and so the same trace label, as ``baseline``'s planner call: a cost
-#: breakdown that split the two arms by role would stop being able to compare them.
+#: This arm's planner call is labelled with the same role as ``baseline``'s, so its cost lands in
+#: the same bucket. Labelling the two arms apart would stop their totals being comparable.
 _PLANNER_ROLE: Final[str] = "investigation_planner"
 
-#: The addendum appended to ``investigation_planner.md`` for this arm.
+#: The extra prompt text appended to the shared planner prompt for this arm, which is what asks
+#: for several competing diagnoses instead of one.
 ADDENDUM_PROMPT: Final[str] = "investigation_planner_best_of_n"
 
-#: Validation-failure classes worth telling apart in the record. Matched on the markers
-#: ``agent/candidates.py`` exports and pydantic's length error types, never on prose.
+#: The kinds of invalid candidate set worth telling apart in the record. Matched on markers the
+#: candidates module exports and on Pydantic's own error types, never on wording.
 _REJECTION_MARKERS: Final[tuple[tuple[str, str], ...]] = (
     (DUPLICATE_CANDIDATE_ID, "duplicate_candidate_id"),
     (DUPLICATE_CANDIDATE, "duplicate_candidate"),
@@ -61,13 +62,13 @@ _REJECTION_MARKERS: Final[tuple[tuple[str, str], ...]] = (
     ("too_long", "long_set"),
 )
 
-#: What ``generation_rejections`` records when the message matches no marker.
+#: What the record says when a rejection matches none of the kinds above.
 REJECTION_OTHER: Final[str] = "other"
 
 
 class CandidateStep(StructuredOutput):
-    # No class docstring on this or on the generated subclass below: pydantic puts one into the
-    # JSON schema as ``description``, which the model is shown on ``record_output``.
+    # No docstring on this class or on the generated subclass below: Pydantic copies a class
+    # docstring into the JSON schema's description, which the model itself then reads.
     model_config = ConfigDict(extra="forbid")
 
     candidates: CandidateTuple
@@ -107,8 +108,8 @@ class BestOfNEnumeratedStrategy:
         self.config: Mapping[str, Any] = MappingProxyType(
             {
                 "n": resolved.n,
-                # So no artifact can put this arm beside ``baseline`` without saying that one
-                # of the two saw evidence ids (ADR 0044).
+                # Recorded so no report can put this arm next to ``baseline`` without saying
+                # that only one of the two was shown the evidence ids.
                 "evidence_ids_rendered": True,
             }
         )
@@ -139,30 +140,34 @@ class BestOfNEnumeratedStrategy:
         An exhausted repair propagates — a real finding, never retried into a smaller N.
         ``grounded_in`` wraps the CALL, so an ungrounded citation gets ADR 0035's one re-ask.
         """
-        # 1. Render the context once. A local, because the record measures the string SENT.
+        # 1. Build the planner's context once, held in a local because the record below
+        #    measures the length of the exact string that was sent.
         user_message = format_planner_context(run_state, show_evidence_ids=True)
-        # 2. One call for N candidates, grounded so a bad citation is an ordinary repair.
+        # 2. One call asking for N candidates, made inside ``grounded_in`` so a candidate citing
+        #    evidence this run does not hold is rejected and re-asked like any bad output.
         with grounded_in(run_state.evidence):
             call = call_with_output_repair(
                 ctx.llm_client,
                 system_prompt=self._system_prompt,
                 user_message=user_message,
-                # N candidates, plus the loop's narrowing if it made one: the arm's OWN model is
-                # what gets narrowed, so the candidate bound survives it (ADR 0074).
+                # This arm's own schema, narrowed by the loop if it withdrew the probe option,
+                # so the requirement for N candidates survives that narrowing.
                 output_model=ctx.step_model(self._output_model),
                 model=ctx.model,
             )
-        # 3. The set becomes an ordinary ranking; index 0 is the emitted diagnosis.
+        # 3. Turn the candidate set into an ordinary ranking, whose first entry is the
+        #    diagnosis this step acts on.
         candidates = call.result.output.candidates
         step = InvestigationStep(
             hypotheses=tuple(_hypothesis_of(candidate) for candidate in candidates),
             next_action=call.result.output.next_action,
         )
-        # 4. Charge the call and hand back the set, the step and the record.
+        # 4. Charge the call to the run's budget, then hand back the candidate set, the step
+        #    the loop will run, and the research record.
         updated = run_state.model_copy(
             update={
-                # The same function ``baseline`` uses: it bills a repair's rejected leg too, so
-                # no budget number becomes a lower bound (ADR 0015).
+                # The same charging function ``baseline`` uses: it bills a re-ask's rejected
+                # leg too, so no budget number is quietly a lower bound.
                 "budget": accrue_structured_call(run_state.budget, call, ctx.model),
                 "hypotheses": step.hypotheses,
                 "updated_at": at,
@@ -194,13 +199,13 @@ class BestOfNEnumeratedStrategy:
             iteration=ctx.iteration,
             strategy=self.name,
             model=ctx.model,
-            # One call generated every candidate, so every candidate names the same call;
-            # ``best_of_n_sampled`` differs per candidate.
+            # One call produced every candidate here, so they all record the same call id;
+            # the sampled arm makes one call per candidate and differs.
             candidate_set=tuple(
                 candidate_record_of(candidate, generation_call_id=result.record_id)
                 for candidate in candidates
             ),
-            # No selector: this arm generates, it does not select (plan 02 § 12).
+            # No selection was made: this arm produces candidates and never chooses between them.
             selector=None,
             emitted_step=step,
             hypothesis_state_before=before.hypotheses,
@@ -209,8 +214,8 @@ class BestOfNEnumeratedStrategy:
                 LLMCallRecord(
                     role=_PLANNER_ROLE,
                     model=ctx.model,
-                    # The ledger's own delta (ADR 0015): it includes every rejected-and-billed
-                    # leg, which the counters below cannot see.
+                    # What the run's own budget moved by, which includes every leg that was
+                    # billed and then rejected; the counters below cannot see those.
                     tokens_used=after.budget.tokens_used - before.budget.tokens_used,
                     usd_used=after.budget.usd_used - before.budget.usd_used,
                     input_tokens=result.input_tokens,

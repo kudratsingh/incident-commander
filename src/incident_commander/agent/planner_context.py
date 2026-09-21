@@ -14,22 +14,23 @@ from incident_commander.agent.state import EvidenceEntry, RunState
 from incident_commander.tools.policies import Tier, tools_at_or_below
 from incident_commander.tools.registry import TOOL_REGISTRY, description_of
 
-#: How an evidence line opens when ids are rendered. Named so prompt and test agree.
+#: How an evidence line begins when the ids are shown to the model. Named once, so the prompt
+#: and the tests that read it back cannot disagree.
 EVIDENCE_ID_PREFIX: Final[str] = "evidence_id="
 
-#: Ledger entry for an attempt that did not end the incident (ADR 0056). Named here, in the
-#: lower module, because a second spelling is how one of its readers stops matching.
+#: The ledger row name for a remediation attempt that did not end the incident. Named in this
+#: low-level module because several modules read it, and a second spelling would stop matching.
 ATTEMPT_FAILED_MARKER: Final[str] = "_remediation_attempt_failed"
 
-#: Ledger entry for a plan that cleared its guards, carrying the cause it targets. Read with
-#: the marker above to tell a cause this run acted on from one it only named.
+#: The ledger row name for a plan that passed every guard, carrying the cause it aims at. Read
+#: together with the row above to tell a cause the run acted on from one it merely named.
 PLAN_MARKER: Final[str] = "_planner_plan"
 
-#: Ledger entry for one verify poll's verdict, ``"<verdict>: <reasoning>"`` with
-#: ``{attempt, of}`` on its arguments. Three readers, so one spelling.
+#: The ledger row name for one verification verdict, whose summary reads "<verdict>: <reasoning>"
+#: and whose arguments say which poll of how many it was. Three modules read it, so one spelling.
 VERIFY_JUDGE_MARKER: Final[str] = "_verify_judge"
 
-#: How that block is headed, in the words the model reads.
+#: The heading above that block, in the exact words the model is shown.
 ALREADY_ATTEMPTED_HEADING: Final[str] = "Already attempted in this incident — do NOT repeat:"
 
 
@@ -62,16 +63,19 @@ def format_planner_context(run_state: RunState, *, show_evidence_ids: bool = Fal
     if run_state.evidence:
         lines.append("Evidence so far:")
         for entry in run_state.evidence:
-            # Attempt records are pulled out and rendered whole at the end.
+            # Records of failed attempts are left out here and printed in full at the end,
+            # where nothing truncates them.
             if entry.tool_name == ATTEMPT_FAILED_MARKER:
                 continue
-            # Id first, so a model scanning for something to cite finds it at a fixed offset.
+            # The id comes first on the line, so a model looking for something to cite finds
+            # it in the same place every time.
             cited = f"{EVIDENCE_ID_PREFIX}{entry.evidence_id} " if show_evidence_ids else ""
             lines.append(f"  - {cited}[{entry.tool_name}] {entry.result_summary}")
     else:
         lines.append("Evidence so far: (none)")
     lines.append("")
-    # Read tools only (Tier.READ) — the planner emits RemediateAction rather than acting.
+    # Only read tools are listed: the investigation planner proposes a remediation for the
+    # loop to gate, and never calls an action tool itself.
     lines.append(format_tool_block())
     attempted = render_already_attempted(run_state.evidence)
     if attempted:

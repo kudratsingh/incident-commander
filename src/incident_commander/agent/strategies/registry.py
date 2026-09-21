@@ -20,8 +20,8 @@ from incident_commander.agent.strategies.protocol import InvestigationStrategy
 from incident_commander.agent.strategies.reflection import ReflectionStrategy
 from incident_commander.agent.strategies.search import SearchStrategy
 
-#: One inference block in, one strategy object out. Every factory takes the block, even the
-#: ones with nothing to read from it, so ``create`` needs no special case.
+#: Takes a settings block and returns one strategy. Every factory takes the block, even those
+#: with nothing to read from it, so ``create`` needs no special case for any of them.
 StrategyFactory = Callable[[StrategyKnobs], InvestigationStrategy]
 
 
@@ -60,14 +60,14 @@ class StrategyRegistry:
             raise UnknownStrategyError(str(name), self.names)
         strategy = factory(knobs if knobs is not None else StrategyKnobs())
         if strategy.name != str(name):
-            # A factory under the wrong key would stamp one name in the provenance record
-            # while running another.
+            # A factory registered under the wrong key would store one strategy's name with
+            # the run while actually running another, so refuse instead.
             raise UnknownStrategyError(str(name), self.names)
         return strategy
 
 
-#: The registry the application uses. Adding the next strategy is one line
-#: here plus a ``StrategyName`` member plus the strategy itself.
+#: The registry the application uses. Adding a strategy is one line here, one ``StrategyName``
+#: member, and the strategy itself.
 STRATEGIES: Final[StrategyRegistry] = StrategyRegistry(
     {
         StrategyName.BASELINE.value: BaselineStrategy,

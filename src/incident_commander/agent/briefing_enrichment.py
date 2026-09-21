@@ -68,8 +68,8 @@ def _format_context(briefing: EscalationBriefing) -> str:
         f"Final state: {briefing.final_state.value}",
         f"Alert: {briefing.alert_summary}",
     ]
-    # Deterministic fields the writer summarizes, never invents: a writer blind to the
-    # attempted action would re-recommend it.
+    # These lines are computed, and the model is asked to summarize them rather than invent
+    # them: a writer that could not see the attempted action would recommend it again.
     if briefing.escalation_reason:
         lines.append(f"Why the run ended: {briefing.escalation_reason}")
     if briefing.attempted_action is not None:
@@ -78,11 +78,11 @@ def _format_context(briefing: EscalationBriefing) -> str:
             f"without checking its effect first): {briefing.attempted_action.tool} "
             f"{briefing.attempted_action.arguments}"
         )
-    # Slots before the trail: the remainder block is the one part of the handoff the writer
-    # may not contradict.
+    # The causes block comes before the trail, because what this run left unaddressed is the
+    # one part of the handoff the writer must not contradict.
     lines.extend(render_incidents(briefing.incidents))
-    # Whose recovery this was is run state, so the writer is shown it rather than asked to
-    # infer it from the trail (ADR 0071).
+    # Whether the action caused the recovery is already decided from the run's readings, so the
+    # writer is shown that verdict rather than asked to work it out from the trail.
     lines.extend(render_attribution(briefing.attribution))
     lines.extend(render_trail(briefing.investigation_trail))
     lines.append(f"Budget used: {briefing.budget_used}")

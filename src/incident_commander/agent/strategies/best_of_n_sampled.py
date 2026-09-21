@@ -44,12 +44,12 @@ from incident_commander.llm.repair import (
     usage_of,
 )
 
-#: Same role as every other planner call, so a per-role cost breakdown can compare this arm
-#: with ``baseline`` instead of splitting them apart.
+#: This arm's calls are labelled with the same role as every other planner call, so a per-role
+#: cost breakdown can compare it with ``baseline`` rather than splitting the two apart.
 _PLANNER_ROLE: Final[str] = "investigation_planner"
 
-#: The temperature an arm built without knobs samples at; the configured value is
-#: ``Settings.sample_temperature``.
+#: The sampling temperature used when this arm is built with no settings of its own; a run
+#: normally takes the configured ``Settings.sample_temperature`` instead.
 DEFAULT_SAMPLE_TEMPERATURE: Final[float] = 1.0
 
 
@@ -90,10 +90,11 @@ class BestOfNSampledStrategy:
         self.config: Mapping[str, Any] = MappingProxyType(
             {
                 "n": resolved.n,
-                # A string, so a reader need not trust a float's JSON round-trip.
+                # Stored as a string so a reader of the record need not trust a float
+                # surviving a JSON round trip unchanged.
                 "sample_temperature": str(Decimal(str(self._temperature))),
-                # Stated rather than omitted: no ``EvidenceRef`` in this arm's schema, so it is
-                # NOT comparable with the enumerated arm here (ADR 0044).
+                # Written out rather than left absent: this arm's schema has no place to cite
+                # evidence, so its candidates are not comparable with the enumerated arm's.
                 "evidence_ids_rendered": False,
             }
         )
@@ -203,7 +204,8 @@ class BestOfNSampledStrategy:
             strategy=self.name,
             model=ctx.model,
             candidate_set=candidates,
-            # No selector: this arm draws, and selects no further than the most confident draw.
+            # No selection was made: this arm takes several independent samples and goes no
+            # further than picking the most confident of them.
             selector=None,
             emitted_step=step,
             hypothesis_state_before=before.hypotheses,
@@ -229,9 +231,10 @@ class BestOfNSampledStrategy:
                 + call.result.cache_creation_tokens
                 for call in calls
             ),
-            # Rendered once, SENT N times: this field is what the arm paid for context.
+            # The context is built once but sent with all N calls, so what the arm paid for
+            # context is that length multiplied by N.
             planner_context_chars=self._n * (len(self._system_prompt) + len(user_message)),
-            # Rejections are per sample, in sample order.
+            # One entry per sample that had to be re-asked, in the order the samples were taken.
             generation_rejections=tuple(
                 f"sample_{index + 1}_repaired"
                 for index, call in enumerate(calls)

@@ -1,8 +1,7 @@
 """Remediation loop: plan → execute → verify.
 
-``make_llm_plan`` (PLANNING) emits a ``RemediationPlan``: one Tier-1 action, one verify probe.
-``make_remediate`` executes it under ``sha256(incident_id|action_tool|sorted_json_args)[:32]``.
-``make_llm_verify`` probes, judges the result, and lands RESOLVED or ESCALATED.
+``make_llm_plan`` emits a ``RemediationPlan`` (one Tier-1 action, one verify probe),
+``make_remediate`` executes it under a deterministic idempotency key, ``make_llm_verify`` judges.
 """
 
 from __future__ import annotations
@@ -89,78 +88,48 @@ Tier1ToolName = Literal[
 
 _IDEMPOTENCY_KEY_LEN: Final[int] = 32
 
-# How many times one PLANNING transition may refuse a plan whose verify probe cannot observe
-# the acted-on resource. One, not the investigation loop's two (see
-# ``investigation._MAX_SUBJECT_PROBE_REFUSALS``): PLANNING is a single LLM call.
+# Times one PLANNING transition may refuse a plan whose verify probe cannot observe the acted-on
+# resource. One, not the investigation loop's two: PLANNING is a single LLM call.
 _MAX_VERIFY_TARGET_REFUSALS: Final[int] = 1
 
-# How many times one PLANNING transition may refuse a plan replaying a job whose dead-letter
-# row nobody read. One: the planner cannot make a read, so the only repair worth an ask is
-# dropping the ids it has no row for. The second refusal escalates, naming the skipped read.
+# Same, for a plan replaying a job whose dead-letter row nobody read. One: the planner cannot make
+# a read, so the only repair worth an ask is dropping the ids it has no row for.
 _MAX_UNREAD_ROW_REFUSALS: Final[int] = 1
 
-# And one for the category half (ADR 0028): when the run HAS read the DLQ but the plan picked
-# a different slice, the repair is to act on the slice in evidence, which the refusal names.
-# Non-inert over a tool set DISJOINT from the by-id guard's, so no plan spends both budgets.
+# And one for the category half (ADR 0028): the run read the DLQ but the plan picked a different
+# slice, so the repair is to act on the slice in evidence. Its tool set is DISJOINT from the
+# by-id guard's, so no plan spends both budgets.
 _MAX_UNLISTED_CATEGORY_REFUSALS: Final[int] = 1
 
-# And one for the question upstream of the other four (ADR 0032): does this action address
-# what the alert is about at all? PR #177's subject guard requires the subject to have been
-# PROBED, never that the ACTION target it — two live runs read the right thing and remediated
-# something else (`adcdcadd94a3` remediate_consumer_lag_success 2026-08-31; `a0aa257bf865`
-# dlq_human_required_escalates 2026-09-08), both admitted by every other guard here.
-#
-# WORST CASE GROWS BY ONE PLANNER CALL: this guard's tool set OVERLAPS the other four's, so one
-# PLANNING transition can now spend five planner calls. No tool-call budget is spent and
-# ADR 0008 still allows exactly one action.
+# And one for the question upstream of the other four (ADR 0032): does this action address what the
+# alert is about at all? The subject guard requires the subject to have been PROBED, never that the
+# ACTION target it, and two live runs read the right thing and remediated something else.
 _MAX_SUBJECT_TARGET_REFUSALS: Final[int] = 1
 
 # And one for the argument half (ADR 0030): a plan that got the reasoning right and fumbled the
-# transcription. Live run `5c8895771fbd` (`dlq_wait_and_replay_success`) emitted
-# `97d91272-0000-0000-0000-000000000000` for `97d91272-9774-5b8e-980b-f0d2fa6ed619` while its
-# own rationale quoted the id correctly, and graded red for a copying slip.
-#
-# One, and the refusal must NOT correct the id for the model: substituting the nearest evidence
-# id would be the harness guessing which job to replay. It offers candidates; the plan that
-# executes is one the model itself emitted.
+# transcription. The refusal must NOT correct the id — substituting the nearest evidence id would
+# be the harness guessing which job to replay — so it offers candidates and the model re-emits.
 _MAX_ARGUMENT_REFUSALS: Final[int] = 1
 
-# Refused-plan marker. Underscore-prefixed: excluded from the trail, spends no tool budget.
+# One marker per refusal, each underscore-prefixed so it stays out of the trail and spends no tool
+# budget. Separate names because each carries different arguments and a different diagnosis, and an
+# archive has to be able to ask which question a plan failed.
 _PLAN_REFUSED_MARKER: Final[str] = "_plan_refused"
-# Same convention for the read-before-act refusal. A separate marker because its arguments and
-# its diagnosis differ: "acted on an unread row", not "verified the wrong thing".
 _PLAN_REFUSED_UNREAD_ROW_MARKER: Final[str] = "_plan_refused_unread_row"
-# And again for the read-before-act refusal's other half (ADR 0028): a replay naming a
-# CATEGORY rather than rows. "You swept a category nobody listed" is its own diagnosis.
 _PLAN_REFUSED_UNLISTED_CATEGORY_MARKER: Final[str] = "_plan_refused_unlisted_category"
-# Fourth marker (ADR 0030). Carries the rejected values AND the candidates offered back, so an
-# archive can tell "shown three ids, emitted a fourth" from "shown nothing".
 _PLAN_REFUSED_ARGUMENT_MARKER: Final[str] = "_plan_refused_argument"
-# Fifth marker (ADR 0032). Carries the alert field naming the subject, its value and the target
-# test that failed, so an archive can be asked "was the action even aimed at the incident?".
 _PLAN_REFUSED_SUBJECT_TARGET_MARKER: Final[str] = "_plan_refused_subject_target"
-# Sixth marker (O-29, ADR 0071), and the one refusal here that is TERMINAL: the fault the action
-# would fix already reads gone in this run's own newest reading of the resource, so there is no
-# re-plan to ask for. It names itself for the reason the five above do — an archive has to be
-# able to ask "why did this run act on nothing?" — and carries the reading that decided it.
+# The one refusal here that is TERMINAL (O-29, ADR 0071): the fault already reads gone in this
+# run's own newest reading, so there is no re-plan to ask for.
 _PLAN_REFUSED_CLEARED_MARKER: Final[str] = "_plan_refused_cleared_before_action"
 
-# The failed attempt itself (ADR 0056) is ``planner_context.ATTEMPT_FAILED_MARKER``, named
-# there because both planner contexts render it. Underscore-prefixed like every other marker,
-# so it spends no tool budget and stays out of the briefing trail; ``_attempted_calls`` never
-# reads it either — the executed call is on the ledger under its own tool name.
-#
-# How much of the verify reading the attempt record quotes. A whole DLQ listing would crowd
-# out the rest of the context; the reading itself is on the ledger under the probe's own name.
+# How much of the verify reading an attempt record (``ATTEMPT_FAILED_MARKER``, ADR 0056) quotes: a
+# whole DLQ listing would crowd out the context, and the reading is on the ledger anyway.
 _ATTEMPT_READING_CHARS: Final[int] = 400
 
-# Every marker ``_format_plan_context`` must render whole and last. Derived membership, not a
-# match on one name: the renderer once matched ``_PLAN_REFUSED_MARKER`` alone, so a refusal
-# under any other name was cut by the 200-character truncation. A new shape must be added here.
-#
-# ``_PLAN_REFUSED_CLEARED_MARKER`` is deliberately NOT a member: that refusal escalates in the
-# same transition, so no planner ever reads a context it could be rendered into, and listing it
-# would promise a steer this guard does not give (O-29's answer there is "do not act at all").
+# Every marker ``_format_plan_context`` must render whole and last. A SET, not a match on one
+# name: the renderer once matched ``_PLAN_REFUSED_MARKER`` alone, so any other refusal was
+# truncated. ``_PLAN_REFUSED_CLEARED_MARKER`` is NOT a member — it escalates in the same breath.
 _PLAN_REFUSAL_MARKERS: Final[frozenset[str]] = frozenset(
     {
         _PLAN_REFUSED_MARKER,
@@ -175,17 +144,15 @@ _PLAN_REFUSAL_MARKERS: Final[frozenset[str]] = frozenset(
 # Eight = a UUID's first block; the slip this exists for began at character 10.
 _MIN_DID_YOU_MEAN_PREFIX: Final[int] = 8
 
-# A canonical UUID as the platform's input schema defines it (8-4-4-4-12 hex). NOT semantic:
-# `97d91272-0000-0000-0000-000000000000` matches happily, so it cannot replace the evidence
-# check; both report through the same refusal path.
+# A canonical UUID as the platform's input schema defines it. NOT semantic — an all-zero tail
+# matches happily — so it cannot replace the evidence check; both report the same refusal.
 _CANONICAL_UUID: Final[re.Pattern[str]] = re.compile(
     r"\A[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\Z"
 )
 
 
-# How the second refusal opens, per cause: a human reading the briefing's
-# ``escalation_reason`` needs to know whether the planner wrote something that could never be
-# an id or something that merely is not one of THESE ids.
+# How the second refusal opens, per cause: a human reading ``escalation_reason`` needs to know
+# whether the planner wrote something that could never be an id, or merely not one of THESE ids.
 _ARGUMENT_ESCALATION_CLAUSE: Final[dict[str, str]] = {
     "malformed": "wrote a resource identifier that is not the shape the platform declares",
     "unsourced": "named a resource that is not one this run read",
@@ -195,8 +162,8 @@ _ARGUMENT_ESCALATION_CLAUSE: Final[dict[str, str]] = {
 class ArgumentRefusal(NamedTuple):
     """A plan whose resource arguments are wrong in a way one re-ask repairs.
 
-    Returned by ``_plan_once`` instead of an escalated ``RunState``, so the caller's loop
-    can spend a refusal budget on it. ``reason`` is shared by refusal and escalation.
+    Returned by ``_plan_once`` instead of an escalated ``RunState``, so the caller's loop can
+    spend a refusal budget on it. ``reason`` is shared by refusal and escalation.
     """
 
     kind: Literal["malformed", "unsourced"]
@@ -223,25 +190,15 @@ class VerifyProbe(NamedTuple):
     identity is the entire requirement; there is no value to match."""
 
 
-# Single source of truth for Tier-1 action → the read that observes what it changed. Sibling of
-# ``investigation.ALERT_SUBJECT_PROBES``, which asks the same question one step earlier.
-#
-# TOTAL over ``Tier1ToolName``: an empty tuple is a *declared* inert entry, and
-# ``tests/unit/test_policies.py::TestVerifyProbeForAction`` pins the totality.
-#
-# Not merely "the verify leg must name the action's resource" — ``_misdirected_verify_args``
-# says that and is inert when the verify leg names NO resource. On 2026-09-07 a live run
-# verified `invalidate_cache_key` with `get_redis_health`, whose counters are server-wide; the
-# probe that would have answered, `get_cache_key_info`, was already in the evidence trail.
+# Single source of truth for Tier-1 action → the read that observes what it changed. TOTAL over
+# ``Tier1ToolName``, with an empty tuple as a DECLARED inert entry. Stronger than
+# ``_misdirected_verify_args``, which is inert when the verify leg names nothing at all.
 VERIFY_PROBE_FOR_ACTION: Final[dict[str, tuple[VerifyProbe, ...]]] = {
-    # v0.6.0 shipped get_cache_key_info (plat #146/#182) to check a key before and after.
     "invalidate_cache_key": (VerifyProbe("get_cache_key_info", "key"),),
     "restart_consumer_group": (VerifyProbe("get_consumer_lag", "consumer_group"),),
-    # pause_dag names `root_job_id`; get_dag_state names `job_id`. Field
-    # names need not match across legs — the VALUE is what must line up.
+    # pause_dag names `root_job_id`, get_dag_state `job_id`: the VALUE must line up, not the field.
     "pause_dag": (VerifyProbe("get_dag_state", "job_id"),),
-    # A DLQ row is observed only by the listing; a DAG read serves a DAG
-    # root (remediate_runaway_saga).
+    # A DLQ row is observed only by the listing; a DAG read serves a DAG root.
     "mark_dlq_permanent": (
         VerifyProbe("list_dlq_messages", None),
         VerifyProbe("get_dag_state", "job_id"),
@@ -277,33 +234,22 @@ class SourceRow(NamedTuple):
     tool to call."""
 
 
-# Single source of truth for "which read must have SEEN this resource before an action may
-# touch it": before you replay a dead-lettered job, its dead-letter row must be in evidence,
-# because the row is the only place its `remediation_hint` exists. `get_dag_state` shows only
-# `status: dead_letter`, and the platform's rule is "A null hint is UNKNOWN, not replay-safe".
-#
-# The guard requires the ROW, never a hint VALUE: choosing between `wait_and_replay` and
-# `replay_safe` is the prompt's job.
-#
-# TOTAL over ``Tier1ToolName``: ``tests/unit/test_policies.py::TestSourceRowForAction`` fails on
-# any Tier-1 tool with no entry. The listing is named because two guards read it — this map's
-# `replay_dlq_by_ids` entry, and ADR 0032's check via ``_row_source_for_subject``.
+# Single source of truth for "which read must have SEEN this resource before an action may touch
+# it": a dead-letter row is the only place its `remediation_hint` exists, and a null hint is
+# UNKNOWN rather than replay-safe. The guard requires the ROW, never a hint VALUE.
 DLQ_ROW_SOURCE: Final[SourceRow] = SourceRow("list_dlq_messages", "items", "id", "remediation_hint")
 
 
 SOURCE_ROW_FOR_ACTION: Final[dict[str, tuple[SourceRow, ...]]] = {
     "replay_dlq_by_ids": (DLQ_ROW_SOURCE,),
-    # Declared inert: the two bulk replays name a category or a job_type and no
-    # ids, so `_resource_values` yields nothing to look for. Their equivalent
-    # CATEGORY rule is a different check, filed as WO-R2-143.
+    # Declared inert: the bulk replays name a category or a job_type and no ids, so
+    # `_resource_values` yields nothing to look for. Their CATEGORY rule is the map below.
     "replay_dlq_by_category": (),
     "replay_dlq_messages": (),
-    # `mark_dlq_permanent` stays inert because fencing is the conservative
-    # direction — it stops auto-replay, it re-runs nothing — so acting on an
-    # unread row cannot cause the harm this guard exists to prevent. WO-R2-144.
+    # Inert because fencing is the conservative direction — it stops auto-replay and re-runs
+    # nothing — so an unread row cannot cause the harm this guard prevents (WO-R2-144).
     "mark_dlq_permanent": (),
-    # No listing classifies a cache key, a consumer group or a DAG root for
-    # safety; there is no row to read, so there is nothing to require.
+    # No listing classifies a cache key, a consumer group or a DAG root, so nothing to require.
     "invalidate_cache_key": (),
     "restart_consumer_group": (),
     "pause_dag": (),
@@ -339,23 +285,13 @@ class SourceListing(NamedTuple):
     filtered and the action did not is enough to refuse."""
 
 
-# Single source of truth for "which read must have COVERED what this action is about to sweep".
-# Sibling of ``SOURCE_ROW_FOR_ACTION`` for the call shape that names no rows: a category replay
-# names a filter the platform expands at execution time, and ``SOURCE_ROW_FOR_ACTION`` is inert
-# there (no resource arguments), as ADR 0027 said when it filed WO-R2-143.
-#
-# Coverage, not row presence: an unfiltered reading covers every slice, one filtered to exactly
-# the action's slice covers it, one filtered elsewhere covers nothing. The claim is about what
-# the agent LOOKED at, so a slice emptied since the read is still covered.
-#
-# TOTAL over ``Tier1ToolName``: ``tests/unit/test_policies.py::TestSourceListingForAction``
-# fails on any Tier-1 tool with no entry.
+# Single source of truth for "which read must have COVERED what this action is about to sweep" —
+# ``SOURCE_ROW_FOR_ACTION``'s sibling for a call naming no rows (ADR 0027). COVERAGE, not row
+# presence, and the claim is about what the agent LOOKED at, so a slice emptied since is covered.
 SOURCE_LISTING_FOR_ACTION: Final[dict[str, tuple[SourceListing, ...]]] = {
-    # `category` is the slice; `job_type` narrows it further on both sides, and the
-    # second scope is not decoration: a read filtered to one job_type is strictly
-    # narrower than a category replay that names no job_type. A missing `category`
-    # reads as "spans every category" and so demands an unfiltered reading — the
-    # fail-closed choice, and `ReplayDlqByCategoryInput` rejects it later anyway.
+    # `job_type` is not decoration: a read filtered to one job_type is strictly narrower than a
+    # category replay naming none. A missing `category` spans every category, so it demands an
+    # unfiltered reading — the fail-closed choice.
     "replay_dlq_by_category": (
         SourceListing(
             "list_dlq_messages",
@@ -367,10 +303,9 @@ SOURCE_LISTING_FOR_ACTION: Final[dict[str, tuple[SourceListing, ...]]] = {
             ),
         ),
     ),
-    # The unfilterable sweep: `job_type` and nothing else, and it replays
-    # uncategorised (null-hint) rows too. `action_field=None` on the hint scope says
-    # so — only an unfiltered reading can cover it. Declaring it here does NOT make
-    # it permissible: every DLQ scenario still lists it in `forbidden_action_tools`.
+    # The unfilterable sweep: `job_type` and nothing else, and it replays uncategorised rows too,
+    # which `action_field=None` says. Declaring it does NOT make it permissible — every DLQ
+    # scenario still lists it in `forbidden_action_tools`.
     "replay_dlq_messages": (
         SourceListing(
             "list_dlq_messages",
@@ -382,9 +317,8 @@ SOURCE_LISTING_FOR_ACTION: Final[dict[str, tuple[SourceListing, ...]]] = {
             ),
         ),
     ),
-    # Declared inert: these name rows, so `SOURCE_ROW_FOR_ACTION` asks the question
-    # ("is that row in evidence?") and a coverage question would refuse a correct
-    # by-id replay whose listing was filtered elsewhere.
+    # Declared inert: these name rows, so `SOURCE_ROW_FOR_ACTION` asks the question, and a
+    # coverage question would refuse a correct by-id replay off a listing filtered elsewhere.
     "replay_dlq_by_ids": (),
     "mark_dlq_permanent": (),
     # These three name one resource each; nothing here is a filter.
@@ -395,10 +329,8 @@ SOURCE_LISTING_FOR_ACTION: Final[dict[str, tuple[SourceListing, ...]]] = {
 
 
 class RemediationPlan(StructuredOutput):
-    """One remediation plan: action + verification.
-
-    Both tool fields are Literal-typed against the registry; ``make_llm_plan`` re-checks tier.
-    """
+    """One remediation plan: action + verification. Both tool fields are Literal-typed against
+    the registry, and ``make_llm_plan`` re-checks tier."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -424,11 +356,8 @@ class RemediationPlan(StructuredOutput):
         min_length=1,
         description="What the verify tool's response should look like if the fix worked.",
     )
-    # Somewhere for a prompt rule asking the planner to SHOW ITS WORK to write the answer:
-    # ``model_config`` forbids extra keys, so an instruction with no field for it raises
-    # ValidationError (the ``wait_and_replay`` delay rule in ``prompts/remediation_planner.md``).
-    # Optional so the canned plan fixtures stay valid. Nothing grades it — what IS graded is
-    # ``expected_action_arguments`` on ``delay_seconds``.
+    # Somewhere for a prompt rule asking the planner to SHOW ITS WORK: ``extra="forbid"`` means an
+    # instruction with no field for it raises. Optional, so canned plan fixtures stay valid.
     action_rationale: str | None = Field(
         default=None,
         description=(
@@ -440,11 +369,9 @@ class RemediationPlan(StructuredOutput):
     )
 
 
-#: The judge role's NAME and the prompt file its rubric lives in. Plan 02 § 3 is normative: the
-#: role is ``action_verifier``; ``verification_judge`` is the file it has always loaded, and
+#: The judge role's NAME and the prompt file its rubric lives in. The two differ on purpose:
 #: renaming the file would move a snapshot hash and rewrite the `_verify_judge` marker 156
-#: committed trajectories carry. Named once each because the calibration harness must load and
-#: hash the same rubric bytes the run loads (plan 03 § 110).
+#: committed trajectories carry. Named once each, so the calibration harness hashes the same bytes.
 ACTION_VERIFIER_ROLE: Final[str] = "action_verifier"
 VERIFICATION_JUDGE_PROMPT: Final[str] = "verification_judge"
 
@@ -463,11 +390,9 @@ class VerificationJudgment(StructuredOutput):
 
 
 def build_idempotency_key(incident_id: str, action_tool: str, arguments: dict[str, Any]) -> str:
-    """Deterministic sha256 of incident + tool + args (idempotency_key excluded).
-
-    Same (incident, tool, args) → same key, so a retry is deduped platform-side.
-    """
-    # Never include idempotency_key in the hash (it's what we're generating).
+    """Deterministic sha256 of incident + tool + args, so a retry with the same (incident, tool,
+    args) produces the same key and the platform dedupes it."""
+    # Never include idempotency_key in the hash: it is what we are generating.
     args_for_hash = {k: v for k, v in arguments.items() if k != "idempotency_key"}
     payload = f"{incident_id}|{action_tool}|{json.dumps(args_for_hash, sort_keys=True)}"
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:_IDEMPOTENCY_KEY_LEN]
@@ -485,9 +410,7 @@ def make_llm_plan(
     """Bind the LLM to the PLANNING transition: hypothesis + evidence → a ``RemediationPlan``.
 
     Non-Tier-1 actions are rejected, then every pre-execution guard runs (ADR 0024): three
-    escalate, five refuse and re-ask once (ADR 0030, 0032, 0027, 0028, 0025), and one refuses
-    under its own name and escalates in the same breath, because its finding is that no action
-    is left to take (ADR 0071). ``max_attempts`` is ``MAX_REMEDIATION_ATTEMPTS`` (ADR 0056).
+    escalate, five refuse and re-ask once, and one does both because no action is left (ADR 0071).
     """
 
     def transition_plan(run_state: RunState, at: datetime) -> RunState:
@@ -496,11 +419,8 @@ def make_llm_plan(
                 run_state, at, "planning entered with no hypotheses on RunState"
             )
         if run_state.remediation_attempts >= max_attempts:
-            # A real limit since ADR 0056, not the unreachability assertion ADR 0008 made:
-            # VERIFYING may now hand back to INVESTIGATING, so PLANNING can be entered with
-            # attempts already spent. VERIFYING declines the edge at the cap, so this fires
-            # on a run whose graph or RunState was built some other way — and it is the
-            # backstop either way, which is why the number is the same one.
+            # A real limit since ADR 0056: VERIFYING may hand back to INVESTIGATING, so PLANNING
+            # can be entered with attempts spent. The backstop, against the same number.
             return _escalate_remediation(
                 run_state,
                 at,
@@ -511,8 +431,7 @@ def make_llm_plan(
             )
         remaining_calls = run_state.budget.max_tool_calls - run_state.budget.tool_calls_used
         if remaining_calls < 2:
-            # An action we can't afford to verify is worse than no action.
-            # Escalate before spending planner tokens or executing anything.
+            # An action nobody can afford to verify is worse than no action.
             return _escalate_remediation(
                 run_state,
                 at,
@@ -556,24 +475,16 @@ def make_llm_plan(
                 return outcome
             plan = outcome
 
-            # ADR 0056's structural half, and it escalates rather than re-asking: an
-            # identical call is not a plan that needs correcting, it is the first attempt
-            # again with worse justification (ADR 0008's own words). Compared on the WIRED
-            # form, because ``wire_arguments`` default-fills every omitted optional — two
-            # plans one `delay_seconds` apart on paper are one call on the wire.
-            # No ``attempted_tool`` on the marker: this call was never sent, so recording it
-            # as an attempt would have the SAFETY dimension grade a write that never
-            # happened. The reason names the tool in words instead.
+            # ADR 0056's structural half, and it escalates rather than re-asking: an identical
+            # call is the first attempt again with worse justification. Compared on the WIRED
+            # form, because ``wire_arguments`` default-fills every omitted optional.
             repeated = _repeated_attempt(plan, run_state)
             if repeated is not None:
                 return _escalate_remediation(run_state, at, repeated)
 
-            # FIRST of the plan-shape guards (ADR 0032), and the order is the priority
-            # order of the diagnoses: "not aimed at the incident" is upstream of asking
-            # whether a correctly-aimed plan was read for, scoped for or checkable. On
-            # live run `a0aa257bf865` every other gate here passed. After the argument
-            # guards inside `_plan_once`, though: a mis-transcribed id names no resource,
-            # so diagnose the typo first (ADR 0030).
+            # FIRST of the plan-shape guards, because the order IS the priority of the diagnoses
+            # (ADR 0032) — but after `_plan_once`'s argument guards, since a mis-transcribed id
+            # names no resource and the typo is the better diagnosis (ADR 0030).
             missed_subject = _unaddressed_alert_subject(plan, run_state)
             if missed_subject is not None:
                 if subject_refusals_spent >= _MAX_SUBJECT_TARGET_REFUSALS:
@@ -599,20 +510,15 @@ def make_llm_plan(
                     )
                 continue
 
-            # SECOND, and the only guard here that never re-asks (O-29, ADR 0071): is the
-            # fault this action would fix still there? After the subject guard, because on a
-            # plan aimed at the wrong resource this question would be asked of furniture; and
-            # before the three read-before-act guards, because "there is nothing left to do"
-            # outranks every question about how well the doing was prepared. The owner's
-            # answer when the resource already reads healthy is not a better plan, it is no
-            # plan: report that it cleared on its own and escalate, cause unknown.
+            # SECOND, and the only guard here that never re-asks (O-29, ADR 0071): is the fault
+            # this action would fix still there? When the resource already reads healthy the
+            # answer is no plan at all — report that it cleared on its own and escalate.
             cleared = _cleared_before_action(plan, run_state)
             if cleared is not None:
                 return _refuse_cleared_before_action(run_state, at, plan, cleared)
 
-            # Before the verify-leg guard, by priority: "should this action happen at
-            # all" outranks "how would you check it". The other order would send the
-            # planner to fix the checking of a replay it must not make.
+            # Before the verify-leg guard, by priority: "should this action happen at all"
+            # outranks "how would you check it", or the planner fixes a replay it must not make.
             unread = _unread_action_rows(plan, run_state)
             if unread is not None:
                 source, unread_ids = unread
@@ -638,9 +544,8 @@ def make_llm_plan(
                     )
                 continue
 
-            # The other half of the same rule (ADR 0028): a call naming a category is
-            # still an action on rows nobody read. Non-inert over a disjoint tool set,
-            # so at most one of the two fires on any plan.
+            # The other half of the same rule (ADR 0028): a call naming a category is still an
+            # action on rows nobody read. Disjoint tool sets, so at most one of the two fires.
             unlisted = _unlisted_action_scope(plan, run_state)
             if unlisted is not None:
                 listing, readings = unlisted
@@ -669,9 +574,8 @@ def make_llm_plan(
             unobserved = _unobserved_action_resource(plan)
             if not unobserved:
                 break
-            # Refuse and steer, don't escalate: the planner is sent back with the probe
-            # it should have picked named for it. Same shape as the investigation loop's
-            # ALERT_SUBJECT_PROBES handoff refusal (WO-R2-15 follow-up #177).
+            # Refuse and steer, never escalate: the planner is sent back with the probe it
+            # should have picked named for it.
             if refusals_spent >= _MAX_VERIFY_TARGET_REFUSALS:
                 values = _resource_values(plan.action_tool, plan.action_arguments)
                 acted = ", ".join(sorted(values))
@@ -707,8 +611,8 @@ def make_llm_plan(
         return run_state.model_copy(
             update={
                 "state": IncidentState.REMEDIATING,
-                # Stored as dict so state.py stays free of remediation-loop imports.
-                # REMEDIATING + VERIFYING re-validate via ``_load_plan``.
+                # A dict, so state.py stays free of remediation imports; REMEDIATING and
+                # VERIFYING re-validate it through ``_load_plan``.
                 "remediation_plan": plan.model_dump(mode="json"),
                 "evidence": (*run_state.evidence, entry),
                 "updated_at": at,
@@ -727,9 +631,8 @@ def _plan_once(
 ) -> tuple[RunState, RemediationPlan | RunState | ArgumentRefusal]:
     """One planner call plus every guard that runs on its own output.
 
-    Three outcomes by type: ``RemediationPlan`` (survived), ``RunState`` (a guard escalated),
-    ``ArgumentRefusal`` (one re-ask repairs a resource id, ADR 0030). The two argument checks
-    stay here rather than in the caller's loop: they must run before ``_misdirected_verify_args``.
+    Three outcomes by type: the plan survived, a guard escalated, or one re-ask repairs a resource
+    id (ADR 0030). The argument checks stay here, before ``_misdirected_verify_args``.
     """
     try:
         call = call_with_output_repair(
@@ -747,9 +650,8 @@ def _plan_once(
             run_state, at, f"{REMEDIATION_PLANNER_INVALID}: {err}"
         )
 
-    # Charge the call the moment it returns, BEFORE the plan is judged: a rejected plan is
-    # still a billed call, and ADR 0015 says the meter may over-report and never under-report.
-    # Since ADR 0035 the same holds for a re-asked leg whose output did not parse.
+    # Charged the moment it returns, BEFORE the plan is judged: a rejected plan is still a billed
+    # call, and the meter may over-report but never under-report (ADR 0015).
     run_state = run_state.model_copy(
         update={"budget": accrue_structured_call(run_state.budget, call, model)}
     )
@@ -779,17 +681,15 @@ def _plan_once(
             "at wire time, so the call would target that default's "
             "resource instead of this incident's."
         )
-    # These two REFUSE rather than escalate (ADR 0030), so they return rather than calling
-    # ``refuse``. Position is load-bearing: they must run before ``_misdirected_verify_args``,
-    # because a mangled action id makes a correct verify id look misdirected.
+    # These two REFUSE rather than escalate (ADR 0030). Position is load-bearing: before
+    # ``_misdirected_verify_args``, because a mangled action id makes a correct verify id look bad.
     malformed = _malformed_resource_args(plan)
     if malformed:
         return run_state, _argument_refusal(plan, run_state, "malformed", malformed)
     unsourced = _unsourced_resource_args(plan, _evidence_value_corpus(run_state))
     if unsourced:
-        # Copy, don't re-type: a resource name the platform never uttered is a
-        # hallucination risk. Since ADR 0030 the first offence buys a re-ask
-        # carrying the candidates.
+        # Copy, do not re-type: a resource name the platform never uttered is a hallucination
+        # risk, and the first offence buys a re-ask carrying the candidates (ADR 0030).
         return run_state, _argument_refusal(plan, run_state, "unsourced", unsourced)
     misdirected = _misdirected_verify_args(plan)
     if misdirected:
@@ -812,10 +712,8 @@ def _tier_1_tools() -> frozenset[str]:
 def _wired_call_id(tool: str, arguments: Mapping[str, Any]) -> str | None:
     """``tool`` plus the hash of its WIRED arguments, or ``None`` when they do not validate.
 
-    The comparison ADR 0056 refuses a repeat on. ``idempotency_key`` is dropped from both
-    sides: it is a deterministic function of (incident, tool, args), so keeping it would
-    compare the same thing twice, and a call that differs in nothing else mints the same key
-    and would be replayed from the platform's store (LESSONS 2026-09-07).
+    The comparison ADR 0056 refuses a repeat on. ``idempotency_key`` is dropped from both sides,
+    since it is already a function of (incident, tool, args).
     """
     spec = TOOL_REGISTRY.get(tool)
     if spec is None:
@@ -831,9 +729,8 @@ def _wired_call_id(tool: str, arguments: Mapping[str, Any]) -> str | None:
 def _attempted_calls(run_state: RunState) -> frozenset[str]:
     """Every Tier-1 call this run has already EXECUTED, as ``_wired_call_id`` values.
 
-    Read off the ledger rather than from a new state field: ``make_remediate`` records each
-    executed action under its own tool name with the exact wired arguments it sent, so the
-    ledger already answers "what has this run done" (invariant 6's shape, one layer in).
+    Off the ledger rather than a new state field: ``make_remediate`` records each executed action
+    with the exact wired arguments it sent, so the ledger already answers this.
     """
     tier_1 = _tier_1_tools()
     return frozenset(
@@ -876,9 +773,8 @@ def _collect_strings(node: Any, out: set[str]) -> None:
 def _evidence_value_corpus(run_state: RunState) -> set[str]:
     """Every string value the platform itself produced during this run.
 
-    The alert payload plus tool result summaries that parse as JSON, EXCLUDING values the same
-    call's own arguments supplied — an echo would launder a hallucinated probe argument into the
-    corpus and whitelist it for the Tier-1 action (B-08). Exclusion is per-entry.
+    The alert plus JSON result summaries, EXCLUDING values the same call's own arguments supplied:
+    an echo would launder a hallucinated probe argument into the corpus (B-08).
     """
     corpus: set[str] = set()
     _collect_strings(dict(run_state.alert), corpus)
@@ -912,11 +808,8 @@ def _resource_values(tool: str, args: Mapping[str, Any]) -> set[str]:
 def _absent_resource_args(plan: RemediationPlan) -> list[str]:
     """Resource-naming fields the plan left out entirely, per leg.
 
-    ``wire_arguments`` *fills* a field carrying a default rather than refusing it —
-    ``GetConsumerLagInput.consumer_group`` defaults to ``"worker-dispatcher"``, so a verify leg
-    omitting the group probes that group whatever the action restarted. Required fields count
-    too, keeping the class pre-execution; coverage pinned by
-    ``tests/unit/test_policies.py::TestResourceArgFieldsCoverage``.
+    ``wire_arguments`` FILLS a field carrying a default rather than refusing it, so a verify leg
+    that omits ``consumer_group`` probes ``"worker-dispatcher"`` whatever the action restarted.
     """
     problems: list[str] = []
     for leg, tool, args in (
@@ -932,10 +825,8 @@ def _absent_resource_args(plan: RemediationPlan) -> list[str]:
 def _misdirected_verify_args(plan: RemediationPlan) -> list[str]:
     """Resources the verify probe names that the action never touched.
 
-    Only enforced when both legs name resources, so a verify leg naming NO resource passes here
-    — ``_unobserved_action_resource`` decides whether that is legitimate, and ADR 0025 records
-    why the two are separate (``get_redis_health`` after ``invalidate_cache_key`` cost a live
-    run). Values must line up, not field names (``pause_dag.root_job_id`` ↔ ``get_dag_state``).
+    Only enforced when both legs name resources; ``_unobserved_action_resource`` covers the rest
+    (ADR 0025). VALUES must line up, not field names.
     """
     action_values = _resource_values(plan.action_tool, plan.action_arguments)
     verify_values = _resource_values(plan.verify_tool, plan.verify_arguments)
@@ -947,11 +838,8 @@ def _misdirected_verify_args(plan: RemediationPlan) -> list[str]:
 def _unobserved_action_resource(plan: RemediationPlan) -> tuple[VerifyProbe, ...]:
     """The probes that WOULD observe this action, when the plan picked none.
 
-    Empty tuple means the plan is fine; a non-empty tuple is the refusal, and its contents are
-    the steer. The complement of ``_misdirected_verify_args``, which is inert when the verify
-    leg names nothing. Three inert cases: no (or an empty) ``VERIFY_PROBE_FOR_ACTION`` entry;
-    the action names no resource value (``_absent_resource_args``' report to make); the plan
-    already picked a listed probe. Strings only, as in ``_resource_values``.
+    Empty means the plan is fine; a non-empty tuple is the refusal and its own steer. Inert with
+    no ``VERIFY_PROBE_FOR_ACTION`` entry, no acted-on value, or a probe already picked.
     """
     probes = VERIFY_PROBE_FOR_ACTION.get(plan.action_tool, ())
     if not probes:
@@ -963,8 +851,8 @@ def _unobserved_action_resource(plan: RemediationPlan) -> tuple[VerifyProbe, ...
         if plan.verify_tool != probe.tool_name:
             continue
         if probe.argument_field is None:
-            # The tool observes the resource without being able to name it.
-            # Picking it IS the whole requirement; there is no value to match.
+            # The tool observes the resource without naming it, so picking it IS the
+            # whole requirement.
             return ()
         observed = plan.verify_arguments.get(probe.argument_field)
         if isinstance(observed, str) and observed in acted:
@@ -975,10 +863,8 @@ def _unobserved_action_resource(plan: RemediationPlan) -> tuple[VerifyProbe, ...
 def _rows_read_for(run_state: RunState, source: SourceRow) -> set[str]:
     """Every resource id this run has actually SEEN a row for, per one source.
 
-    Narrower than ``_evidence_value_corpus`` deliberately: that corpus holds every string the
-    platform uttered, including an id echoed by the alert or read off ``get_dag_state``, which
-    is what lets ``_unsourced_resource_args`` pass a job whose row nobody opened. Only the
-    listing's own rows count, and only the row's identifying field. Non-string ids are skipped.
+    Deliberately narrower than ``_evidence_value_corpus``, which holds ids the alert merely
+    echoed: only the listing's own rows count, and only the row's identifying field.
     """
     seen: set[str] = set()
     for entry in run_state.evidence:
@@ -1007,10 +893,8 @@ def _unread_action_rows(
 ) -> tuple[SourceRow, tuple[str, ...]] | None:
     """The source and the ids it has no row for, when the plan acts on one.
 
-    ``None`` means the plan is fine. Inert when ``SOURCE_ROW_FOR_ACTION``'s entry is empty, when
-    the action names no resource value (``_absent_resource_args``' report), or when every id is
-    already a row in evidence. Only the FIRST declared source is reported, but an id counts as
-    read if ANY declared source carried it.
+    ``None`` means the plan is fine. Only the FIRST declared source is reported, but an id counts
+    as read if ANY declared source carried it.
     """
     sources = SOURCE_ROW_FOR_ACTION.get(plan.action_tool, ())
     if not sources:
@@ -1045,8 +929,7 @@ def _unread_row_reason(source: SourceRow, unread: tuple[str, ...], plan: Remedia
 def _scope_value(arguments: Mapping[str, Any], field: str | None) -> str | None:
     """The narrowing value on one scope, or ``None`` for "not narrowed".
 
-    A missing key, a JSON ``null`` (what ``wire_arguments`` writes for an unset optional
-    filter), a non-string and a whitespace-only string all read as *not narrowed*, on the
+    A missing key, a JSON ``null``, a non-string and whitespace all read as NOT narrowed, on the
     read side and the action side alike.
     """
     if field is None:
@@ -1126,9 +1009,7 @@ def _unlisted_action_scope(
 ) -> tuple[SourceListing, tuple[str, ...]] | None:
     """The source and the readings that were there instead, when none covers the plan.
 
-    ``None`` means the plan is fine: inert when ``SOURCE_LISTING_FOR_ACTION``'s entry is empty
-    (``_unread_action_rows`` asks the right question there) or when some reading covers every
-    scope the action narrows on. ANY covering source admits the plan; the FIRST is reported.
+    ``None`` means the plan is fine. ANY covering source admits the plan; the FIRST is reported.
     """
     sources = SOURCE_LISTING_FOR_ACTION.get(plan.action_tool, ())
     if not sources:
@@ -1182,9 +1063,8 @@ def _refuse_unlisted_category(
 ) -> RunState:
     """Refuse a plan that would sweep a slice nobody listed, and say which read.
 
-    Refuses rather than escalates, like ``_refuse_plan``: the readings already in evidence are
-    named, so the planner can re-plan onto the slice it looked at. Underscore-prefixed marker,
-    so the trail and the grader's called-tools set skip it and it spends no tool-call budget.
+    Refuses rather than escalates, like ``_refuse_plan``, naming the readings already in evidence
+    so the planner can re-plan onto the slice it looked at.
     """
     reason = f"plan refused before execution: {_unlisted_category_reason(source, readings, plan)}"
     entry = EvidenceEntry(
@@ -1211,7 +1091,7 @@ class SubjectKind(StrEnum):
     """What kind of thing the alert's subject is, and so what "targets it" means.
 
     DERIVED from the subject's own probe (``_subject_kind``), never declared twice: the three
-    shapes ``investigation.ALERT_SUBJECT_PROBES`` can produce (ADR 0031's resource/slice line).
+    shapes ``ALERT_SUBJECT_PROBES`` can produce (ADR 0031).
     """
 
     RESOURCE = "resource"
@@ -1254,9 +1134,8 @@ def _subject_kind(subject: AlertSubject) -> SubjectKind:
 def _row_source_for_subject(subject: AlertSubject) -> SourceRow | None:
     """The declared row source whose rows carry this subject's decision field.
 
-    Walks ``SOURCE_ROW_FOR_ACTION``'s values rather than a second table; today that is
-    ``DLQ_ROW_SOURCE``, and ``tests/unit/test_remediation.py`` pins that it resolves. ``None``
-    leaves the guard inert rather than inventing a probe nobody declared.
+    Walks ``SOURCE_ROW_FOR_ACTION`` rather than a second table. ``None`` leaves the guard inert
+    rather than inventing a probe nobody declared.
     """
     for sources in SOURCE_ROW_FOR_ACTION.values():
         for source in sources:
@@ -1273,10 +1152,8 @@ def _row_decisions_in_evidence(
 ) -> dict[str, str | None]:
     """Every row id these evidence entries carry, mapped to the decision field's value.
 
-    Sibling of ``_rows_read_for``, which only answers "was this row read at all". ``None`` is a
-    VALUE, not a lookup miss: a missing key means never read, a key mapped to ``None`` means
-    read and unclassified. A later reading overwrites an earlier one — after a fence the hint
-    changes, and the newest reading is the current classification.
+    ``None`` is a VALUE, not a lookup miss: absent means never read, mapped to ``None`` means read
+    and unclassified. A later reading wins, because a fence changes the hint.
     """
     decisions: dict[str, str | None] = {}
     for entry in evidence:
@@ -1306,10 +1183,8 @@ def _row_decisions_in_evidence(
 class GraphView(NamedTuple):
     """The read whose response is a GRAPH the alerted resource roots (ADR 0070).
 
-    Sibling of ``SourceRow``, which describes a listing of independent rows. The
-    difference that earns a second shape: this read's response says which resource it is
-    a view OF, so a node id in it is a claim about the alerted object rather than about
-    the world at large.
+    Not ``SourceRow``, because this read's response says which resource it is a view OF, so a node
+    id in it is a claim about the alerted object rather than about the world at large.
     """
 
     tool_name: str
@@ -1326,15 +1201,9 @@ class GraphView(NamedTuple):
     """Field within a node carrying its resource id."""
 
 
-# Which subjects have a graph view, and what it is called. Keyed on the subject's own
-# probe tool (``investigation.ALERT_SUBJECT_PROBES``), so a consumer-group or DLQ-slice
-# subject is untouched by this admission however many chain readings a run holds — which
-# is live run `adcdcadd94a3`'s shape and the thing ADR 0032 exists to refuse.
-#
-# Field names are the pinned contract's, checked against it by
-# ``tests/unit/test_remediation.py::TestAChainNodeActionIsAdmittedByTheChainsOwnReading``:
-# a renamed response field would otherwise make the admission silently inert rather than
-# loud, and an inert admission reads exactly like the refusal it replaced.
+# Which subjects have a graph view. Keyed on the subject's own probe tool, so a consumer-group
+# subject is untouched however many chain readings a run holds. Field names are the pinned
+# contract's, checked against it: a rename would make the admission silently inert.
 GRAPH_VIEW_FOR_SUBJECT: Final[dict[str, GraphView]] = {
     "get_dag_state": GraphView("get_dag_state", "seed_id", "nodes", "id"),
 }
@@ -1345,11 +1214,8 @@ def _graph_nodes_in_evidence(
 ) -> frozenset[str]:
     """Every node id this run has read in a graph view rooted at ``subject``.
 
-    Empty when the subject has no graph view, when the run holds no such reading, or when
-    every reading it holds is of a DIFFERENT graph — three distinct inert cases that all
-    mean the same thing here, which is "no licence". The ``subject_field`` comparison is
-    what makes the third one true: this suite seeds three stuck chains, so a node id read
-    in one of them is not evidence about another.
+    Empty means "no licence". The ``subject_field`` comparison is what rules out a reading of a
+    DIFFERENT graph: the suite seeds three stuck chains, and one is not evidence about another.
     """
     view = GRAPH_VIEW_FOR_SUBJECT.get(subject.tool_name)
     if view is None:
@@ -1382,9 +1248,8 @@ def _graph_nodes_in_evidence(
 def _subject_action_field(plan: RemediationPlan, subject: AlertSubject) -> str | None:
     """The action argument that narrows on the subject's own dimension, if any.
 
-    Derived from ``SOURCE_LISTING_FOR_ACTION``'s ``ListingScope`` pairs — the projection
-    ADR 0031 used to admit a slice as a subject — so the read side and the act side of one
-    dimension cannot drift apart.
+    Derived from ``SOURCE_LISTING_FOR_ACTION``'s ``ListingScope`` pairs (ADR 0031), so the read
+    side and the act side of one dimension cannot drift apart.
     """
     for source in SOURCE_LISTING_FOR_ACTION.get(plan.action_tool, ()):
         if source.tool_name != subject.tool_name:
@@ -1398,11 +1263,8 @@ def _subject_action_field(plan: RemediationPlan, subject: AlertSubject) -> str |
 def _unaddressed_alert_subject(plan: RemediationPlan, run_state: RunState) -> SubjectMiss | None:
     """The subject this plan fails to act on, when the alert named one.
 
-    ``None`` means the plan is fine: inert when the alert names no subject (an alert storm,
-    `db_latency_high`, a whole-queue DLQ depth alert — ``investigation.alert_subject``'s own
-    inert set), when no declared listing exposes a slice subject's decision field
-    (``_row_source_for_subject``), or when the plan targets the subject. NOT inert: an action
-    naming no resource at all under a RESOURCE subject — the shape of live run `adcdcadd94a3`.
+    ``None`` means the plan is fine. NOT inert for an action naming no resource at all under a
+    RESOURCE subject, which is the live-run shape ADR 0032 was written from.
     """
     subject = alert_subject(run_state.alert)
     if subject is None:
@@ -1414,10 +1276,9 @@ def _unaddressed_alert_subject(plan: RemediationPlan, run_state: RunState) -> Su
     if kind is SubjectKind.RESOURCE:
         if subject.value in acted:
             return None
-        # ADR 0070: a node of the graph the subject ROOTS is the subject's own incident.
-        # Grounded in a reading THIS RUN HOLDS whose own `seed_id` is the subject, so an
-        # invented id, a node of another chain and a batch that reaches outside the graph
-        # are all still refused — and `off_graph` says which, by name, in the steer.
+        # ADR 0070: a node of the graph the subject ROOTS is the subject's own incident. Grounded
+        # in a reading THIS RUN HOLDS whose `seed_id` is the subject, so an invented id, another
+        # chain's node and a batch reaching outside the graph are all still refused.
         nodes = _graph_nodes_in_evidence(run_state.evidence, subject)
         off_graph = sorted(acted - nodes)
         if acted and not off_graph:
@@ -1561,12 +1422,8 @@ class ClearedMiss(NamedTuple):
 def _cleared_before_action(plan: RemediationPlan, run_state: RunState) -> ClearedMiss | None:
     """The fault this plan would fix, already gone in the run's newest reading of it.
 
-    ``None`` means the plan may proceed. Inert wherever the question cannot be answered from a
-    reading: no declared ``RECOVERED_READING`` for the resource's probe (every entry and its
-    reason are in ``agent/attribution.py``), no reading of that resource in this run, or a
-    reading that shows the fault present. NOT inert when the newest reading reads recovered —
-    that is O-29's "if already healthy, do not act", and it is the one case where the action
-    provably cannot cause the recovery the run would go on to report.
+    ``None`` means the plan may proceed, and it is inert wherever no reading can answer. A newest
+    reading that reads recovered is O-29's "if already healthy, do not act".
     """
     found = already_recovered(run_state.evidence, plan.action_tool, plan.action_arguments)
     if found is None:
@@ -1578,9 +1435,8 @@ def _cleared_before_action(plan: RemediationPlan, run_state: RunState) -> Cleare
         resource,
         reading,
         rendered,
-        # Opens with a banner for the same reason ADR 0026's `STABILIZED, NOT RESOLVED` does:
-        # this lands on `EscalationBriefing.escalation_reason` and the first words are what an
-        # on-call reads. The owner's sentence follows it VERBATIM — a test pins that.
+        # A banner, like ADR 0026's `STABILIZED, NOT RESOLVED`: this lands on
+        # `escalation_reason`, so the first words are what an on-call reads.
         f"NO ACTION TAKEN: {CLEARED_ON_ITS_OWN_SENTENCE}. {plan.action_tool} would act on "
         f"{resource}, and this "
         f"run's own newest reading of it — {rendered} — already shows the fault gone: "
@@ -1595,9 +1451,8 @@ def _refuse_cleared_before_action(
 ) -> RunState:
     """Record the refusal under its own name, then escalate with the same sentence.
 
-    Two entries, in that order, because they answer different questions and the escalation
-    marker must stay last (``agent/briefing.py::_terminal_marker`` reads it as the reason).
-    Underscore-prefixed, so no tool-call budget is spent and the trail is unchanged.
+    Two entries, in that order: the escalation marker must stay last, because
+    ``briefing._terminal_marker`` reads it as the reason.
     """
     entry = EvidenceEntry(
         tool_name=_PLAN_REFUSED_CLEARED_MARKER,
@@ -1622,9 +1477,8 @@ def _refuse_subject_target(
 ) -> RunState:
     """Refuse a plan aimed at something other than the alert's subject.
 
-    Refuses rather than escalates, like its four siblings and ``investigation._refuse_handoff``:
-    the repair needs no new read, since the subject is in the alert and the rows are in the
-    evidence the planner was already shown. Underscore-prefixed marker: no tool-call budget.
+    Refuses rather than escalates, like its four siblings: the repair needs no new read, since the
+    subject is in the alert and the rows are in evidence the planner was already shown.
     """
     reason = f"plan refused before execution: {miss.reason}"
     entry = EvidenceEntry(
@@ -1673,10 +1527,8 @@ def _refuse_plan(
 ) -> RunState:
     """Refuse a plan for an unobservable verify leg and steer the planner.
 
-    Deliberately NOT a terminal transition: the action is correct and only the evidence for it
-    is missing, so naming the probe is usually enough. Same shape as
-    ``investigation._refuse_handoff``. The marker is underscore-prefixed so the trail and the
-    grader's called-tools set skip it, and it spends no tool-call budget.
+    Deliberately NOT terminal: the action is correct and only the evidence for it is missing, so
+    naming the probe is usually enough.
     """
     reason = (
         f"plan refused before execution: {plan.verify_tool}"
@@ -1714,10 +1566,8 @@ def _refuse_unread_rows(
 ) -> RunState:
     """Refuse a plan that would act on a row nobody read, and say which read.
 
-    Refuses rather than escalates, like ``_refuse_plan`` and
-    ``investigation._refuse_handoff``: a batch replay carrying one listed id and one unlisted
-    one is repaired by dropping the second. Underscore-prefixed marker: it spends no tool-call
-    budget, only the re-ask's planner tokens, which ``_plan_once`` charges.
+    Refuses rather than escalates, like ``_refuse_plan``: a batch replay carrying one listed id
+    and one unlisted one is repaired by dropping the second.
     """
     reason = f"plan refused before execution: {_unread_row_reason(source, unread, plan)}"
     entry = EvidenceEntry(
@@ -1764,10 +1614,8 @@ def _unsourced_resource_args(plan: RemediationPlan, corpus: set[str]) -> list[st
 def _malformed_resource_args(plan: RemediationPlan) -> list[str]:
     """Resource values that cannot be the id the platform's schema declares.
 
-    The cheap half of ADR 0030, run BEFORE the evidence check: "not the shape of a job id"
-    points at the characters, where "never produced that string" leaves a truncated id looking
-    invented. Only ``policies.UUID_RESOURCE_FIELDS`` is checked, every offender is reported, and
-    a zero-filled block is still 8-4-4-4-12 hex — so shape and provenance are a pair.
+    The cheap half of ADR 0030, run BEFORE the evidence check: "not the shape of a job id" points
+    at the characters. A zero-filled block is still valid hex, so shape and provenance are a pair.
     """
     problems: list[str] = []
     for tool, args in (
@@ -1788,9 +1636,8 @@ def _malformed_resource_args(plan: RemediationPlan) -> list[str]:
 def _row_candidates(run_state: RunState, tool: str) -> tuple[str, ...]:
     """The ids the listings in this run's evidence actually carry, for one tool.
 
-    Reuses ``SOURCE_ROW_FOR_ACTION`` rather than ``_evidence_value_corpus``, which holds every
-    string the platform uttered and would make the offer a wall of noise. Empty for an inert
-    entry and for a run that never listed anything; the caller makes no offer then.
+    Reuses ``SOURCE_ROW_FOR_ACTION``, not ``_evidence_value_corpus``, which would make the offer
+    a wall of noise. Empty means the caller makes no offer.
     """
     seen: set[str] = set()
     for source in SOURCE_ROW_FOR_ACTION.get(tool, ()):
@@ -1801,10 +1648,8 @@ def _row_candidates(run_state: RunState, tool: str) -> tuple[str, ...]:
 def _did_you_mean(value: str, candidates: Sequence[str]) -> str | None:
     """The one candidate a rejected value was probably a slip of, or ``None``.
 
-    Prefix-based, because the slips this exists for (zero-filled tail, truncation, doubled
-    block) keep the opening characters. Single-match-only, because offering two is a wrong
-    claim: if the prefix cannot separate them, go and look. NEVER a correction — the value is
-    quoted into a refusal the planner must act on itself.
+    Prefix-based, because the slips this exists for keep the opening characters, and
+    single-match-only, because offering two is a wrong claim. NEVER a correction.
     """
     matches = [
         candidate
@@ -1893,10 +1738,8 @@ def _refuse_arguments(
 ) -> RunState:
     """Refuse a plan for a mis-transcribed resource id, and offer the candidates.
 
-    Refuses rather than escalates (ADR 0030), against this module's older reading that a
-    mis-named resource means the planner reasoned about the wrong object: live run
-    ``5c8895771fbd`` quoted the right id in its rationale, briefing and judge reasoning, and
-    only the arguments dict was wrong. Underscore-prefixed marker: no tool-call budget is spent.
+    Refuses rather than escalates (ADR 0030): a live run quoted the right id in its rationale,
+    briefing and judge reasoning, and only the arguments dict was wrong.
     """
     entry = EvidenceEntry(
         tool_name=_PLAN_REFUSED_ARGUMENT_MARKER,
@@ -1981,9 +1824,8 @@ def make_remediate(
 ) -> Callable[[RunState, datetime], RunState]:
     """Bind the MCP client to the REMEDIATING transition.
 
-    Executes the plan's action tool under an agent-generated idempotency key: success →
-    VERIFYING, any failure → ESCALATED. ``action_timeout_seconds`` overrides the client
-    read-default for this call only.
+    Executes the plan's action under an agent-generated idempotency key: success → VERIFYING, any
+    failure → ESCALATED. ``action_timeout_seconds`` overrides the client default for this call.
     """
 
     def transition_remediate(run_state: RunState, at: datetime) -> RunState:
@@ -1996,9 +1838,8 @@ def make_remediate(
                 run_state, at, "REMEDIATING entered with no remediation_plan"
             )
 
-        # Crash-recovery contract (ADR 0008): re-entering REMEDIATING re-invokes with the
-        # SAME idempotency_key and the platform's store replays the cached response
-        # (platform ADR 0010), proven by tests/integration/test_idempotency_contract.py.
+        # Crash-recovery contract (ADR 0008): re-entering REMEDIATING re-invokes with the SAME
+        # idempotency_key, and the platform's store replays the cached response.
         spec = TOOL_REGISTRY[plan.action_tool]
         idempotency_key = build_idempotency_key(
             str(run_state.incident_id), plan.action_tool, plan.action_arguments
@@ -2038,9 +1879,8 @@ def make_remediate(
         try:
             output_summary = _summarize_output(spec.output_model, result.content)
         except (ValueError, ValidationError) as err:
-            # is_error=False, so the Tier-1 action EXECUTED and only our parse of its
-            # response failed. Charged here, unlike the MCPError and is_error=True
-            # branches above, which are the platform saying it did NOT act.
+            # is_error=False, so the Tier-1 action EXECUTED and only the parse failed. Charged
+            # here, unlike the two branches above, where the platform said it did NOT act.
             return _escalate_remediation(
                 run_state,
                 at,
@@ -2099,11 +1939,8 @@ def _retry_declined(
 ) -> RetryDeclined | None:
     """Whether this attempt may hand back to INVESTIGATING, and why not (ADR 0056).
 
-    Three deterministic preconditions, checked in this order: the cap, the budget, and
-    somewhere else to go. The third is what keeps the retry from being ADR 0008's rejected
-    shape — with no other ranked hypothesis carrying a Tier-1 fix, the only plan a
-    reinvestigation could reach is the one ``_repeated_attempt`` refuses, so the outcome is
-    already known and spending a planner call to arrive at it buys nothing.
+    Three deterministic preconditions in this order: the cap, the budget, somewhere else to go.
+    Without the third, reinvestigation could only reach the plan ``_repeated_attempt`` refuses.
     """
     attempts = run_state.remediation_attempts
     if attempts >= max_attempts:
@@ -2151,14 +1988,13 @@ def _attempt_failed_entry(
     )
     return EvidenceEntry(
         tool_name=ATTEMPT_FAILED_MARKER,
-        # Deliberately NOT ``attempted_tool``: that key means "a call the platform refused"
-        # to ``evals/graders/deterministic.py``, and this call executed and is already on
-        # the ledger under its own name. A second spelling would double-count it.
+        # Deliberately NOT ``attempted_tool``: to the grader that key means "a call the platform
+        # refused", and this call executed and is on the ledger under its own name.
         arguments={
             "attempt": run_state.remediation_attempts,
             "of": max_attempts,
-            # Which cause this attempt aimed at, so ADR 0059's resolve gate can tell a
-            # cause the run has ADDRESSED from one it is still only naming.
+            # Which cause this attempt aimed at, so ADR 0059's resolve gate can tell an
+            # ADDRESSED cause from one the run is still only naming.
             "target_hypothesis": plan.target_hypothesis,
             "action_tool": plan.action_tool,
             "action_arguments": dict(plan.action_arguments),
@@ -2180,10 +2016,8 @@ def _attempt_failed_entry(
 def _reinvestigate(run_state: RunState, at: datetime, entry: EvidenceEntry) -> RunState:
     """Hand back to INVESTIGATING with the failed attempt on the ledger (ADR 0056).
 
-    ``hypotheses`` carry over so the planner RE-RANKS given the failure instead of starting
-    over; ``budget`` and ``remediation_attempts`` are untouched, so the second attempt spends
-    from the first's ledger. The spent plan is dropped: the next PLANNING writes its own, and
-    a stale plan on the state is the re-plan-against-stale-evidence shape ADR 0008 refused.
+    ``hypotheses`` carry over so the planner RE-RANKS given the failure, and the ledger is
+    untouched so the second attempt spends from the first's. The spent plan is dropped.
     """
     return run_state.model_copy(
         update={
@@ -2208,21 +2042,8 @@ def make_llm_verify(
 ) -> Callable[[RunState, datetime], RunState]:
     """Bind clients + model to the VERIFYING transition.
 
-    Probe, then judge the result against the plan's expectation: ``verified`` → RESOLVED,
-    ``not_verified`` → re-probe after ``probe_delay_seconds`` until ``probe_attempts`` is spent.
-    An attempt that did not end the incident — ``not_verified``, a verified stabilizer
-    (ADR 0026) or a verified action that left the alerted condition standing — then either
-    hands back to INVESTIGATING for one more attempt or escalates, per ``_retry_declined``
-    (ADR 0056, superseding ADR 0008). Polling exists because live probes are eventually
-    consistent; defaults (attempts=1, delay=0) keep the single-probe behaviour canned runs
-    rely on. Attempt 1 always runs (ADR 0006, why loop.py exempts VERIFYING from the
-    loop-level short-circuit); later ones need budget. ``clock`` stamps each poll for real,
-    ``None`` with ``at``.
-
-    ``planner_log`` is where each poll's verdict is written the moment the judge returns
-    (ADR 0075). A verify leg can poll for minutes, and until ADR 0075 every verdict reached a
-    watching operator only when the leg ended, so a run that polled four times looked stuck.
-    ``None`` means nobody is watching, and changes nothing about the run.
+    Probe, judge against the plan's expectation, re-probe until ``probe_attempts`` is spent. An
+    attempt that did not end the incident reinvestigates or escalates (ADR 0056, ADR 0006).
     """
 
     def transition_verify(run_state: RunState, at: datetime) -> RunState:
@@ -2245,9 +2066,8 @@ def make_llm_verify(
 
         # Seeded with the transition's `at` so the clock=None path is unchanged (#59).
         at_attempt = at
-        # The last poll's reading and the judge's words, for the attempt record ADR 0056
-        # writes when this attempt does not end the incident. Seeded so the no-poll case
-        # (unreachable while probe_attempts >= 1) still types.
+        # The last poll's reading and the judge's words, for the attempt record ADR 0056 writes.
+        # Seeded so the no-poll case, unreachable while probe_attempts >= 1, still types.
         last_reading = ""
         last_reasoning = ""
         for attempt in range(probe_attempts):
@@ -2324,9 +2144,8 @@ def make_llm_verify(
                 result_summary=f"{judgment.verdict}: {judgment.reasoning}",
                 timestamp=at_attempt,
             )
-            # Dollars and cache counters accrue per poll attempt, not once per VERIFYING
-            # entry (ADR 0015). ``accrue_structured_call``, because a repaired judgment
-            # is two billed calls.
+            # Per POLL, not once per VERIFYING entry (ADR 0015), and through
+            # ``accrue_structured_call`` because a repaired judgment is two billed calls.
             new_budget = accrue_structured_call(run_state.budget, judge_call, model).model_copy(
                 update={"tool_calls_used": run_state.budget.tool_calls_used + 1}
             )
@@ -2339,10 +2158,8 @@ def make_llm_verify(
                     "updated_at": at_attempt,
                 }
             )
-            # ADR 0075: the verdict goes out now, not when this leg ends. A verify leg can poll
-            # for minutes against the platform's own 60-second lag clock, and a page that shows
-            # nothing for those minutes reads as a hung run. The ranking travels unchanged — a
-            # verdict judges the action, it does not re-rank the causes.
+            # ADR 0075: the verdict goes out now, not when the leg ends — a leg that polls for
+            # minutes with nothing on the page reads as a hung run.
             if planner_log is not None:
                 planner_log.verdict(
                     hypotheses=tuple(run_state.hypotheses),
@@ -2352,9 +2169,8 @@ def make_llm_verify(
                     of=probe_attempts,
                 )
             if judgment.verdict == "verified":
-                # "Did the action work?" is not "is the incident over?": a STABILIZE-ONLY
-                # pause reads verified and leaves the chain stuck. Consulted here rather
-                # than at plan time because a stabilizer is a legitimate plan.
+                # "Did the action work?" is not "is the incident over?": a STABILIZE-ONLY pause
+                # reads verified and leaves the chain stuck. Here, because such a plan is legal.
                 try:
                     policy = resolution_class_of(plan.action_tool)
                 except PolicyCoverageError as err:
@@ -2362,10 +2178,8 @@ def make_llm_verify(
                     return _escalate_remediation(run_state, at_attempt, str(err))
                 if policy.resolution is Resolution.STABILIZES:
                     stabilized = _stabilized_reason(plan, policy.rationale)
-                    # ADR 0026's outcome is unchanged when no retry is available, and
-                    # unchanged in the end when one is: a stabilizer never resolves. What
-                    # ADR 0056 adds is that a stabilized incident may reinvestigate once
-                    # before handing off, carrying the sentence below onto the ledger.
+                    # A stabilizer never resolves (ADR 0026); what ADR 0056 adds is that it may
+                    # reinvestigate once before handing off.
                     declined = _retry_declined(
                         run_state, plan, max_attempts=max_attempts, verdict="verified_stabilizer"
                     )
@@ -2387,22 +2201,19 @@ def make_llm_verify(
                         run_state,
                         at_attempt,
                         stabilized,
-                        # `make_remediate` already charged the action, so no
-                        # `executed=True` here — it would bill twice. This carries it
-                        # onto the briefing's `attempted_action` field.
+                        # No `executed=True`: `make_remediate` already charged the action, and
+                        # this only carries it onto the briefing's `attempted_action`.
                         attempted_tool=plan.action_tool,
                         attempted_arguments=plan.action_arguments,
                     )
-                # One question left, about the INCIDENT not the action: is the alerted
-                # condition cleared? Yes by construction with a subject (ADR 0032); with
-                # none, the queue's rows answer (WO-R2-164). Then the same question about
-                # the OTHER faults this run named, which no alert can answer (ADR 0059).
+                # One question left, about the INCIDENT not the action: is the alerted condition
+                # cleared (ADR 0032, WO-R2-164), and what about the other causes (ADR 0059)?
                 condition = _uncleared_alert_condition(plan, run_state) or (
                     _unaddressed_second_cause(plan, run_state)
                 )
                 if condition is not None:
-                    # Same shape as the stabilizer above: the action worked and the incident
-                    # is not over, so it is an attempt that may earn one reinvestigation.
+                    # Same shape as the stabilizer above: the action worked and the incident is
+                    # not over, so it may earn one reinvestigation.
                     declined = _retry_declined(
                         run_state, plan, max_attempts=max_attempts, verdict="verified_unresolved"
                     )
@@ -2449,10 +2260,8 @@ def make_llm_verify(
                     why=last_reasoning,
                 ),
             )
-        # A run that has NOT yet retried escalates exactly as it did under ADR 0008: the
-        # judge's `not_verified` verdict is the last entry and so the briefing's reason, and
-        # every canned run predating the edge is byte-identical. Only a run that already
-        # spent a retry adds a reason of its own, because "we tried twice" is new information.
+        # A run that has NOT yet retried escalates as it did under ADR 0008, so every canned run
+        # predating the edge is byte-identical. Only a second attempt adds a reason of its own.
         if run_state.remediation_attempts > 1:
             return _escalate_remediation(
                 run_state,
@@ -2492,13 +2301,8 @@ def judge_verification(
 ) -> RepairedCall[VerificationJudgment]:
     """Ask the ``action_verifier`` whether the executed action worked.
 
-    The role is ``action_verifier`` (plan 02 § 3); ``verification_judge`` is the prompt file it
-    loads. "Verifier" is never unprefixed here —
-    ``tests/unit/test_judge_calibration.py::TestTheRoleWordIsAlwaysPrefixed`` sweeps for it.
-    One bounded re-ask, cap 1 (ADR 0035, widened by WO-R2-174). A function because WP-6.3's
-    calibration must use the same prompt, renderer, schema and repair the run does; a second
-    copy in ``evals/`` is the drift that produced INC-002. No temperature and no parameter for
-    one (O-24, ADR 0048, ``llm/client.SAMPLING_REJECTED_MODELS``); ADR 0052 measures stability.
+    A function, because WP-6.3's calibration must use the same prompt, renderer, schema and repair
+    the run does: a second copy in ``evals/`` is the drift that produced INC-002.
     """
     return call_with_output_repair(
         llm_client,
@@ -2514,10 +2318,8 @@ def format_verify_context(
 ) -> str:
     """What the judge is shown.
 
-    Public since WP-6.3 so the calibration asks in exactly the bytes a run would.
-    ``action_summary`` is the executed action's own response: without it a delayed replay is
-    unjudgeable — ``wait_and_replay`` reports ``scheduled``/``execute_at`` there and the platform
-    holds the timer, so the DLQ cannot shrink inside the verify window.
+    Public since WP-6.3, so the calibration asks in exactly the bytes a run would.
+    ``action_summary`` is the action's own response: a delayed replay is unjudgeable without it.
     """
     action_block = (
         f"Remediation result:\n{action_summary}\n\n"
@@ -2550,10 +2352,8 @@ def _summarize_output(output_model: type[BaseModel], content: list[dict[str, Any
 def _stabilized_reason(plan: RemediationPlan, rationale: str) -> str:
     """The escalation reason for a verified STABILIZE-ONLY action.
 
-    ``_escalate_remediation`` puts it on the marker's ``result_summary``, which
-    ``agent/briefing.py`` reads into ``EscalationBriefing.escalation_reason``, so it must carry
-    three things without reading as a failure: the action worked, the incident is not over, and
-    which resource still needs a decision. The resource is named from the plan's own arguments.
+    It lands on ``EscalationBriefing.escalation_reason``, so it must carry three things without
+    reading as a failure: the action worked, the incident is not over, and which resource is left.
     """
     resources = sorted(_resource_values(plan.action_tool, plan.action_arguments))
     named = ", ".join(resources) if resources else "the affected resource"
@@ -2575,11 +2375,8 @@ def _stabilized_reason(plan: RemediationPlan, rationale: str) -> str:
 def _dead_letter_actions() -> frozenset[str]:
     """Every Tier-1 action that acts on dead-letter rows — derived, not declared.
 
-    The union of three maps that already answer it (architecture-principles rule 2):
-    ``SOURCE_ROW_FOR_ACTION`` (must have READ a ``DLQ_ROW_SOURCE`` row),
-    ``SOURCE_LISTING_FOR_ACTION`` (a listing must have COVERED the slice) and
-    ``investigation.HINT_ROUTED_TOOLS`` (where `mark_dlq_permanent` joins, inert in both maps).
-    ``tests/unit/test_remediation.py`` pins the derived set so it cannot empty or grow silently.
+    The union of the three maps that already answer it, ``HINT_ROUTED_TOOLS`` included because
+    `mark_dlq_permanent` is inert in the other two. Pinned, so it cannot empty silently.
     """
     tools = {
         tool
@@ -2646,13 +2443,8 @@ class ConditionMiss(NamedTuple):
 def _stabilized_earlier(run_state: RunState) -> str | None:
     """An earlier attempt in this run that STABILIZED rather than resolved (ADR 0026).
 
-    Read off the attempt records ADR 0056 writes, so the fact travels with the ledger
-    rather than with a flag; the returned string is that record's own summary. ADR 0026's
-    rule is unconditional — a stabilizer is never a resolution — and ADR 0056 put the
-    sentence on the ledger without stopping a LATER attempt resolving over it.
-    ``not_verified`` and ``verified_unresolved`` are deliberately not here: the first
-    changed nothing (``retry_second_hypothesis_succeeds`` resolves on its second attempt
-    and still does) and the second's own condition is re-asked of the current plan.
+    Read off ADR 0056's attempt records, so the fact travels with the ledger. ``not_verified`` and
+    ``verified_unresolved`` are not here: one changed nothing, the other is re-asked per plan.
     """
     for entry in run_state.evidence:
         if entry.tool_name != ATTEMPT_FAILED_MARKER:
@@ -2675,10 +2467,8 @@ def _attempted_targets(run_state: RunState, plan: RemediationPlan) -> frozenset[
 def _is_attempted(hypothesis: Hypothesis, attempted: Collection[str]) -> bool:
     """Whether a ranked hypothesis is one an attempt in this run aimed at.
 
-    Name OR category, because ``RemediationPlan.target_hypothesis`` is a free string and the
-    corpus spells it both ways (``jobs_not_progressing_dispatcher_stall`` names the category,
-    the retry scenarios name the hypothesis). Reading only one spelling would call an
-    already-remediated cause unaddressed and escalate a correct single-fault run.
+    Name OR category, because ``target_hypothesis`` is a free string the corpus spells both ways.
+    One spelling would call an already-remediated cause unaddressed.
     """
     return hypothesis.name in attempted or hypothesis.category.value in attempted
 
@@ -2686,11 +2476,8 @@ def _is_attempted(hypothesis: Hypothesis, attempted: Collection[str]) -> bool:
 def _standing_causes(run_state: RunState, plan: RemediationPlan) -> tuple[Hypothesis, ...]:
     """Causes this run still ranks at the bar it acts on and has NOT acted on (ADR 0059).
 
-    The run's OWN ranking, at the loop's own threshold: below the bar is a cause the agent
-    is considering, not one it is asserting, so hedging costs nothing while claiming a
-    second cause costs precision if it is wrong. A cause an attempt already targeted is
-    addressed, however the ranking still scores it — otherwise a run that fixed both faults
-    could never say so.
+    The run's OWN ranking at the loop's own threshold, so hedging below the bar costs nothing. A
+    cause an attempt already targeted counts as addressed however the ranking still scores it.
     """
     attempted = _attempted_targets(run_state, plan)
     return tuple(
@@ -2704,10 +2491,8 @@ def _standing_causes(run_state: RunState, plan: RemediationPlan) -> tuple[Hypoth
 def _unaddressed_second_cause(plan: RemediationPlan, run_state: RunState) -> ConditionMiss | None:
     """A verified action that leaves another cause of this incident standing (ADR 0059).
 
-    ``_uncleared_alert_condition``'s question asked of the run's own diagnosis instead of the
-    dead-letter queue, so it is live whatever the alert names: a second, independent fault is
-    not something an alert can name. Two ways to be unfinished — a stabilizer earlier in this
-    run, and a cause the run asserts and has not acted on.
+    ``_uncleared_alert_condition``'s question asked of the run's own diagnosis, so it is live
+    whatever the alert names. Two ways to be unfinished: an earlier stabilizer, or a standing cause.
     """
     if (stabilized := _stabilized_earlier(run_state)) is not None:
         return ConditionMiss(
@@ -2741,11 +2526,8 @@ def _evidence_before(
 ) -> tuple[EvidenceEntry, ...] | None:
     """The evidence prefix recorded before ``tool_name`` was first called.
 
-    ``make_remediate`` writes the action's own entry under ``plan.action_tool``, so this is the
-    run as it stood when the action was chosen. Slicing there matters: the verify probe re-reads
-    the same listing afterwards, so a post-action page answers "what did the action do?", not
-    "what was the alert about?". ``None`` (no entry under that name) means the action cannot be
-    located and callers treat it as inert; a real run cannot produce it.
+    The run as it stood when the action was chosen. Slicing there matters: a post-action page
+    answers "what did the action do?", not "what was the alert about?". ``None`` is inert.
     """
     prefix: list[EvidenceEntry] = []
     for entry in evidence:
@@ -2760,10 +2542,8 @@ def _whole_queue_readings(
 ) -> tuple[EvidenceEntry, ...]:
     """The readings that saw the WHOLE dead-letter queue, not a slice or a page.
 
-    Two conditions: **narrowed on nothing** — every declared ``ListingScope.read_field`` absent
-    by ``_scope_value``'s four-way collapse — and **the page is the queue**, ``total`` equal to
-    the rows returned (``total: 40`` with four rows saw page one of ten). No usable ``total`` is
-    accepted: this is a contradiction test, not an invention.
+    Narrowed on nothing, and the page IS the queue (``total`` equal to the rows returned). No
+    usable ``total`` is accepted: this is a contradiction test, not an invention.
     """
     readings: list[EvidenceEntry] = []
     for entry in evidence:
@@ -2792,11 +2572,8 @@ def _rows_addressed_by(
 ) -> frozenset[str]:
     """The rows this run's one action ADDRESSED — replayed, scheduled, or fenced.
 
-    Narrow and provable: a row is addressed when the action NAMED it, **by id** (among its
-    ``RESOURCE_ARG_FIELDS`` values) or **by slice** (narrowed to the value the listing classified
-    it on; ``ListingScope.action_field is None`` spans every value). Un-provable is unaddressed —
-    with another declared scope also narrowed, no map says which rows survive the intersection,
-    so the slice route guesses nothing. It does NOT claim the row is fixed (``RESOLUTION_CLASS``).
+    Provable only: the action NAMED the row by id, or narrowed to the slice the listing classified
+    it on. Un-provable is unaddressed, and "addressed" never claims the row is FIXED.
     """
     addressed = {
         value
@@ -2827,9 +2604,8 @@ def _rows_addressed_by(
     return frozenset(addressed)
 
 
-# What each remaining row still needs, in words a human can act on. The TOOL half is derived
-# from ``HINT_ROUTED_TOOLS``; this is the phrase half, keyed on the same slice words (``None``
-# → ``unclassified``) so ``tests/unit/test_remediation.py`` pins the key sets equal.
+# What each remaining row still needs, in words a human can act on. The TOOL half is derived from
+# ``HINT_ROUTED_TOOLS``; this is the phrase half, keyed on the same slice words and pinned equal.
 _ROW_DISPOSITION: Final[dict[str, str]] = {
     "replay_safe": "an immediate replay",
     "wait_and_replay": "a delayed replay, once the dependency its error names answers",
@@ -2856,11 +2632,8 @@ def _row_needs(row: UnaddressedRow) -> str:
 def _uncleared_condition_reason(
     plan: RemediationPlan, miss_rows: tuple[UnaddressedRow, ...], read_count: int
 ) -> str:
-    """The escalation reason for a verified action that left the condition standing.
-
-    Opens with ``STABILIZED, NOT RESOLVED``, the string ADR 0026 minted for a stabilize-only
-    TOOL: this is a stabilize-only OUTCOME, the same message to the same reader.
-    """
+    """The escalation reason for a verified action that left the condition standing. Opens with
+    ADR 0026's ``STABILIZED, NOT RESOLVED``: a stabilize-only OUTCOME reads the same way."""
     if not miss_rows:
         return (
             f"STABILIZED, NOT RESOLVED. {plan.action_tool} executed successfully and "
@@ -2891,13 +2664,8 @@ def _uncleared_condition_reason(
 def _uncleared_alert_condition(plan: RemediationPlan, run_state: RunState) -> ConditionMiss | None:
     """The alerted condition this verified action did not clear (WO-R2-164).
 
-    ``None`` means RESOLVED is admissible. Inert when the alert names a subject (ADR 0032 has
-    already refused any plan aimed elsewhere, and a second question would escalate every
-    correctly-scoped run, against ADR 0031); when the action is not a dead-letter action (the
-    link is the agent's own plan; nothing parses alert free text, which ADR 0031 refused); when
-    the whole queue was read and every row addressed; when the action is not locatable
-    (``_evidence_before``); and when no listing precedes it (ADR 0027/0028 own that). NOT inert:
-    filtered or partial pages, per ``_whole_queue_readings``.
+    ``None`` means RESOLVED is admissible. Inert wherever another guard owns the question — a
+    subject-bearing alert (ADR 0032), a non-DLQ action, a whole queue fully addressed.
     """
     if alert_subject(run_state.alert) is not None:
         return None
@@ -2934,13 +2702,8 @@ def _escalate_remediation(
 ) -> RunState:
     """Escalate from any remediation state with the failure reason on evidence.
 
-    ``attempted_tool`` / ``attempted_arguments`` record a Tier-1 call that was MADE and refused;
-    without them the entry is ``_remediation_escalate``, which the SAFETY dimension does not
-    match, and ``docs/eval-methodology.md`` promises the attempt graded red even when the
-    platform blocks it. ``executed=True`` (only the unparseable-response branch) charges one
-    tool call and one ``remediation_attempts``, which ADR 0008 reads for the single-attempt
-    invariant. The reason lands on ``result_summary``, read into
-    ``EscalationBriefing.escalation_reason`` by ``agent/briefing.py``.
+    ``attempted_tool`` records a Tier-1 call that was MADE and refused, which SAFETY grades red;
+    ``executed=True`` charges one tool call and one attempt. The reason becomes the briefing's.
     """
     arguments: dict[str, Any] = {"from_state": run_state.state.value, "reason": reason}
     if attempted_tool is not None:

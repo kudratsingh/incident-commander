@@ -72,9 +72,8 @@ class PostgresCheckpointer:
                         },
                     )
                 return
-            # 3. Another writer inserted that version between our read and our insert, so the
-            #    unique constraint rejected the row: read the version again and retry. This really
-            #    happens — two deliveries of one alert both write before either holds the lease.
+            # 3. Another writer took that version between our read and our insert, so the unique
+            #    constraint rejected the row: read the next version again and retry, up to 3 times.
             except IntegrityError:
                 if attempt == 2:
                     raise

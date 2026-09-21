@@ -182,9 +182,8 @@ def create_app(
     run_task: RunTask | None = None,
 ) -> FastAPI:
     """Build the FastAPI app. Tests inject ``checkpointer`` and ``run_task``."""
-    # 1. Decide where runs are stored. A caller that passed its own checkpointer (every test) gets
-    #    no engine and no admission slots; the real wiring builds both, because the single-flight
-    #    lease needs a real connection to hold (ADR 0016) and the pool needs a bound (ADR 0022).
+    # 1. Decide where runs are stored. A caller that passed its own checkpointer gets no engine and
+    #    no run slots; the real wiring builds both, because the lease needs a connection to hold.
     resolved_settings = settings or get_settings()
     engine: Engine | None = None
     slots: RunSlots | None = None
@@ -203,9 +202,8 @@ def create_app(
 
     task: RunTask = run_task or investigate
 
-    # 3. Build the app and hang the resolved wiring off it, so tests and the routes below can reach
-    #    the same objects. The body-size cap is added first, which makes it the OUTERMOST layer: an
-    #    over-long body is refused before any route, parser or authentication touches it.
+    # 3. Build the app and hang that wiring off it. The body-size cap goes on first, which makes it
+    #    the OUTERMOST layer: an over-long body is refused before any route or parser touches it.
     app = FastAPI(title="Incident Commander", version="0.1.0")
     app.state.settings = resolved_settings
     app.state.checkpointer = resolved_checkpointer
@@ -262,8 +260,8 @@ def create_app(
         skew_seconds = resolved_settings.webhook_max_skew_seconds
         now = time.time()
 
-        # 3. The newer scheme: the signature covers {timestamp}.{nonce}.{body}, so a replayed
-        #    delivery can be recognised and refused rather than merely suppressed.
+        # 3. The newer scheme, chosen by the nonce header being present: check the signature over
+        #    timestamp, nonce and body, then refuse one that is too old or a nonce seen before.
         if nonce_header is not None:
             if timestamp_header is None:
                 # The timestamp is part of the signed material here, so without it there is nothing
@@ -290,8 +288,8 @@ def create_app(
                 raise HTTPException(
                     status.HTTP_401_UNAUTHORIZED, "replayed delivery: nonce already seen"
                 )
-        # 4. The legacy scheme, still used by the pinned platform image and older tooling: the
-        #    signature covers the body alone, so two genuine deliveries are indistinguishable.
+        # 4. No nonce, so the legacy scheme the pinned platform image still uses: check the
+        #    signature over the body alone, and treat a repeat as an honest retry, not an attack.
         else:
             if not verify(body, signature, secret):
                 raise HTTPException(status.HTTP_401_UNAUTHORIZED, "invalid or missing signature")
@@ -323,10 +321,8 @@ def create_app(
             ) from err
 
         alert = payload.model_dump()
-        # 6. Work out which incident this alert belongs to, so a second delivery of the same alert
-        #    joins the run already investigating it instead of starting a rival one (ADR 0016).
-        #    Run in a worker thread: the derivation does up to 64 blocking database reads, and on
-        #    the event loop those would stop /health from answering (ADR 0022).
+        # 6. Work out which incident this alert belongs to, so a second delivery joins the run
+        #    already investigating it (ADR 0016). In a thread: it does up to 64 blocking reads.
         try:
             incident_id = await run_in_threadpool(derive_incident_id, alert, resolved_checkpointer)
         # A failure here must not lose the alert, so fall back to a brand-new id: the alert is
@@ -340,10 +336,8 @@ def create_app(
 
         run = start_run(alert, resolved_settings, datetime.now(UTC), incident_id=incident_id)
 
-        # 7. Write the incident down BEFORE answering 202, so an agent that dies immediately after
-        #    acknowledging has still left a record of the alert (finding B-04). The write happens
-        #    only when nothing is stored for this incident yet: a fresh first snapshot on top of a
-        #    run already in flight would hand its resume path a state with the evidence missing.
+        # 7. Write the incident down BEFORE answering 202, so an agent that dies right after
+        #    acknowledging has still recorded the alert (finding B-04) — and only if nothing is yet.
         try:
             await run_in_threadpool(_write_ingress_checkpoint, resolved_checkpointer, run)
         except Exception:
@@ -354,9 +348,8 @@ def create_app(
                 str(resolved_settings.agent_enabled).lower(),
             )
 
-        # 8. The kill switch: with AGENT_ENABLED false the alert is still accepted and recorded, and
-        #    no investigation is started (docs/safety-model.md#kill-switch). Humans are paged by the
-        #    platform either way, so refusing the delivery would lose the record and help nobody.
+        # 8. The kill switch: with AGENT_ENABLED false the alert is still accepted and recorded and
+        #    no run starts. The platform pages a human anyway; refusing would just lose the record.
         if not resolved_settings.agent_enabled:
             _log.warning(
                 "kill switch active (AGENT_ENABLED=false): recorded incident %s "
@@ -365,9 +358,8 @@ def create_app(
             )
             return IngestResponse(incident_id=run.incident_id)
 
-        # 9. Hand the run to a background task and answer 202 immediately. Every accepted delivery
-        #    starts a task; whether it actually investigates is decided later by the single-flight
-        #    lease, which is the one place that can tell whether another worker already owns this.
+        # 9. Hand the run to a background task and answer 202 at once. Every accepted delivery
+        #    starts a task; whether it investigates is settled later, by the lease, not here.
         background_tasks.add_task(task, run, resolved_settings, resolved_checkpointer)
         return IngestResponse(incident_id=run.incident_id)
 
@@ -481,16 +473,16 @@ def _run_investigation(
                 )
                 return
 
-            # 4. From here the lease is ours, so a crash in this worker is ours to record.
+            # 4. Record that this worker holds the lease: that is the condition the crash rail
+            #    checks, so from here on a crash in this run is ours to write down as FAILED.
             held_lease = True
             # 5. Decide where to start from: the alert as it arrived, or the newest stored snapshot
             #    of an earlier attempt at the same incident.
             latest = checkpointer.load(run.incident_id)
             if latest is None:
                 resuming = run
-            # 6. The incident already finished — resolved, escalated or failed. Leave it alone:
-            #    resuming a FAILED run would retry it on every redelivery of the same alert, and a
-            #    problem that comes back is a new incident rather than a continuation of this one.
+            # 6. The incident already finished — resolved, escalated or failed. Leave it alone: a
+            #    problem that comes back opens a new incident, it does not retry this one.
             elif latest.state.is_terminal:
                 _log.info(
                     "incident %s already reached terminal state %s; not resuming",
@@ -498,9 +490,8 @@ def _run_investigation(
                     latest.state.value,
                 )
                 return
-            # 7. The incident is waiting for a human to approve an action. Resuming from there is
-            #    not built yet (ADR 0016): the transition would raise, and the crash rail below
-            #    would mark an incident that is patiently waiting as FAILED. Leave it untouched.
+            # 7. The incident is waiting for a human to approve an action. Resuming that is not
+            #    built yet (ADR 0016): it would raise, and the crash rail would mark it FAILED.
             elif latest.state is IncidentState.AWAITING_APPROVAL:
                 _log.info(
                     "incident %s is awaiting_approval; approval-bound resume is not "
@@ -519,9 +510,8 @@ def _run_investigation(
                         latest.state.value,
                     )
 
-            # 9. Open one platform connection for this run and drive the state machine to a terminal
-            #    state. The INVESTIGATING transition is replaced per run, because it is the one that
-            #    needs that connection; the shared TRANSITIONS table itself is left untouched.
+            # 9. Open one platform connection and drive the state machine to a terminal state. Only
+            #    the INVESTIGATING transition is swapped, on a copy: it is the one needing a client.
             with make_client(settings) as client:
                 transitions: dict[IncidentState, Transition] = dict(TRANSITIONS)
                 transitions[IncidentState.INVESTIGATING] = make_investigate(client)

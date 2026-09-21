@@ -258,9 +258,8 @@ class MCPClient:
             "method": method,
             "params": dict(params),
         }
-        # 2. Assemble the per-request headers and timeout. The headers are copied rather than
-        #    mutated because a lab credential belongs to one call, not to the whole client, and an
-        #    explicit timeout is how a slow Tier-1 action gets longer than an ordinary read.
+        # 2. Assemble this request's headers and timeout. The headers are COPIED, because a lab
+        #    credential belongs to one call; the timeout lets a slow action outlast a read's limit.
         headers = self._headers if extra_headers is None else {**self._headers, **extra_headers}
         post_kwargs: dict[str, Any] = {"json": body, "headers": headers}
         if timeout_seconds is not None:

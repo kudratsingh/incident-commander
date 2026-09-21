@@ -255,10 +255,9 @@ class RedisHealthOutput(BaseModel):
 
 # --- get_outbox_status (read) --------------------------------------------
 #
-# A read-only tool over the outbox table: work the platform has committed and still has to PUBLISH.
-# That is not consumer lag, which is work already published and not yet consumed. Null means
-# "nothing to report", not zero, and `unpublished_past_attempt_limit` counts rows that are ALSO in
-# `unpublished_count`, so adding the two together double-counts them.
+# A read-only tool over the outbox table: work the platform committed and still has to PUBLISH — not
+# consumer lag, which is work already published. Null means "nothing to report", not zero, and
+# `unpublished_past_attempt_limit` counts rows ALSO in `unpublished_count`, so never add the two.
 
 
 class GetOutboxStatusOutput(BaseModel):
@@ -321,9 +320,8 @@ class GetSloStatusOutput(BaseModel):
 # --- get_circuit_breakers (read) -----------------------------------------
 #
 # A read-only tool, no arguments (platform ADR 0030). Each breaker's state is kept in Redis under
-# `breaker:state:<name>`, stamped by whichever process owns it, so `reported_age_s` is the age of
-# that entry and not a sign of life. An empty list with `unknown_reason` set means nothing could be
-# read about any breaker — never that no breaker is open.
+# `breaker:state:<name>` and stamped by the process that owns it, so `reported_age_s` is that
+# entry's age, not a sign of life. An empty list with `unknown_reason` set means nothing was read.
 
 
 class CircuitBreakerReading(BaseModel):
@@ -665,9 +663,8 @@ class InvalidateCacheKeyOutput(BaseModel):
 # --- v0.4.0 DLQ categorization tools ------------------------------------
 #
 # Three tools that replaced the all-or-nothing ``replay_dlq_messages`` with ones that respect the
-# platform's own verdict on a job: ``replay_dlq_by_ids`` replays up to 50 named jobs,
-# ``replay_dlq_by_category`` replays a whole category and refuses `human_required`, and
-# ``mark_dlq_permanent`` fences such a job. ``delay_seconds`` makes the PLATFORM hold a replay back.
+# platform's verdict on a job: ``replay_dlq_by_ids`` replays up to 50 named jobs,
+# ``replay_dlq_by_category`` a category but never `human_required`, ``mark_dlq_permanent`` fences.
 
 
 class ReplayDlqByIdsInput(BaseModel):

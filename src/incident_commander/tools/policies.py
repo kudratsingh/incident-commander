@@ -212,10 +212,9 @@ def is_cached_read(tool_name: str) -> bool:
     return tool_name in CACHED_READ_FRESHNESS_SECONDS
 
 
-# For each tool, the argument fields whose value NAMES a particular thing on the platform (a cache
-# key, a job id) rather than filtering a list. A plan may fill these only by copying a value word
-# for word from the alert or the evidence ledger, never by inventing or retyping one (ADR 0009).
-# Every tool in the registry needs an entry; `tests/unit/test_policies.py` fails if one is missing.
+# Per tool, the argument fields whose value NAMES one thing on the platform (a cache key, a job id)
+# rather than filtering a list. A plan may fill these only by copying a value word for word out of
+# the alert or the evidence ledger (ADR 0009). Every tool needs an entry, and a test pins that.
 RESOURCE_ARG_FIELDS: Final[dict[str, frozenset[str]]] = {
     # `key` names one cache entry, so the same copy-it-exactly rule applies as to the tool that
     # deletes that entry — a mistyped key reads a different entry and proves nothing.
@@ -323,7 +322,8 @@ def ensure_covered() -> None:
             f"in TOOL_REGISTRY with no tier: {', '.join(unclassified)} — "
             "classify each in _READ_TOOLS, _TIER_1_TOOLS or _TIER_2_TOOLS"
         )
-    # 2. A tier entry for a tool that no longer exists: harmless today, misleading tomorrow.
+    # 2. A tier entry naming a tool the registry no longer has: nothing breaks today, but it reads
+    #    as a decision about a live tool, so report it as a stale line to delete.
     if stale := sorted(classified - registered):
         problems.append(
             f"assigned a tier but not in TOOL_REGISTRY: {', '.join(stale)} — drop the stale entry"

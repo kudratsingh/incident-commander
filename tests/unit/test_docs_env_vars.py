@@ -14,7 +14,7 @@ from typing import Final
 
 import pytest
 
-from incident_commander.config import Settings
+from incident_commander.config import Settings, settings_env_var_names
 
 _REPO_ROOT: Final[Path] = Path(__file__).resolve().parents[2]
 _CLAUDE_MD: Final[Path] = _REPO_ROOT / "CLAUDE.md"
@@ -197,3 +197,9 @@ def test_claude_md_names_no_pre_package_src_paths() -> None:
         "This vocabulary is what evals.yml's path filter was written against (A-08).\n"
         + "\n".join(stale)
     )
+
+
+def test_claude_md_states_the_real_settings_count() -> None:
+    """CLAUDE.md said 34 while ``Settings`` read 51 (WO-R3-319); the number is derived, not kept."""
+    stated = re.findall(r"`Settings` reads (\d+) variables", _CLAUDE_MD.read_text())
+    assert stated == [str(len(settings_env_var_names()))]

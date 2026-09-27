@@ -1102,6 +1102,18 @@ _JUSTIFIED: Final[dict[tuple[object, ...], tuple[str, str]]] = {
         "probe, so a correct run never consumes it and no live walk could produce it; both "
         "elements share this row",
     ),
+    # WO-R3-353 (INC-005, ADR 0077), the same shape as the two rows above. ONE row, generic over
+    # the three elements; `source`, `lag_known` and `cache_key` agree with the platform for
+    # `worker-dispatcher`, and the restart's answer is never probed (a probe does not act).
+    ("verify_judge_reads_history_backwards", "get_consumer_lag", "lag", "value"): (
+        CANNED_ONLY,
+        "the world is the seventh take's own two readings of worker-dispatcher — 29, then 55 "
+        "served 48 ms after the restart but measured before it — plus a third reading of 0 "
+        "measured after it, and `use_live_mcp` is false, so the sequence is the scenario's "
+        "premise rather than a recording of anything. The un-faulted world the check probes "
+        "answers 0. The THIRD element is the reading ADR 0077's gate polls for, so a run "
+        "before the gate never consumes it; all three elements share this row",
+    ),
     # Group 2: a hot-set key nothing seeds. `create_stale_cache` writes
     # `cache:jobs:worker-dispatcher:hot_set`; this scenario's key is a different one, so the
     # un-faulted world answers `exists: false` with every field null. Five rows because an

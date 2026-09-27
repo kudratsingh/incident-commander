@@ -169,7 +169,9 @@ _EXPECTED_HASHES: Final[dict[str, str]] = {
     # ADR 0070: the fix table now says which node of the chain the routing is aimed at. And
     # by WO-R3-321 / ADR 0071: it is told the cleared-before-action refusal is structural.
     "remediation_planner": ("8b6026da7b47322170f65a5fe08099ff78196f738856779bf15f461480531dea"),
-    "verification_judge": ("6d55bbfb6efebdaa6b5b032839094c9cf7ec0547377df74fcd595ffb9b93d1e3"),
+    # Moved by WO-R3-353 / ADR 0077 (INC-005): the judge is told how its reading's sample
+    # history is laid out — oldest first, with a computed trend and the action's time.
+    "verification_judge": ("2aa252b4a168105c6246caa3b1ff96ed498b6043c9165059af213d03ef279f73"),
     "output_repair": ("461943691f22c6fb6c0c1b62a1cb356dc43eab3ec963b21db069a5701e86a1a0"),
 }
 

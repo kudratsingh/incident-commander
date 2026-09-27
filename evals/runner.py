@@ -2045,9 +2045,12 @@ def run_scenario(
         # JUDGE_MODEL, not agent_model: this decides RESOLVED and was the one judgement left
         # on an unpinned model. It judges an expectation the agent wrote for itself.
         model=settings.judge_model,
-        # Poll only against a real platform; one canned read is already authoritative.
-        probe_attempts=settings.verify_probe_attempts if live_mcp_available else 1,
-        probe_delay_seconds=settings.verify_probe_delay_seconds,
+        # A canned world polls as often as the scenario says (one unless it is about polling),
+        # with no wait between polls: canned answers do not change with time.
+        probe_attempts=(
+            settings.verify_probe_attempts if live_mcp_available else scenario.canned_verify_polls
+        ),
+        probe_delay_seconds=settings.verify_probe_delay_seconds if live_mcp_available else 0.0,
         # The loop's own clock, so each poll in a multi-minute window is stamped when it happened.
         clock=tick,
         max_attempts=settings.max_remediation_attempts,

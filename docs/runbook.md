@@ -124,7 +124,7 @@ shared platform, with real spend and no reset between scenarios; run one at a
 time with a reset between, the full protocol is below.
 
 (Until 2026-09 neither refusal existed. A bare `make eval-live` was stopped
-only by the exit-8 canned-only gate, which fires because 16 scenarios declare
+only by the exit-8 canned-only gate, which fires because 17 scenarios declare
 no live leg — a fact about `evals/scenarios/`, not about the command, and one
 that would stop being true the moment every one of them gained a live leg.
 That count is written down here and nowhere else: the runner and the tests
@@ -145,7 +145,7 @@ is a documented substring override, and neither path spends or shares state).
 
 Trace files land in `evals/traces/*.jsonl`; the formatter turns them into readable stepwise trajectories in `evals/reports/human/<scenario>/*.txt` — one folder per scenario, and one new file per run, not one per scenario per run (WO-R3-257). `evals/reports/README.md` maps the whole folder.
 
-**Cost:** roughly $0.05 per read-only scenario, $0.07 per remediation scenario. Current suite of 66 (~50 live: 34 read-only, 16 remediation) is ~$2.82 of tokens end to end — but never in one invocation, for the reason above. A smoke pass is ~$1.15 of that; the remediation scenarios are the rest, paid one run at a time.
+**Cost:** roughly $0.05 per read-only scenario, $0.07 per remediation scenario. Current suite of 67 (~50 live: 34 read-only, 16 remediation) is ~$2.82 of tokens end to end — but never in one invocation, for the reason above. A smoke pass is ~$1.15 of that; the remediation scenarios are the rest, paid one run at a time.
 
 **Side effects:** remediation scenarios fire real Tier-1 mutations against the platform. Idempotent — repeat runs with the same `(incident_id, tool, args)` hash return the cached result. But the *first* run of a scenario does apply changes.
 
@@ -520,6 +520,8 @@ Environment variable knobs for the live path (see [ADR 0006](ADR/0006-verificati
 | `INVESTIGATE_REPROBE_DELAY_SECONDS` | 20 | 75 | Delay before the freshness re-read. Must **straddle** the cached tool's staleness window, not merely be shorter than it (lag cache: 60s → 75). |
 
 `.env.example` now ships the live-recommended values for these knobs uncommented (canned/offline runs are unaffected — the runner forces single-probe and no-reprobe whenever the platform is a placeholder), and a `--live` run that still has them at canned-equivalent values prints a preflight warning. This table stays the source of record.
+
+**Since [ADR 0077](ADR/0077-resolved-needs-a-reading-taken-after-the-action.md) (INC-005) the verify window is spent differently on the platform's own pages.** When the alert states a number and its threshold (the platform's `consumer_stalled` page does), a judge's `verified` resolves the run only if a reading of the alerted group measured AFTER the action is below the threshold. The first verify read lands milliseconds after the restart and is almost always older than it, so expect the ledger to show `_verify_reading_gate … verified_on_stale_reading` on poll 1 and the run to resolve on poll 2, one `VERIFY_PROBE_DELAY_SECONDS` later. That is the gate working, not a flaky run. If every poll is refused the run escalates naming the last reading and its time — the backlog did not visibly drain inside the window; read the lag before re-running. A canned run polls once unless its scenario sets `canned_verify_polls` (only `verify_judge_reads_history_backwards` does).
 
 **Why the reprobe delay is 75 and not 20** (live run 2026-08-31, "run B" —
 [`docs/lessons/live-eval-sequence-2026-09.md`](lessons/live-eval-sequence-2026-09.md)).
@@ -1241,7 +1243,8 @@ first pin that moved the REQUEST and left `tools/list` byte-identical; the eleve
 with v0.6.18, the first pin that made a platform CONSTANT a setting this stack then
 sets to something else; the twelfth with v0.6.19, the first release that changes
 nothing on the agent's side of the wire at all; the thirteenth with v0.6.20, the
-first pin where the new setting changes how fast the DEMO can build its fault):
+first pin where the new setting changes how fast the DEMO can build its fault; and
+v0.6.21, the second console-only release, needed no new step — item 12 covers it):
 
 1. Update `demo/compose.yml` — **all THREE platform-code services**
    (`migrate`, `platform`, `api`) and the prose that names the version:
@@ -1847,6 +1850,10 @@ first pin where the new setting changes how fast the DEMO can build its fault):
     archive records is the digest out of `demo/compose.yml`
     (`platform_image_digest`), so a half-pinned stack also mislabels every archive
     it produces.
+
+    v0.6.21 (WO-R3-353's last item, for WO-R3-354's console) is the second: console-only
+    again, `make snapshot` against the live v0.6.21 stack came back with **no diff** (40
+    tools) and `make test-contract` passed. All four services re-pinned all the same.
 
     **The one-line rebless note still gets written**, in the hub's
     `docs/wave4-specs/rebless-notes.md`, and it says the diff was empty. A version

@@ -136,16 +136,16 @@ class TestSplitsAreByTemplate:
         }
 
     def test_the_shipped_corpus_loads(self) -> None:
-        """66 scenarios, no straddle. The check is inert until it is not.
+        """67 scenarios, no straddle. The check is inert until it is not.
 
         41 until WO-R3-202's four, 45 until WO-R3-214's four, 49 until WO-R3-226's
         four, 53 until WO-R3-228's two, 55 until WO-R3-236's two, 57 until
         WO-R3-229's cascade, 58 until WO-R3-221's four, 62 until WO-R3-284's
         fifth `workflow_stuck` world, 63 until WO-R3-331's INC-004 reproduction,
-        64 until WO-R3-332's sibling of it and 65 until WO-R3-339's demo-only
-        replay-safe DLQ backlog. A pin, not a derivation.
+        64 until WO-R3-332's sibling of it, 65 until WO-R3-339's demo-only
+        replay-safe DLQ backlog and 66 until WO-R3-353's INC-005 reproduction. A pin.
         """
-        assert len(CORPUS) == 66
+        assert len(CORPUS) == 67
 
 
 class TestClosedVocabularies:
@@ -323,6 +323,14 @@ class TestPromotionIsReconciled:
             "uncategorized",
             "harness_control",
             "the planner's own probe-elsewhere path; the withdrawn move is the subject",
+        ),
+        # WO-R3-353 (INC-005, ADR 0077). The rule answers `consumer_lag` because the alert IS
+        # the platform's lag page; recorded as the fourth `harness_control` member because what
+        # is measured is which reading the VERIFY LOOP resolves on, not the lag diagnosis.
+        "verify_judge_reads_history_backwards": (
+            "consumer_lag",
+            "harness_control",
+            "the verify loop's post-action gate is the subject, not the world",
         ),
         "remediate_verify_fails": ("uncategorized", "consumer_lag", "alert IS consumer lag"),
         # WO-R3-202 (WP-4.3). No needle for an outbox or a dispatch pipeline, so the rule
@@ -557,6 +565,13 @@ class TestPromotionIsReconciled:
             "single",
             "control",
             "the schema the settled step is offered is the subject, not the world",
+        ),
+        # WO-R3-353 (ADR 0077), `control` on the same second meaning: the backlog is real and a
+        # diagnosis is not what is scored.
+        "verify_judge_reads_history_backwards": (
+            "single",
+            "control",
+            "the reading RESOLVED rests on is the subject, not the world",
         ),
     }
 

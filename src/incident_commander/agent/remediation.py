@@ -43,6 +43,12 @@ from incident_commander.agent.planner_context import (
     VERIFY_JUDGE_MARKER,
     render_already_attempted,
 )
+from incident_commander.agent.post_action import (
+    GateVerdict,
+    gate_miss,
+    judge_view,
+    metric_expectation,
+)
 from incident_commander.agent.state import (
     EvidenceEntry,
     IncidentState,
@@ -117,6 +123,8 @@ _PLAN_REFUSED_SUBJECT_TARGET_MARKER: Final[str] = "_plan_refused_subject_target"
 # The one refusal that ends the run instead of asking again (ADR 0071's rule): this run's own
 # newest reading already shows the fault gone, so there is no better plan to ask for.
 _PLAN_REFUSED_CLEARED_MARKER: Final[str] = "_plan_refused_cleared_before_action"
+# Ledger row for a `verified` the loop did not accept: no post-action reading inside the threshold.
+POST_ACTION_GATE_MARKER: Final[str] = "_verify_reading_gate"
 
 # How many characters of the verify reading a failed-attempt record quotes back to the planner. A
 # whole queue listing would crowd out its context, and the full reading is on the ledger anyway.
@@ -2081,6 +2089,11 @@ def make_llm_verify(
         at_attempt = at
         last_reading = ""
         last_reasoning = ""
+        # A metric-shaped alert (a number with a threshold) resolves only on a reading taken after
+        # the action (ADR 0077); `last_gate` is why the newest `verified` was not accepted.
+        metric = metric_expectation(run_state.alert)
+        action = _action_entry_of(run_state, plan)
+        last_gate: tuple[GateVerdict, str] | None = None
         for attempt in range(probe_attempts):
             # 3. Escalate before sleeping if the budget is spent, except on the very first poll:
             #    ADR 0006 allows one verify read over budget, not one per polling attempt.
@@ -2128,8 +2141,10 @@ def make_llm_verify(
                     llm_client,
                     plan=plan,
                     probe_summary=probe_summary,
-                    action_summary=_action_result_of(run_state, plan),
+                    action_summary=action.result_summary if action is not None else None,
                     model=model,
+                    action_at=action.timestamp if action is not None else None,
+                    read_at=at_attempt,
                 )
             except (ValueError, ValidationError, LLMError) as err:
                 run_state = run_state.model_copy(
@@ -2171,18 +2186,40 @@ def make_llm_verify(
                     "updated_at": at_attempt,
                 }
             )
-            # 7. Send this verdict to the console immediately, not when polling ends: a step that
+            # 7. A `verified` on a metric-shaped alert counts only if a reading of the alerted
+            #    subject taken AFTER the action is inside the threshold (ADR 0077, INC-005).
+            #    Otherwise the refusal goes on the ledger and the loop polls again.
+            last_gate = None
+            if judgment.verdict == "verified" and metric is not None:
+                last_gate = gate_miss(run_state, metric)
+            if last_gate is not None:
+                run_state = run_state.model_copy(
+                    update={
+                        "evidence": (
+                            *run_state.evidence,
+                            EvidenceEntry(
+                                tool_name=POST_ACTION_GATE_MARKER,
+                                arguments={"verdict": last_gate[0], **ordinal},
+                                result_summary=f"{last_gate[0]}: {last_gate[1]}",
+                                timestamp=at_attempt,
+                            ),
+                        )
+                    }
+                )
+            # 8. Send this verdict to the console immediately, not when polling ends: a step that
             #    polls for minutes showing nothing looks to a watcher like a hung run.
             if planner_log is not None:
                 planner_log.verdict(
                     hypotheses=tuple(run_state.hypotheses),
-                    verdict=judgment.verdict,
-                    reasoning=judgment.reasoning,
+                    verdict=judgment.verdict if last_gate is None else last_gate[0],
+                    reasoning=judgment.reasoning if last_gate is None else last_gate[1],
                     attempt=attempt + 1,
                     of=probe_attempts,
                 )
+            if last_gate is not None:
+                continue
             if judgment.verdict == "verified":
-                # 8. The action worked — but some Tier-1 tools only stabilize. A pause verifies
+                # 9. The action worked — but some Tier-1 tools only stabilize. A pause verifies
                 #    and still leaves the chain stuck, so it never resolves (ADR 0026's rule).
                 try:
                     policy = resolution_class_of(plan.action_tool)
@@ -2220,8 +2257,8 @@ def make_llm_verify(
                         attempted_tool=plan.action_tool,
                         attempted_arguments=plan.action_arguments,
                     )
-                # 9. One question left, about the incident rather than the action: has the alerted
-                #    condition cleared, and is any second cause still unaddressed (ADR 0059)?
+                # 10. One question left, about the incident rather than the action: has the alerted
+                #     condition cleared, and is any second cause still unaddressed (ADR 0059)?
                 condition = _uncleared_alert_condition(plan, run_state) or (
                     _unaddressed_second_cause(plan, run_state)
                 )
@@ -2254,10 +2291,22 @@ def make_llm_verify(
                         attempted_tool=plan.action_tool,
                         attempted_arguments=plan.action_arguments,
                     )
-                # 10. Verified, the alerted condition is clear and no cause is left: RESOLVED.
+                # 11. Verified, the alerted condition is clear and no cause is left: RESOLVED.
                 return run_state.with_state(IncidentState.RESOLVED, at_attempt)
 
-        # 11. Every poll came back ``not_verified``: take one more remediation attempt if one is
+        # 12. The last poll's `verified` was refused for want of a post-action reading, so hand
+        #     off naming that reading (ADR 0077); a second action would not make a reading newer.
+        if last_gate is not None:
+            return _escalate_remediation(
+                run_state,
+                at_attempt,
+                f"{plan.action_tool} ran and the judge said verified, but RESOLVED needs a reading "
+                f"taken after the action that is below the alert's threshold (ADR 0077), and "
+                f"{probe_attempts} verify poll(s) did not produce one: {last_gate[1]}.",
+                attempted_tool=plan.action_tool,
+                attempted_arguments=plan.action_arguments,
+            )
+        # 13. Every poll came back ``not_verified``: take one more remediation attempt if one is
         #     left, otherwise hand the incident off (ADR 0056's rule).
         declined = _retry_declined(
             run_state, plan, max_attempts=max_attempts, verdict="not_verified"
@@ -2299,12 +2348,18 @@ def _tool_context_block(name: str) -> str:
     return f"  - {name}: {indented}\n    input_schema={schema}"
 
 
-def _action_result_of(run_state: RunState, plan: RemediationPlan) -> str | None:
-    """What the executed action itself reported, if it is on the ledger."""
+def _action_entry_of(run_state: RunState, plan: RemediationPlan) -> EvidenceEntry | None:
+    """The executed action's own ledger entry, if it is on the ledger."""
     for entry in reversed(run_state.evidence):
         if entry.tool_name == plan.action_tool:
-            return entry.result_summary
+            return entry
     return None
+
+
+def _action_result_of(run_state: RunState, plan: RemediationPlan) -> str | None:
+    """What the executed action itself reported, if it is on the ledger."""
+    entry = _action_entry_of(run_state, plan)
+    return entry.result_summary if entry is not None else None
 
 
 def judge_verification(
@@ -2314,6 +2369,8 @@ def judge_verification(
     probe_summary: str,
     action_summary: str | None,
     model: str,
+    action_at: datetime | None = None,
+    read_at: datetime | None = None,
 ) -> RepairedCall[VerificationJudgment]:
     """Ask the ``action_verifier`` whether the executed action worked.
 
@@ -2323,31 +2380,40 @@ def judge_verification(
     return call_with_output_repair(
         llm_client,
         system_prompt=load_prompt(VERIFICATION_JUDGE_PROMPT),
-        user_message=format_verify_context(plan, probe_summary, action_summary),
+        user_message=format_verify_context(
+            plan, probe_summary, action_summary, action_at=action_at, read_at=read_at
+        ),
         output_model=VerificationJudgment,
         model=model,
     )
 
 
 def format_verify_context(
-    plan: RemediationPlan, probe_summary: str, action_summary: str | None = None
+    plan: RemediationPlan,
+    probe_summary: str,
+    action_summary: str | None = None,
+    *,
+    action_at: datetime | None = None,
+    read_at: datetime | None = None,
 ) -> str:
-    """What the judge is shown.
+    """What the judge is shown. Public since WP-6.3, so the calibration asks in a run's bytes.
 
-    Public since WP-6.3, so the calibration asks in exactly the bytes a run would.
     ``action_summary`` is the action's own response: a delayed replay is unjudgeable without it.
+    A reading with a sample history is shown oldest first with a trend and the action's time
+    (``post_action.judge_view``, ADR 0077); any other reading is shown as it came back.
     """
     action_block = (
         f"Remediation result:\n{action_summary}\n\n"
         if action_summary is not None
         else "Remediation result: (not recorded)\n\n"
     )
+    reading = judge_view(plan.verify_tool, probe_summary, action_at=action_at, read_at=read_at)
     return (
         f"Remediation attempted: {plan.action_tool}({json.dumps(plan.action_arguments)})\n"
         f"Target hypothesis: {plan.target_hypothesis}\n\n"
         f"{action_block}"
         f"Verify probe: {plan.verify_tool}({json.dumps(plan.verify_arguments)})\n"
-        f"Verify probe result:\n{probe_summary}\n\n"
+        f"Verify probe result:\n{reading}\n\n"
         f"Expected behavior after fix:\n{plan.verify_expectation}\n"
     )
 

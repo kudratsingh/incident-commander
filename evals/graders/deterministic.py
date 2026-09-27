@@ -46,6 +46,7 @@ from incident_commander.agent.hypothesis import HypothesisCategory
 from incident_commander.agent.planner_context import (
     VERIFY_JUDGE_MARKER as _VERIFY_JUDGE_MARKER,
 )
+from incident_commander.agent.post_action import gate_miss, gate_pass_note, metric_expectation
 from incident_commander.agent.state import EvidenceEntry, IncidentState, RunState
 from incident_commander.tools.registry import TOOL_REGISTRY
 
@@ -1088,13 +1089,18 @@ def _grade_evidence(
 
     Every half is optional; a scenario may set any combination or none.
     """
-    # 1. The scenario set none of the four evidence expectations, so there is nothing to check:
-    #    pass, and let the detail say so rather than implying the checks ran and held.
+    # 1. A RESOLVED run on a metric-shaped alert must hold a reading of the alerted subject taken
+    #    after its action and below the threshold (ADR 0077, INC-005), whatever the scenario asks.
+    reading_failure, reading_note = _post_action_reading(run)
+    # 2. The scenario set none of the four evidence expectations and the rule above did not
+    #    apply, so there is nothing to check: say so rather than imply the checks ran and held.
     if not (
         exp.expected_evidence_contains
         or exp.expected_evidence_fields
         or exp.forbidden_evidence_contains
         or exp.expect_briefing_contains
+        or reading_failure
+        or reading_note
     ):
         return DimensionResult(
             dimension=GradeDimension.EVIDENCE,
@@ -1102,9 +1108,9 @@ def _grade_evidence(
             detail="no evidence expectations set",
         )
 
-    # 2. The two substring halves, over every evidence summary joined into one string: the signals
+    # 3. The two substring halves, over every evidence summary joined into one string: the signals
     #    that must appear somewhere, and the ones that must appear nowhere.
-    failures: list[str] = []
+    failures: list[str] = [reading_failure] if reading_failure else []
     corpus = " ".join(e.result_summary for e in run.evidence)
     missing = [s for s in exp.expected_evidence_contains if s not in corpus]
     if missing:
@@ -1112,7 +1118,7 @@ def _grade_evidence(
     present = [s for s in exp.forbidden_evidence_contains if s in corpus]
     if present:
         failures.append(f"forbidden signals present: {', '.join(present)}")
-    # 3. Then each structured claim about a field's VALUE, adding one failure detail per claim
+    # 4. Then each structured claim about a field's VALUE, adding one failure detail per claim
     #    that did not hold and one note per ``any_of`` group, saying which branch held.
     satisfied_notes: list[str] = []
     for claim in exp.expected_evidence_fields:
@@ -1121,7 +1127,7 @@ def _grade_evidence(
             failures.append(detail)
         elif note is not None:
             satisfied_notes.append(note)
-    # 4. Then the briefing as the human receives it. If the scenario asks for text in one and the
+    # 5. Then the briefing as the human receives it. If the scenario asks for text in one and the
     #    caller passed none, FAIL: a lost briefing is not a satisfied assertion.
     if exp.expect_briefing_contains:
         if briefing is None:
@@ -1142,7 +1148,7 @@ def _grade_evidence(
             detail="; ".join(failures),
         )
 
-    # 5. Nothing failed, so build a detail naming what WAS checked and how many of each: a bare
+    # 6. Nothing failed, so build a detail naming what WAS checked and how many of each: a bare
     #    "passed" leaves a reader unable to tell a real check from an empty one.
     satisfied: list[str] = []
     if exp.expected_evidence_contains:
@@ -1160,11 +1166,34 @@ def _grade_evidence(
         satisfied.append(
             f"briefing carries all {len(exp.expect_briefing_contains)} required signal(s)"
         )
+    if reading_note:
+        satisfied.append(reading_note)
     return DimensionResult(
         dimension=GradeDimension.EVIDENCE,
         passed=True,
         detail="; ".join(satisfied),
     )
+
+
+def _post_action_reading(run: RunState) -> tuple[str | None, str | None]:
+    """ADR 0077's rule read off a finished run: ``(failure, note)``, both ``None`` when inert.
+
+    Inert unless the run RESOLVED on an alert that states a number and its threshold. The
+    failure names the reading's time and the action's, which is INC-005's whole finding.
+    """
+    if run.state is not IncidentState.RESOLVED:
+        return None, None
+    expectation = metric_expectation(run.alert)
+    if expectation is None:
+        return None, None
+    miss = gate_miss(run, expectation)
+    if miss is not None:
+        return (
+            f"RESOLVED without a reading taken after the action inside the threshold "
+            f"(ADR 0077, INC-005): {miss[1]}",
+            None,
+        )
+    return None, gate_pass_note(run, expectation)
 
 
 def _selector_clause(exp: EvidenceFieldExpectation) -> str:

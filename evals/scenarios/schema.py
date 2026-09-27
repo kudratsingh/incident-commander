@@ -779,6 +779,9 @@ class Scenario(BaseModel):
     # When True the runner ignores ``canned_llm_responses`` and builds real clients for every
     # role. Skipped under a placeholder key, and non-deterministic, so no regression gate.
     use_live_llm: bool = False
+    # How many verify polls a CANNED run makes (a live run uses VERIFY_PROBE_ATTEMPTS). One is
+    # enough for most canned worlds; a scenario about re-polling declares more (ADR 0077).
+    canned_verify_polls: int = Field(default=1, ge=1, le=10)
     # Optional single hook fired before a live run. LEGACY and deliberately kept: every shipped
     # scenario spells its one fault this way, and ``chaos`` below normalizes it to a plan.
     chaos_setup: ChaosHook | None = None
@@ -829,6 +832,8 @@ class Scenario(BaseModel):
             "canned_llm_responses",
             "use_live_mcp",
             "use_live_llm",
+            # Harness timing for a canned run; no model reads it.
+            "canned_verify_polls",
             "chaos_setup",
             "chaos_plan",
             "expected_precondition",

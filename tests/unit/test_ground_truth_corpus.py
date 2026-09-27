@@ -78,6 +78,10 @@ _DECIDED: Final[Mapping[str, tuple[Category, ...] | None]] = {
     # which READS the loop still offers once that ranking has settled, so grading the label
     # would again score the script for agreeing with its own fixture.
     "planner_probes_elsewhere_forever": None,
+    # WO-R3-353 (INC-005, ADR 0077), the third `harness_control` abstention and the same
+    # reasoning: the diagnosis is the premise, and what is measured is which READING the verify
+    # loop resolves on, so a label would score the script for agreeing with its own fixture.
+    "verify_judge_reads_history_backwards": None,
     "postgres_slow": (Category.DB_QUERY_LATENCY,),
     "redis_saturation": (Category.REDIS_SATURATION,),
     "remediate_consumer_lag_success": (Category.CONSUMER_SATURATION,),
@@ -246,7 +250,7 @@ class TestEveryScenarioCarriesADecision:
         """The number in the PR body, checked against the corpus that produced it."""
         corpus = _corpus()
         graded = [s for s in corpus if s.root_cause_graded]
-        assert (len(graded), len(corpus)) == (55, 66), (
+        assert (len(graded), len(corpus)) == (55, 67), (
             f"{len(graded)} of {len(corpus)} scenarios are root-cause graded; "
             "WO-R3-261 landed 32 of 41, WO-R3-202 took it to 36 of 45, WO-R3-214 "
             "to 40 of 49, WO-R3-226 to 44 of 53, WO-R3-228 to 46 of 55, WO-R3-236 to "
@@ -259,7 +263,8 @@ class TestEveryScenarioCarriesADecision:
             "for the same reason. WO-R3-339's demo-only DLQ world takes it to 55 of 66: "
             "it is the first scenario added for the DEMO rather than for the benchmark, "
             "and it carries a label anyway, because ADR 0038 makes one mandatory "
-            "whatever a scenario is for. Every "
+            "whatever a scenario is for. WO-R3-353's INC-005 reproduction moves the "
+            "denominator alone again, to 55 of 67, abstaining on the same family. Every "
             "`jobs_not_progressing`, `temporal_recovery`, `workflow_stuck`, "
             "`api_latency`, retry, multi-fault and cascading scenario carries a label, "
             "because ADR 0038 makes one mandatory for a new scenario. Update this "

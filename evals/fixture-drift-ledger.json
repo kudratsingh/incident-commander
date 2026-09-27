@@ -12,9 +12,9 @@
     "no-hook": "the fixture describes a fault no chaos hook can produce, so the canned value is the scenario's premise and the check probes a world that never had it. Not a defect; the fix, if that scenario is ever to run live, is a platform hook"
   },
   "_counts": {
-    "recorded": 182,
+    "recorded": 183,
     "fixture-defect": 10,
-    "explained": 172
+    "explained": 173
   },
   "known_drift": [
     {
@@ -1089,6 +1089,14 @@
       "kind": "live_only_field",
       "context": "canned-only",
       "why": "same scenario, same deliberate malformation \u2014 v0.6.0 made this a third field the fixture deliberately omits"
+    },
+    {
+      "scenario": "verify_judge_reads_history_backwards",
+      "tool": "get_consumer_lag",
+      "path": "lag",
+      "kind": "value",
+      "context": "canned-only",
+      "why": "the world is the seventh take's own two readings of worker-dispatcher \u2014 29, then 55 served 48 ms after the restart but measured before it \u2014 plus a third reading of 0 measured after it, and `use_live_mcp` is false, so the sequence is the scenario's premise rather than a recording of anything. The un-faulted world the check probes answers 0. The THIRD element is the reading ADR 0077's gate polls for, so a run before the gate never consumes it; all three elements share this row"
     },
     {
       "scenario": "workflow_stuck_dead_lettered_root",

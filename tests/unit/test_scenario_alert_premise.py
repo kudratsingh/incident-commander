@@ -111,6 +111,12 @@ _NON_WEBHOOK_ALERT_FIELDS: Final[frozenset[str]] = frozenset(
         # WO-R3-202 / ADR 0051: the `jobs_not_progressing` noise variant carries the
         # running release. NOT in `ALERT_SUBJECT_PROBES` — a release needs no probe.
         "deploy_version",
+        # WO-R3-353 / ADR 0077: the platform's own `consumer_stalled` page (platform ADR 0039),
+        # which `--alert-from-platform` takes verbatim (ADR 0076), carries these at top level.
+        # `threshold` is what makes an alert metric-shaped for the post-action gate.
+        "lag",
+        "measured_at",
+        "threshold",
     }
 )
 

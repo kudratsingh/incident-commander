@@ -95,7 +95,8 @@ def test_ledger_holds_no_entry_that_is_already_fixed(probe) -> None:  # type: ig
         listing = "\n".join(f"  {key}" for key in stale)
         pytest.fail(
             f"{len(stale)} ledger entr(ies) no longer drift — the fixture was fixed. "
-            f"Stack context was {probe.stack_context}; delete these lines from {LEDGER_PATH.name} "
+            f"Stack context was {probe.stack_context} because {probe.stack_context_reason}; "
+            f"delete these lines from {LEDGER_PATH.name} "
             f"(or run `{_BLESS}`):\n{listing}"
         )
 

@@ -144,6 +144,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     for error in result.errors:
         print(f"  UNCHECKED {error.scenario}:{error.tool} — {error.detail}")
+    print(f"stack context: {result.stack_context} because {result.stack_context_reason}")
     print(f"rate-limited calls: {result.rate_limited_calls}")
     for scenario, tool in result.rate_limited:
         print(f"  RATE-LIMITED {scenario}:{tool} — not read, so its rows are neither new nor stale")
@@ -205,7 +206,12 @@ def main(argv: list[str] | None = None) -> int:
         print("git add + commit the ledger to bless the current fixture state.")
         return 0
 
-    new, stale = classify(result.drifts, load_ledger(), unobserved=result.rate_limited)
+    new, stale = classify(
+        result.drifts,
+        load_ledger(),
+        stack_context=result.stack_context,
+        unobserved=result.rate_limited,
+    )
     print(
         f"drift observed: {len(result.drifts)}  new: {len(new)}  stale ledger entries: {len(stale)}"
     )

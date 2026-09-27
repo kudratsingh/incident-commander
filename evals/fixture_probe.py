@@ -26,6 +26,7 @@ _TIMEOUT_SECONDS = 20.0
 _RATE_LIMIT_BACKOFF_SECONDS: Final[tuple[float, ...]] = (2.0, 4.0, 8.0, 16.0)
 _RATE_LIMIT_BUDGET_SECONDS: Final[float] = 60.0
 _RATE_LIMITED: Final[str] = "HTTP 429 from the platform"
+_NO_LAG_READING: Final[str] = "no get_consumer_lag('worker-dispatcher') reading was compared"
 
 # Read tools whose non-empty result proves the eval fixture pack is loaded.
 # Both are seeded unconditionally by the platform's seed_eval_fixtures.py.
@@ -61,7 +62,10 @@ class ProbeResult:
     # the run's COVERAGE, which is what licenses the bless path to delete a
     # ledger entry. ``checked`` is a count and cannot answer that.
     compared: tuple[tuple[str, str], ...] = ()
+    # `warm` means the metrics loop measured worker-dispatcher's lag within its last window,
+    # `cold` that it has not (just booted, or just after `make eval-reset`) — not the volume's age.
     stack_context: str = "unknown"
+    stack_context_reason: str = _NO_LAG_READING
     # Pairs a 429 kept this run from reading, after the back-off (WO-R3-307). Not errors and
     # not compared: their ledger rows are neither new nor stale this run.
     rate_limited: tuple[tuple[str, str], ...] = ()
@@ -116,6 +120,7 @@ def probe_live(
     rate_limited: dict[tuple[str, str], None] = {}
     backoff = _Backoff()
     stack_context = "unknown"
+    stack_context_reason = _NO_LAG_READING
     errors: list[ProbeError] = [
         ProbeError(
             scenario=call.scenario,
@@ -168,10 +173,14 @@ def probe_live(
                 call.tool == "get_consumer_lag"
                 and call.arguments.get("consumer_group") == "worker-dispatcher"
             ):
-                stack_context = (
-                    "warm"
-                    if payload.get("lag_known") is True and payload.get("measured_at")
-                    else "cold"
+                measured = payload.get("lag_known") is True and bool(payload.get("measured_at"))
+                stack_context = "warm" if measured else "cold"
+                stack_context_reason = (
+                    f"get_consumer_lag('worker-dispatcher') answered "
+                    f"lag_known={json.dumps(payload.get('lag_known'))}, "
+                    f"measured_at={json.dumps(payload.get('measured_at'))}: the metrics loop "
+                    + ("has" if measured else "has not")
+                    + " measured the lag within its last window"
                 )
             compared[call.scenario, call.tool] = None
     finally:
@@ -186,6 +195,7 @@ def probe_live(
         # A pair with one element read and another refused was not fully read.
         compared=tuple(pair for pair in compared if pair not in rate_limited),
         stack_context=stack_context,
+        stack_context_reason=stack_context_reason,
         rate_limited=tuple(rate_limited),
         rate_limited_calls=sum(1 for _, error in cache.values() if error == _RATE_LIMITED),
     )

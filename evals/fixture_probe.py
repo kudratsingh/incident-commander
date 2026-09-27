@@ -8,9 +8,10 @@ the read-scoped principal — see ``probe_live``.
 from __future__ import annotations
 
 import json
+import time
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Final
 
 import httpx
 
@@ -19,6 +20,12 @@ from incident_commander.tools.policies import Tier, tier_of
 from incident_commander.tools.registry import TOOL_REGISTRY
 
 _TIMEOUT_SECONDS = 20.0
+
+# The MCP server allows 120 calls a minute per principal. A 429 is retried after each of these
+# waits in turn, and the whole run sleeps at most _RATE_LIMIT_BUDGET_SECONDS on them.
+_RATE_LIMIT_BACKOFF_SECONDS: Final[tuple[float, ...]] = (2.0, 4.0, 8.0, 16.0)
+_RATE_LIMIT_BUDGET_SECONDS: Final[float] = 60.0
+_RATE_LIMITED: Final[str] = "HTTP 429 from the platform"
 
 # Read tools whose non-empty result proves the eval fixture pack is loaded.
 # Both are seeded unconditionally by the platform's seed_eval_fixtures.py.
@@ -55,6 +62,11 @@ class ProbeResult:
     # ledger entry. ``checked`` is a count and cannot answer that.
     compared: tuple[tuple[str, str], ...] = ()
     stack_context: str = "unknown"
+    # Pairs a 429 kept this run from reading, after the back-off (WO-R3-307). Not errors and
+    # not compared: their ledger rows are neither new nor stale this run.
+    rate_limited: tuple[tuple[str, str], ...] = ()
+    # Distinct live calls still refused with a 429 after the back-off.
+    rate_limited_calls: int = 0
 
 
 def unregistered_calls(calls: Iterable[CannedCall]) -> tuple[CannedCall, ...]:
@@ -101,6 +113,8 @@ def probe_live(
     cache: dict[tuple[str, str, int], tuple[Mapping[str, Any] | None, str | None]] = {}
     drifts: list[Drift] = []
     compared: dict[tuple[str, str], None] = {}
+    rate_limited: dict[tuple[str, str], None] = {}
+    backoff = _Backoff()
     stack_context = "unknown"
     errors: list[ProbeError] = [
         ProbeError(
@@ -114,15 +128,19 @@ def probe_live(
         for call in {(c.scenario, c.tool): c for c in unregistered}.values()
     ]
     try:
-        assert_seeded(http, mcp_url, token)
+        assert_seeded(http, mcp_url, token, backoff=backoff)
         for call in probed:
             # Keyed by POSITION as well as by call: element 1 is what the platform
             # said after the agent acted, so answering it from element 0's snapshot
             # compares a post-action recording against the pre-action world.
             key = (call.tool, json.dumps(dict(call.arguments), sort_keys=True), call.index)
             if key not in cache:
-                cache[key] = _call_tool(http, mcp_url, token, call.tool, dict(call.arguments))
+                cache[key] = backoff.call(http, mcp_url, token, call.tool, dict(call.arguments))
             payload, error = cache[key]
+            if error == _RATE_LIMITED:
+                # Still refused after the back-off: no reading, so no verdict on its rows.
+                rate_limited[call.scenario, call.tool] = None
+                continue
             if (error is not None or payload is None) and call.chaos_seeded:
                 # A chaos-seeded fixture is probed BEFORE its hook fires, so
                 # `get_dag_state` answering "job not found" is an OBSERVATION of
@@ -165,20 +183,50 @@ def probe_live(
         checked=len(probed),
         skipped_write_tier=len(all_calls) - len(probed) - len(unregistered),
         live_calls=len(cache),
-        compared=tuple(compared),
+        # A pair with one element read and another refused was not fully read.
+        compared=tuple(pair for pair in compared if pair not in rate_limited),
         stack_context=stack_context,
+        rate_limited=tuple(rate_limited),
+        rate_limited_calls=sum(1 for _, error in cache.values() if error == _RATE_LIMITED),
     )
 
 
-def assert_seeded(client: httpx.Client, mcp_url: str, token: str) -> None:
+class _Backoff:
+    """Retries a 429 after each of ``_RATE_LIMIT_BACKOFF_SECONDS``, within one run-wide budget."""
+
+    def __init__(self) -> None:
+        self.remaining = _RATE_LIMIT_BUDGET_SECONDS
+
+    def call(
+        self,
+        client: httpx.Client,
+        mcp_url: str,
+        token: str,
+        name: str,
+        arguments: dict[str, Any],
+    ) -> tuple[Mapping[str, Any] | None, str | None]:
+        """``_call_tool``, retried while the platform answers 429 and the budget lasts."""
+        for delay in _RATE_LIMIT_BACKOFF_SECONDS:
+            payload, error = _call_tool(client, mcp_url, token, name, arguments)
+            if error != _RATE_LIMITED or delay > self.remaining:
+                return payload, error
+            self.remaining -= delay
+            time.sleep(delay)
+        return _call_tool(client, mcp_url, token, name, arguments)
+
+
+def assert_seeded(
+    client: httpx.Client, mcp_url: str, token: str, *, backoff: _Backoff | None = None
+) -> None:
     """Refuse to compare fixtures against a platform that carries no data.
 
     An unseeded platform answers every list tool with ``[]``, so every fixture
     looks wrong and the one real signal is buried. A check whose premise was never
     established reports that it could not run, not a result.
     """
+    patient = backoff or _Backoff()
     for tool, collection in _SEED_WITNESSES:
-        payload, error = _call_tool(client, mcp_url, token, tool, {})
+        payload, error = patient.call(client, mcp_url, token, tool, {})
         if error is not None:
             raise UnseededPlatformError(f"seed witness {tool} failed: {error}")
         if payload and payload.get(collection):
@@ -216,6 +264,8 @@ def _call_tool(
         )
         response.raise_for_status()
     except httpx.HTTPStatusError as err:
+        if err.response.status_code == httpx.codes.TOO_MANY_REQUESTS:
+            return None, _RATE_LIMITED
         return None, f"HTTP {err.response.status_code} from the platform"
     except httpx.HTTPError as err:
         # Connect, read, write, timeout, protocol — the platform was not

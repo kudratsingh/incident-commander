@@ -60,7 +60,12 @@ def probe():  # type: ignore[no-untyped-def]
 
 
 def test_no_fixture_drift_outside_the_ledger(probe) -> None:  # type: ignore[no-untyped-def]
-    new, _ = classify(probe.drifts, load_ledger(), stack_context=probe.stack_context)
+    new, _ = classify(
+        probe.drifts,
+        load_ledger(),
+        stack_context=probe.stack_context,
+        unobserved=probe.rate_limited,
+    )
     if new:
         listing = "\n".join(f"  {drift.describe()}" for drift in new)
         pytest.fail(
@@ -80,7 +85,12 @@ def test_ledger_holds_no_entry_that_is_already_fixed(probe) -> None:  # type: ig
     recording it has to leave in the same PR — a guard whose exception list only grows is
     not a guard.
     """
-    _, stale = classify(probe.drifts, load_ledger(), stack_context=probe.stack_context)
+    _, stale = classify(
+        probe.drifts,
+        load_ledger(),
+        stack_context=probe.stack_context,
+        unobserved=probe.rate_limited,
+    )
     if stale:
         listing = "\n".join(f"  {key}" for key in stale)
         pytest.fail(
@@ -99,6 +109,12 @@ def test_every_fixture_was_actually_reachable(probe) -> None:  # type: ignore[no
     if probe.errors:
         listing = "\n".join(f"  {e.scenario}:{e.tool} — {e.detail}" for e in probe.errors)
         pytest.fail(f"{len(probe.errors)} canned fixture(s) could not be checked:\n{listing}")
+    if probe.rate_limited:
+        listing = "\n".join(f"  {scenario}:{tool}" for scenario, tool in probe.rate_limited)
+        pytest.fail(
+            f"rate-limited calls: {probe.rate_limited_calls}. These fixtures were never read, "
+            f"so their ledger rows were not judged; wait a minute and re-run:\n{listing}"
+        )
 
 
 def test_the_walk_is_not_vacuous(probe) -> None:  # type: ignore[no-untyped-def]

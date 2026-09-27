@@ -1431,9 +1431,11 @@ first pin where the new setting changes how fast the DEMO can build its fault):
    **1** on the next, minutes apart, with the same ledger and the same stack — the
    42 was a rate limit and the 1 is the real, documented local-volume row. The tell
    is a stale list spanning scenarios you did not touch, and the fix is to wait a
-   minute and run it again. `evals/fixture_probe.py::assert_seeded` catches the
-   case where the FIRST call is refused (`UnseededPlatformError: HTTP 429`); a
-   refusal partway through is silent.
+   minute and run it again. **Since WO-R3-307 the probe handles this itself:** a
+   429 is retried after 2, 4, 8 and 16 s (at most 60 s of waiting per run), and a
+   call still refused after that is "not read" — its rows are neither new nor
+   stale, the report prints `rate-limited calls: N` with each fixture named, and
+   the run exits 1 (a bless refuses) until a re-run reads them.
 
    v0.6.14 adds the fourth way, and it is the one a busy day produces: **a stack
    whose last 24 hours are not empty makes a fault fixture look live.**

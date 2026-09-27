@@ -2044,14 +2044,19 @@ def dump_ledger(
 
 
 def classify(
-    drifts: Iterable[Drift], ledger: frozenset[DriftKey], *, stack_context: str = "unknown"
+    drifts: Iterable[Drift],
+    ledger: frozenset[DriftKey],
+    *,
+    stack_context: str = "unknown",
+    unobserved: Collection[tuple[str, str]] = (),
 ) -> tuple[tuple[Drift, ...], tuple[DriftKey, ...]]:
     """Split observed drift into ``(new, stale_ledger_entries)``.
 
-    ``new`` is drift the ledger does not record — the check's actual subject.
-    ``stale`` is recorded drift that no longer occurs, which means a fixture
-    was fixed and its line here has to go.
+    ``new`` is drift the ledger does not record; ``stale`` is recorded drift that no longer
+    occurs, so its line has to go. A row whose ``(scenario, tool)`` is in ``unobserved`` (a
+    call the platform rate-limited, WO-R3-307) was not read, so it is never stale.
     """
+    unread = set(unobserved)
     observed = {drift.key for drift in drifts}
     generic_observed = {key[:4] for key in observed}
     matched = {key for key in ledger if key in observed or key in generic_observed}
@@ -2062,8 +2067,11 @@ def classify(
         sorted(
             key
             for key in ledger - matched
-            if context_of(key)[0] not in {COLD_STACK, WARM_STACK, TRAFFIC_STACK}
-            or context_of(key)[0].removesuffix("-stack") == stack_context
+            if (key[0], key[1]) not in unread
+            and (
+                context_of(key)[0] not in {COLD_STACK, WARM_STACK, TRAFFIC_STACK}
+                or context_of(key)[0].removesuffix("-stack") == stack_context
+            )
         )
     )
     return new, stale

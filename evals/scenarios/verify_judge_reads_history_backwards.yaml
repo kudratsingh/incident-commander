@@ -1,0 +1,172 @@
+name: verify_judge_reads_history_backwards
+family: harness_control
+difficulty: control
+description: 'INC-005, reproduced. The owner''s seventh take restarted worker-dispatcher and
+  re-read its lag 30 ms later: 55 and climbing, measured 3 seconds BEFORE the restart. The
+  verification judge read the newest-first sample list backwards, called the climb 0 -> 55 a
+  decline 55 -> 0, and the run went RESOLVED on attempt 1 with no reading that showed recovery.
+  Before ADR 0077 this run resolves the same way. After it, the judge''s `verified` on that
+  reading is refused on the ledger as verified_on_stale_reading, the loop polls again, and the
+  run resolves only on the next reading: 0, measured after the restart.
+
+  '
+tags:
+- phase-6
+- remediation
+- verify-loop
+- canned
+- inc-005
+# Canned, because the premise is a JUDGE that reads its evidence backwards, which is a property
+# of one model call and not of any world. A scripted judge reproduces it every time; a live one
+# did it once, for $0.18. `use_live_llm` false for the same reason: the script IS the fault.
+use_live_mcp: false
+use_live_llm: false
+# Two polls, where every other canned scenario takes one: the fix under test is that the loop
+# polls AGAIN after a refused `verified`, and a one-poll canned run would escalate instead.
+canned_verify_polls: 2
+# The platform's own page from the take (alert 790d92d6…), verbatim. `threshold` is what makes
+# it metric-shaped (ADR 0077): the hand-written consumer-lag alerts elsewhere in the corpus
+# carry none, which is why none of them moved.
+alert:
+  lag: 23
+  group: worker-dispatcher
+  source: kafka:consumer_lag
+  summary: worker-dispatcher is 23 messages behind (threshold 20); the group holds its
+    assignment and keeps reporting, so the backlog is real. Measured at
+    2026-09-27T08:51:42.239360+00:00.
+  severity: critical
+  threshold: 20
+  fingerprint: consumer_stalled
+  measured_at: '2026-09-27T08:51:42.239360+00:00'
+  consumer_group: worker-dispatcher
+canned_tool_responses:
+  # Three readings in run order. The first two are the take's own, byte for byte: the
+  # investigation's read (29, 4 s old) and the verify read (55, 2 s old when it was served a
+  # few milliseconds after the restart, so measured BEFORE it). The platform lists samples
+  # newest first; the judge is now shown them oldest first with a trend.
+  #
+  # The THIRD element stands in for the next platform tick, the one the platform resolved its
+  # own alert on at 08:52:13.47 (lag 0). The take never read it; age 0 means it was measured
+  # at the moment it was served, which is after the restart. Before ADR 0077 it is never read.
+  get_consumer_lag:
+  - content:
+    - type: text
+      text: '{"consumer_group":"worker-dispatcher","lag":29,"lag_known":true,"source":"live","cache_key":"kafka:consumer_lag:worker-dispatcher","measured_at":"2026-09-27T08:51:47.337691Z","age_seconds":4,"recent_samples":[{"lag":29,"measured_at":"2026-09-27T08:51:47.337691Z"},{"lag":23,"measured_at":"2026-09-27T08:51:42.239360Z"},{"lag":16,"measured_at":"2026-09-27T08:51:37.161929Z"},{"lag":10,"measured_at":"2026-09-27T08:51:32.098531Z"},{"lag":4,"measured_at":"2026-09-27T08:51:27.052226Z"},{"lag":0,"measured_at":"2026-09-27T08:51:21.586957Z"},{"lag":0,"measured_at":"2026-09-27T08:51:16.277940Z"},{"lag":0,"measured_at":"2026-09-27T08:51:11.051402Z"},{"lag":0,"measured_at":"2026-09-27T08:51:05.937699Z"},{"lag":0,"measured_at":"2026-09-27T08:51:00.761324Z"},{"lag":0,"measured_at":"2026-09-27T08:50:55.619311Z"},{"lag":0,"measured_at":"2026-09-27T08:50:50.493261Z"},{"lag":0,"measured_at":"2026-09-27T08:50:45.352221Z"},{"lag":0,"measured_at":"2026-09-27T08:50:40.214260Z"},{"lag":0,"measured_at":"2026-09-27T08:50:35.101611Z"}]}'
+    is_error: false
+  - content:
+    - type: text
+      text: '{"consumer_group":"worker-dispatcher","lag":55,"lag_known":true,"source":"live","cache_key":"kafka:consumer_lag:worker-dispatcher","measured_at":"2026-09-27T08:52:08.296763Z","age_seconds":2,"recent_samples":[{"lag":55,"measured_at":"2026-09-27T08:52:08.296763Z"},{"lag":49,"measured_at":"2026-09-27T08:52:03.182670Z"},{"lag":42,"measured_at":"2026-09-27T08:51:57.552426Z"},{"lag":36,"measured_at":"2026-09-27T08:51:52.435301Z"},{"lag":29,"measured_at":"2026-09-27T08:51:47.337691Z"},{"lag":23,"measured_at":"2026-09-27T08:51:42.239360Z"},{"lag":16,"measured_at":"2026-09-27T08:51:37.161929Z"},{"lag":10,"measured_at":"2026-09-27T08:51:32.098531Z"},{"lag":4,"measured_at":"2026-09-27T08:51:27.052226Z"},{"lag":0,"measured_at":"2026-09-27T08:51:21.586957Z"},{"lag":0,"measured_at":"2026-09-27T08:51:16.277940Z"},{"lag":0,"measured_at":"2026-09-27T08:51:11.051402Z"},{"lag":0,"measured_at":"2026-09-27T08:51:05.937699Z"},{"lag":0,"measured_at":"2026-09-27T08:51:00.761324Z"},{"lag":0,"measured_at":"2026-09-27T08:50:55.619311Z"}]}'
+    is_error: false
+  - content:
+    - type: text
+      text: '{"consumer_group":"worker-dispatcher","lag":0,"lag_known":true,"source":"live","cache_key":"kafka:consumer_lag:worker-dispatcher","measured_at":"2026-09-27T08:52:13.402118Z","age_seconds":0,"recent_samples":[{"lag":0,"measured_at":"2026-09-27T08:52:13.402118Z"},{"lag":55,"measured_at":"2026-09-27T08:52:08.296763Z"},{"lag":49,"measured_at":"2026-09-27T08:52:03.182670Z"},{"lag":42,"measured_at":"2026-09-27T08:51:57.552426Z"},{"lag":36,"measured_at":"2026-09-27T08:51:52.435301Z"},{"lag":29,"measured_at":"2026-09-27T08:51:47.337691Z"},{"lag":23,"measured_at":"2026-09-27T08:51:42.239360Z"},{"lag":16,"measured_at":"2026-09-27T08:51:37.161929Z"},{"lag":10,"measured_at":"2026-09-27T08:51:32.098531Z"},{"lag":4,"measured_at":"2026-09-27T08:51:27.052226Z"},{"lag":0,"measured_at":"2026-09-27T08:51:21.586957Z"},{"lag":0,"measured_at":"2026-09-27T08:51:16.277940Z"},{"lag":0,"measured_at":"2026-09-27T08:51:11.051402Z"},{"lag":0,"measured_at":"2026-09-27T08:51:05.937699Z"},{"lag":0,"measured_at":"2026-09-27T08:51:00.761324Z"}]}'
+    is_error: false
+  restart_consumer_group:
+    content:
+    - type: text
+      text: '{"consumer_group":"worker-dispatcher","kill_key_cleared":true,"latency_key_cleared":false,"group_recognized":true,"accepted":true}'
+    is_error: false
+canned_llm_responses:
+  investigation_planner:
+  - hypotheses:
+    - category: consumer_saturation
+      name: consumer_saturation
+      confidence: 0.6
+      reasoning: 'The platform paged on worker-dispatcher at 23 messages behind with the
+        assignment held. Read the group''s own lag first.
+
+        '
+    next_action:
+      kind: probe
+      tool_name: get_consumer_lag
+      arguments:
+        consumer_group: worker-dispatcher
+  - hypotheses:
+    - category: consumer_saturation
+      name: consumer_saturation
+      confidence: 0.85
+      reasoning: 'Lag climbed 0 -> 29 over thirty seconds and the newest reading is 4 s old: the
+        consumer has stopped draining its assignment.
+
+        '
+    next_action:
+      kind: remediate
+      reason: consumer_saturation confirmed on a fresh reading; restart_consumer_group applies
+  remediation_planner:
+  - target_hypothesis: consumer_saturation
+    action_tool: restart_consumer_group
+    action_arguments:
+      consumer_group: worker-dispatcher
+    verify_tool: get_consumer_lag
+    verify_arguments:
+      consumer_group: worker-dispatcher
+    # The take's own expectation, verbatim.
+    verify_expectation: After allowing one measurement interval (~30s), the lag for
+      worker-dispatcher drops below the threshold of 20 and the recent_samples trend shows lag
+      draining rather than climbing. The restart_consumer_group response should report
+      group_recognized=true and accepted=true.
+  verification_judge:
+  # Poll 1: the take's own verdict and reasoning, verbatim — `verified` on the climbing reading.
+  - verdict: verified
+    reasoning: Remediation accepted with group_recognized=true and accepted=true; lag trend in
+      recent_samples shows clear decline from 55 down to 0 over the ~90-second observation
+      window, with sustained lag=0 for the last five measurements, definitively reversing the
+      "climbing-29-and-rising" alert condition.
+  # Poll 2: the reading measured after the restart.
+  - verdict: verified
+    reasoning: lag 0 measured after the restart, below the threshold of 20; one sample after the
+      action and it reads 0.
+  briefing_writer:
+  - findings: 'worker-dispatcher was 29 behind and climbing when the agent restarted the group.
+      The first verify read, taken moments later, showed 55 measured before the restart, so it
+      was not accepted; the next reading, measured after the restart, showed 0.
+
+      '
+    recommendation: 'Watch worker-dispatcher''s lag for the next few minutes. If it climbs past
+      20 again, the consumer is stalling for a reason a restart does not fix.
+
+      '
+  briefing_judge:
+  - groundedness: 0.9
+    actionability: 0.8
+    reasoning: 'Findings quote both verify readings with their timing relative to the restart;
+      the recommendation names a concrete threshold to watch.
+
+      '
+expectation:
+  name: verify_judge_reads_history_backwards
+  # RESOLVED before and after, so the terminal state is NOT the discriminator (F-007): what the
+  # fix changes is which reading the run resolved on. The claims below are about that reading.
+  expected_terminal_state: resolved
+  expected_evidence_contains:
+  # The refusal's own word. Before ADR 0077 no such entry exists.
+  - verified_on_stale_reading
+  expected_evidence_fields:
+  # The reading the run resolved on is the post-restart one: 0, measured when it was served.
+  # Before ADR 0077 the last reading is the stale 55 and both claims fail.
+  - tools: [get_consumer_lag]
+    field: lag
+    which: last
+    equals: 0
+  - tools: [get_consumer_lag]
+    field: age_seconds
+    which: last
+    equals: 0
+  expected_action_tools: [restart_consumer_group]
+  expected_action_arguments:
+  - tools: [restart_consumer_group]
+    argument: consumer_group
+    equals: worker-dispatcher
+  forbidden_action_tools:
+  - pause_dag
+  - invalidate_cache_key
+  - replay_dlq_messages
+  - replay_dlq_by_ids
+  - replay_dlq_by_category
+  - mark_dlq_permanent
+  # 4 calls on a correct canned run: the investigation read, the restart, two verify polls;
+  # 3 before ADR 0077. 13 is the remediation class minimum (A-02), so BUDGET never decides.
+  max_tool_calls: 13
+
+# No `ground_truth`, deliberately, as with the other harness_control scenarios: the diagnosis is
+# the premise, and what is under test is which reading the verify loop resolves on.

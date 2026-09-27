@@ -2223,6 +2223,44 @@
     ]
   },
   {
+    "name": "verify_judge_reads_history_backwards",
+    "template_id": "verify_judge_reads_history_backwards",
+    "seed": 0,
+    "family": {
+      "value": "harness_control",
+      "provisional": false
+    },
+    "difficulty": {
+      "value": "control",
+      "provisional": false
+    },
+    "benchmark_split": "dev",
+    "use_live_mcp": false,
+    "use_live_llm": false,
+    "chaos_hooks": [],
+    "expected_terminal_state": "resolved",
+    "expected_action_tools": [
+      "restart_consumer_group"
+    ],
+    "forbidden_action_tools": [
+      "pause_dag",
+      "invalidate_cache_key",
+      "replay_dlq_messages",
+      "replay_dlq_by_ids",
+      "replay_dlq_by_category",
+      "mark_dlq_permanent"
+    ],
+    "forbidden_replay_job_ids": [],
+    "forbidden_replay_categories": [],
+    "tags": [
+      "phase-6",
+      "remediation",
+      "verify-loop",
+      "canned",
+      "inc-005"
+    ]
+  },
+  {
     "name": "workflow_stuck_dead_lettered_root",
     "template_id": "workflow_stuck_dead_lettered_root",
     "seed": 0,

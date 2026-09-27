@@ -258,6 +258,8 @@ _JUSTIFIED_WITHOUT_PRECONDITION: dict[str, str] = {
     "retry_identical_refused": "canned-only scenario; needs WP-10.0's sticky fault",
     "retry_cap_escalates": "canned-only scenario; needs WP-10.0's sticky fault",
     "stabilizer_then_reinvestigate": "canned-only scenario; ships with the edge, not a world",
+    # WO-R3-353 (INC-005, ADR 0077): the fault is a judge reading its evidence backwards.
+    "verify_judge_reads_history_backwards": "canned-only scenario; the premise is a model call",
 }
 
 

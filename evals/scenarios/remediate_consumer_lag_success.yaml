@@ -92,6 +92,24 @@ canned_llm_responses:
     reasoning: 'The verify probe reads lag 0 after the restart: the kill flag was cleared (kill_key_cleared=true), the supervisor re-spawned the consumer, and the backlog has drained.
 
       '
+  # A canned run polls once and reads only the verdict above. A rehearsal on the stack polls up
+  # to VERIFY_PROBE_ATTEMPTS times, and ADR 0077 refuses a `verified` on a reading measured
+  # before the restart, so the scripted judge needs one verdict per poll; the gate decides.
+  - verdict: verified
+    reasoning: Scripted rehearsal verdict; the loop accepts it only on a lag reading measured
+      after the restart and below the threshold.
+  - verdict: verified
+    reasoning: Scripted rehearsal verdict; the loop accepts it only on a lag reading measured
+      after the restart and below the threshold.
+  - verdict: verified
+    reasoning: Scripted rehearsal verdict; the loop accepts it only on a lag reading measured
+      after the restart and below the threshold.
+  - verdict: verified
+    reasoning: Scripted rehearsal verdict; the loop accepts it only on a lag reading measured
+      after the restart and below the threshold.
+  - verdict: verified
+    reasoning: Scripted rehearsal verdict; the loop accepts it only on a lag reading measured
+      after the restart and below the threshold.
   briefing_writer:
   - findings: 'worker-dispatcher had stopped processing while retaining its group assignment; lag climbed to 15000. The agent restarted the consumer group (kill flag cleared); the supervisor re-spawned it and the follow-up probe shows lag back at 0.
 

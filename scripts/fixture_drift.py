@@ -144,10 +144,21 @@ def main(argv: list[str] | None = None) -> int:
     )
     for error in result.errors:
         print(f"  UNCHECKED {error.scenario}:{error.tool} — {error.detail}")
+    print(f"stack context: {result.stack_context} because {result.stack_context_reason}")
+    print(f"rate-limited calls: {result.rate_limited_calls}")
+    for scenario, tool in result.rate_limited:
+        print(f"  RATE-LIMITED {scenario}:{tool} — not read, so its rows are neither new nor stale")
     for defect in shape_defects:
         print(f"  SHAPE {defect.describe()}")
 
     if args.bless:
+        if result.rate_limited:
+            print(
+                f"ERROR: refusing to bless — {len(result.rate_limited)} fixture(s) were "
+                "rate-limited (listed above) and never read. Wait a minute and re-run.",
+                file=sys.stderr,
+            )
+            return 2
         if result.errors:
             # The ledger IS the burn-down list, so rewriting it from a run that could not
             # read part of the suite silently deletes entries nothing disproved.
@@ -195,7 +206,12 @@ def main(argv: list[str] | None = None) -> int:
         print("git add + commit the ledger to bless the current fixture state.")
         return 0
 
-    new, stale = classify(result.drifts, load_ledger())
+    new, stale = classify(
+        result.drifts,
+        load_ledger(),
+        stack_context=result.stack_context,
+        unobserved=result.rate_limited,
+    )
     print(
         f"drift observed: {len(result.drifts)}  new: {len(new)}  stale ledger entries: {len(stale)}"
     )
@@ -205,7 +221,9 @@ def main(argv: list[str] | None = None) -> int:
         print(f"  STALE {key} — no longer drifted; delete this line from the ledger")
     if result.errors:
         print("\nA fixture that could not be probed is not a fixture that agrees.")
-    return 1 if (new or stale or result.errors or shape_defects) else 0
+    if result.rate_limited:
+        print("\nRate-limited fixtures were not read. Wait a minute and run it again.")
+    return 1 if (new or stale or result.errors or result.rate_limited or shape_defects) else 0
 
 
 if __name__ == "__main__":  # pragma: no cover

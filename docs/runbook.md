@@ -1420,6 +1420,20 @@ first pin where the new setting changes how fast the DEMO can build its fault):
    something else is a non-empty `new` list — the one half of this check that
    cannot be wrong about the ledger in the shrinking direction.
 
+   **What `warm` and `cold` mean, and where to read it (WO-R3-308).** The words
+   say whether the platform's metrics loop has measured `worker-dispatcher`'s lag
+   within its last window — nothing about how old the volume is or how long a
+   developer has been using it. Since the demo stack set
+   `METRICS_LOOP_INTERVAL_SECONDS: "5"`, the loop measures every 5 s, so CI's
+   freshly booted stack and a developer stack just after `make eval-reset` both
+   read `warm` within seconds; `cold` now means the check ran in those first
+   seconds or the loop is not running. The words were kept because they name the
+   `cold-stack` / `warm-stack` ledger contexts they select. `make fixture-drift`
+   prints `stack context: <warm|cold> because <the reading>` — the exact
+   `lag_known` and `measured_at` it saw — and now passes that context to the
+   stale check, so it and `make test-drift` no longer disagree about the
+   `warm-stack` rows.
+
    One more way the stale half lies, found by WP-8.5 and worth knowing before you
    believe a long list: **a rate-limited probe makes ledger rows look fixed.** The
    MCP server rate-limits per principal (`MCP_RATE_LIMIT_PER_PRINCIPAL`, 120/min),
@@ -1431,9 +1445,11 @@ first pin where the new setting changes how fast the DEMO can build its fault):
    **1** on the next, minutes apart, with the same ledger and the same stack — the
    42 was a rate limit and the 1 is the real, documented local-volume row. The tell
    is a stale list spanning scenarios you did not touch, and the fix is to wait a
-   minute and run it again. `evals/fixture_probe.py::assert_seeded` catches the
-   case where the FIRST call is refused (`UnseededPlatformError: HTTP 429`); a
-   refusal partway through is silent.
+   minute and run it again. **Since WO-R3-307 the probe handles this itself:** a
+   429 is retried after 2, 4, 8 and 16 s (at most 60 s of waiting per run), and a
+   call still refused after that is "not read" — its rows are neither new nor
+   stale, the report prints `rate-limited calls: N` with each fixture named, and
+   the run exits 1 (a bless refuses) until a re-run reads them.
 
    v0.6.14 adds the fourth way, and it is the one a busy day produces: **a stack
    whose last 24 hours are not empty makes a fault fixture look live.**
@@ -1449,7 +1465,9 @@ first pin where the new setting changes how fast the DEMO can build its fault):
    `new` was empty. Unlike the cold/warm rows these carry NO context word that
    `classify()` can exempt, because the mechanism is not the stack's warmth; if
    this recurs on every pin, the honest fix is a `busy-window` context, not a
-   bless.
+   bless. **That context now exists (WO-R3-326):** the three rows carry
+   `busy-window`, which `classify()` never reports stale on any stack, while
+   CI's empty window still reports them drifting as recorded.
 
    One more reading from v0.6.14, on the two tools disagreeing again, because it
    is now reproducible rather than anecdotal: `make fixture-drift` printed

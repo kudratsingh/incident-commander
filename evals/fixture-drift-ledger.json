@@ -8,12 +8,13 @@
     "canned-only": "the scenario never runs live, so its recordings are its premise rather than a recording of anything",
     "cold-stack": "the recording is of a warm stack and the check ran on a cold one: worker-dispatcher's lag is unmeasured for about the first minute after boot, so a fresh platform answers null where the recording says 0. Timing, not contract, and not fixable from either side",
     "warm-stack": "the mirror of cold-stack: the recording caught a freshly seeded world and the check ran against a volume that has been up long enough to have measured one. Timing, not contract",
+    "busy-window": "get_slo_status reads a rolling 24 h of the jobs table, which make eval-reset does not empty, so a busy day can make the fault value live too. Never reported stale; CI's empty window still reports it drifting",
     "no-hook": "the fixture describes a fault no chaos hook can produce, so the canned value is the scenario's premise and the check probes a world that never had it. Not a defect; the fix, if that scenario is ever to run live, is a platform hook"
   },
   "_counts": {
-    "recorded": 186,
+    "recorded": 182,
     "fixture-defect": 10,
-    "explained": 176
+    "explained": 172
   },
   "known_drift": [
     {
@@ -105,14 +106,6 @@
       "why": "the fixture was written against v0.6.13, which had no pool group; live answers one idle entry per process (`api_worker` and `mcp`, 0 of 5 checked out). Nothing in this world holds pool connections, so the reading a re-record wants is the idle one \u2014 the work is the re-record, not a judgement about the world"
     },
     {
-      "scenario": "api_latency_db_query",
-      "tool": "get_slo_status",
-      "path": "objectives[].total[]",
-      "kind": "not_live_reachable",
-      "context": "traffic-stack",
-      "why": "the recording was taken under sustained `make traffic`, which this family's preconditions require (`total >= 1`, because `total: 0` is an absence of evidence rather than health); the drift walk probes a quiet stack, which answers 0"
-    },
-    {
       "scenario": "api_latency_downstream",
       "tool": "get_circuit_breakers",
       "path": "breakers[].last_failure_reason_class[]",
@@ -149,7 +142,7 @@
       "tool": "get_slo_status",
       "path": "objectives[].budget_remaining_pct[]",
       "kind": "not_live_reachable",
-      "context": "post-fault",
+      "context": "busy-window",
       "why": "the same hook fails the bulk_api_sync jobs themselves, so they retry and dead-letter and spend the job-completion-rate error budget; the fixture reads -100.0 (the floor, on a budget spent and then some) where a healthy world reads 100.0. The value is CLAMPED rather than continuous, which is why it can be canned at all while `total`, `failed`, `burn_rate` and `current_success_rate` are volatile"
     },
     {
@@ -189,16 +182,8 @@
       "tool": "get_slo_status",
       "path": "objectives[].healthy[]",
       "kind": "not_live_reachable",
-      "context": "post-fault",
+      "context": "busy-window",
       "why": "the same reading's other boolean \u2014 an objective below its target is not healthy \u2014 false in the fault world and true in an idle one. Ledgered beside `fast_burn` rather than folded into it because they answer different questions (below target now, versus burning fast enough to page) and a world can be one without the other"
-    },
-    {
-      "scenario": "api_latency_downstream",
-      "tool": "get_slo_status",
-      "path": "objectives[].total[]",
-      "kind": "not_live_reachable",
-      "context": "traffic-stack",
-      "why": "same premise, same walk: 186 submitted jobs against a quiet stack's 0. Here the count also scopes the failure claims beside it \u2014 28 of 186 is a statement about these dispatches"
     },
     {
       "scenario": "api_latency_healthy_control",
@@ -217,14 +202,6 @@
       "why": "same pin, and on the control it is worth naming: the world's claim is that every shared dependency is at baseline, and after v0.6.14 that claim covers a group the fixture does not carry \u2014 the control asserts health over a reading it omits"
     },
     {
-      "scenario": "api_latency_healthy_control",
-      "tool": "get_slo_status",
-      "path": "objectives[].total[]",
-      "kind": "not_live_reachable",
-      "context": "traffic-stack",
-      "why": "same premise, and on the control it is load-bearing twice: without traffic the world's central claim (both budgets intact) would be asserted over no samples, which is INC-003's mistake in its strongest form"
-    },
-    {
       "scenario": "api_latency_redis",
       "tool": "get_postgres_health",
       "path": "pool_gauges_unknown_reason",
@@ -239,14 +216,6 @@
       "kind": "live_only_field",
       "context": "fixture-defect",
       "why": "same pin, same silence; this world's fault is Redis and its pool entries are idle"
-    },
-    {
-      "scenario": "api_latency_redis",
-      "tool": "get_slo_status",
-      "path": "objectives[].total[]",
-      "kind": "not_live_reachable",
-      "context": "traffic-stack",
-      "why": "same premise, same walk: 154 submitted jobs against a quiet stack's 0"
     },
     {
       "scenario": "cascading_redis_starves_backpressure",
@@ -317,7 +286,7 @@
       "tool": "get_slo_status",
       "path": "objectives[].healthy[]",
       "kind": "not_live_reachable",
-      "context": "canned-only",
+      "context": "busy-window",
       "why": "an un-faulted stack reports every objective healthy, so the `false` this world's dispatch objective carries is not a value it can emit. The `true` beside it agrees with live and rides this row because both objectives merge into one"
     },
     {

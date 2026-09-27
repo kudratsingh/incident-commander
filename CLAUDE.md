@@ -377,7 +377,7 @@ filter at parse time, because a filtered run must not be blessed over a full bas
 ## Configuration
 
 `.env.example` is the full, annotated list and `src/incident_commander/config.py` is the
-authority; `Settings` reads 34 variables. Values are never committed. The ones that decide
+authority; `Settings` reads 51 variables. Values are never committed. The ones that decide
 how a run behaves:
 
 ```text

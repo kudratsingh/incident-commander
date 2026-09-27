@@ -368,6 +368,9 @@ def drift_between(
                         if scenario is None
                         else scenario.seeds_chaos or recording.world.chaos_seeded
                     ),
+                    volatile=(
+                        frozenset() if scenario is None else scenario.volatile_paths(recorded.tool)
+                    ),
                 ),
                 live_payload,
                 shape_only=shape_only_paths(recorded.tool, scenario),

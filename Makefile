@@ -451,13 +451,16 @@ trace-report:
 # TRACE_DIR= names the trace store (default $$EVAL_TRACE_DIR or evals/traces); point it
 # at evals/runs/<id>/traces/ to export one archived run. ONLY=<scenario> narrows it.
 # It REFUSES, by name, any scenario whose template is held out, and the refusal is the
-# whole export rather than a filter (plan 03 § 4, plan 06 D7).
+# whole export rather than a filter (plan 03 § 4, plan 06 D7). A rehearsal trajectory
+# (a scripted planner's, ADR 0069) is left out and counted in the manifest unless
+# INCLUDE_REHEARSAL=1 (WO-R3-318).
 .PHONY: training-export
 training-export:
 	uv run python -m evals.export \
 		$(if $(TRACE_DIR),--trace-dir $(TRACE_DIR),) \
 		$(if $(ONLY),--only $(ONLY),) \
-		$(if $(WRITE),--write,)
+		$(if $(WRITE),--write,) \
+		$(if $(INCLUDE_REHEARSAL),--include-rehearsal,)
 
 # The quality gate over that export (WP-15.3, evals/dataset_checks.py). Reads only, and
 # it can FAIL a dataset: exit 1 on any blocking finding and on any it cannot classify,

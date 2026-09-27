@@ -389,3 +389,13 @@ ground_truth:
   - Redis stays up and answers in under a millisecond, so no job fails and no objective moves
   - the pressure is visible only in the dependency's own reading, which is the whole evidence
   - the paged job dispatch-latency objective is whole, so the page is not confirmed
+
+# Evaluator-only. Fields this world moves between two honest readings, so both drift
+# walks compare them by type only here (WO-R3-309); other scenarios still compare them.
+volatile:
+- tool: get_slo_status
+  path: objectives.total
+  why: a count of the jobs `make traffic` had submitted in the 24 h window when the reading was taken, so it grows with the traffic and a quiet stack reads 0
+- tool: get_outbox_status
+  path: unpublished_count
+  why: under sustained traffic the relay publishes in batches, so two honest readings a moment apart read 0 or 1 depending on when they land

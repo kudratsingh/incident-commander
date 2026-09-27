@@ -513,6 +513,35 @@ class PreconditionProbe(BaseModel):
         return _read_only_registered_tool(value, "A precondition")
 
 
+class VolatileField(BaseModel):
+    """One field this scenario's world moves between two honest readings (WO-R3-309).
+
+    Both drift walks compare it by JSON type only, for this scenario alone. ``path`` is the
+    dotted form without list markers (``objectives.total``), as ``_VOLATILE`` writes it.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    tool: str = Field(min_length=1)
+    path: str = Field(min_length=1)
+    why: str = Field(min_length=20)
+
+    @field_validator("tool")
+    @classmethod
+    def _tool_is_read_only(cls, value: str) -> str:
+        return _read_only_registered_tool(value, "A volatile declaration")
+
+    @field_validator("path")
+    @classmethod
+    def _path_has_no_list_markers(cls, value: str) -> str:
+        if "[]" in value:
+            raise ValueError(
+                f"volatile path {value!r} carries list markers. Write it the way the drift "
+                f"walks look it up, without them: {value.replace('[]', '')!r}."
+            )
+        return value
+
+
 class GroundTruth(BaseModel):
     """What was actually wrong with the world — the evaluator's copy, never the agent's.
 
@@ -769,6 +798,9 @@ class Scenario(BaseModel):
     # The reads that tell this fault apart from the ones it looks like. Evaluator-only:
     # the answer key to the investigation, not a hint the agent is entitled to.
     discriminating_probes: tuple[DiscriminatingProbe, ...] = ()
+    # Fields this world moves between two honest readings, which both drift walks compare
+    # by type only for this scenario (WO-R3-309). Only true clocks stay in ``_VOLATILE``.
+    volatile: tuple[VolatileField, ...] = ()
 
     # Every field above is on exactly one side of plan 00 § 3.1's trust boundary, DECLARED here
     # and checked against ``model_fields`` at import, so a field with no side cannot be imported.
@@ -803,6 +835,7 @@ class Scenario(BaseModel):
             "smoke_exclusion",
             "ground_truth",
             "discriminating_probes",
+            "volatile",
         }
     )
 
@@ -818,6 +851,22 @@ class Scenario(BaseModel):
             max_tool_calls=self.expectation.max_tool_calls,
             canned_tool_responses=dict(self.canned_tool_responses),
         )
+
+    def volatile_paths(self, tool: str) -> frozenset[str]:
+        """The paths this scenario declares volatile for ``tool``."""
+        return frozenset(entry.path for entry in self.volatile if entry.tool == tool)
+
+    @model_validator(mode="after")
+    def _each_volatile_field_is_declared_once(self) -> Scenario:
+        seen: set[tuple[str, str]] = set()
+        for entry in self.volatile:
+            if (entry.tool, entry.path) in seen:
+                raise ValueError(
+                    f"scenario {self.name!r} declares {entry.tool}.{entry.path} volatile "
+                    "twice. Keep one entry and one reason."
+                )
+            seen.add((entry.tool, entry.path))
+        return self
 
     @property
     def root_cause_graded(self) -> bool:

@@ -95,6 +95,11 @@ class _FakeStack:
         self.traffic_allowances: list[str | None] = []
         #: Fault firings and producer starts in ONE list, so a test can say which came first.
         self.events: list[str] = []
+        #: The `ENDPOINTS=` each producer was started with (WO-R3-345).
+        self.traffic_endpoints: list[str | None] = []
+        #: What the wind-down's dead-letter read answers, and the labels it was read under.
+        self.dlq_total = 4
+        self.dlq_reasons: list[str] = []
 
     def run(self, command: Any, **kwargs: Any) -> subprocess.CompletedProcess[str]:
         argv = list(command)
@@ -129,6 +134,12 @@ def stack(monkeypatch: pytest.MonkeyPatch) -> _FakeStack:
     )
     monkeypatch.setattr(demo_live, "_artifacts", lambda scenario: ["trajectory: <fake>"])
     monkeypatch.setattr(demo_live, "_lag_reading", lambda: _reading(0))
+
+    def _dlq(reason: str = demo_live.FAULT_WATCH_PROBE_REASON) -> tuple[int | None, bool]:
+        fake.dlq_reasons.append(reason)
+        return fake.dlq_total, True
+
+    monkeypatch.setattr(demo_live, "_dlq_total", _dlq)
     monkeypatch.setattr(
         demo_live,
         "_fault_is_visible",
@@ -164,6 +175,7 @@ def stack(monkeypatch: pytest.MonkeyPatch) -> _FakeStack:
         fake.traffic_started += 1
         fake.traffic_rates.append(rate)
         fake.traffic_allowances.append(max_per_window)
+        fake.traffic_endpoints.append(self.endpoint_count)
         fake.events.append(f"producer {rate}")
         # A stand-in with a `Popen` shape, so `stop`'s `poll()` sees what it would see live.
         # The cast is the honest shape of a fake: structurally what the handle uses, nothing more.
@@ -1273,6 +1285,17 @@ class TestEveryReadSaysItIsTheLabs:
             ("list_dlq_messages", demo_live.FAULT_WATCH_PROBE_REASON, "SMOKE-TOKEN")
         ]
 
+    def test_the_wind_down_dlq_read_says_why_it_was_made(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        transport = self._wired(monkeypatch, {"total": 4, "messages": []})
+
+        assert demo_live._dlq_total(demo_live.WIND_DOWN_PROBE_REASON) == (4, True)
+
+        assert transport.calls == [
+            ("list_dlq_messages", demo_live.WIND_DOWN_PROBE_REASON, "SMOKE-TOKEN")
+        ]
+
     def test_the_precondition_probes_carry_the_lab_credential(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -1344,3 +1367,71 @@ class TestTheDocstringStaysTrue:
         assert "--world-already-faulted" in doc
         assert "wrong for the" in doc
         assert "the scenario's own hooks fire twice" not in doc
+
+
+class TestTheProducersJobsCannotBeDeadLettered:
+    """WO-R3-345: in the sixth take two of the producer's jobs dead-lettered and the platform
+    raised a second page (`dlq_depth_warning`, 6 > 5) after the consumer alert resolved."""
+
+    def test_both_consumer_outage_producers_submit_jobs_that_cannot_fail(
+        self, stack: _FakeStack
+    ) -> None:
+        assert demo_live.main(["--mode", "consumer_outage", "--auto"]) == 0
+
+        assert demo_live.MODES["consumer_outage"]["traffic_endpoint_count"] == "0"
+        assert stack.traffic_endpoints == ["0", "0"]
+
+    def test_the_endpoint_count_reaches_make_as_a_variable(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        seen: list[list[str]] = []
+        monkeypatch.setattr(subprocess, "Popen", _recording_popen(seen))
+        monkeypatch.setattr(demo_live, "_smoke_env", lambda: {"PLATFORM_SMOKE_TOKEN": "x"})
+        demo_live.TrafficHandle(endpoint_count="0").start(rate="2.0", max_per_window="240")
+
+        assert seen == [["make", "traffic", "RATE=2.0", "MAX_PER_WINDOW=240", "ENDPOINTS=0"]]
+
+    def test_the_make_target_hands_it_to_the_loop(self) -> None:
+        recipe = (_REPO_ROOT / "Makefile").read_text(encoding="utf-8")
+
+        assert "$(if $(ENDPOINTS),--endpoint-count $(ENDPOINTS))" in recipe
+
+    def test_the_wind_down_reports_a_clean_queue_before_the_reset(
+        self, stack: _FakeStack, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        assert demo_live.main(["--mode", "consumer_outage", "--auto"]) == 0
+
+        out = capsys.readouterr().out
+        assert "dead-letter queue before the reset: 4 (the seeded 4) — this take added none" in out
+        assert stack.dlq_reasons == [demo_live.WIND_DOWN_PROBE_REASON]
+        assert out.index("dead-letter queue before the reset") < out.rindex("resetting the world")
+
+    def test_rows_above_the_baseline_warn_and_the_world_still_goes_back(
+        self, stack: _FakeStack, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        stack.dlq_total = 6
+        assert demo_live.main(["--mode", "consumer_outage", "--auto"]) == 0
+
+        out = capsys.readouterr().out
+        assert "WARNING: 6 dead-letter rows before the reset, 2 above the seeded 4" in out
+        assert stack.make_targets().count("eval-reset") == 2
+
+    def test_an_unreadable_queue_warns_and_still_resets(
+        self, stack: _FakeStack, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        def _boom(reason: str = "") -> tuple[int | None, bool]:
+            raise RuntimeError("platform unreachable")
+
+        monkeypatch.setattr(demo_live, "_dlq_total", _boom)
+        assert demo_live.main(["--mode", "consumer_outage", "--auto"]) == 0
+
+        assert "could not read the dead-letter queue" in capsys.readouterr().out
+        assert stack.make_targets().count("eval-reset") == 2
+
+    def test_the_dlq_mode_does_not_read_it_because_its_fault_is_the_queue(
+        self, stack: _FakeStack
+    ) -> None:
+        assert demo_live.main(["--mode", "dlq_backlog", "--auto"]) == 0
+
+        assert stack.dlq_reasons == []
+        assert stack.traffic_endpoints == []

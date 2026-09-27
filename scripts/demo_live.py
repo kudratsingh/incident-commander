@@ -78,6 +78,9 @@ MODES: Final[dict[str, dict[str, Any]]] = {
         # which is the fifth take's plateau: the producer spent one window in 22 s and then
         # collected 429s while the chart sat flat at 28 (F4).
         "traffic_max_per_window": "240",
+        # The `endpoint_count` of every job the producer submits. 0 means a job that cannot
+        # fail, so the take's dead-letter queue stays at the seeded 4 (WO-R3-345, see `ENDPOINTS`).
+        "traffic_endpoint_count": "0",
         # Which platform reading tells the operator the page will show the fault. A closed
         # set for the same reason the modes are: this decides what is polled.
         "fault": "consumer_lag",
@@ -104,6 +107,7 @@ MODES: Final[dict[str, dict[str, Any]]] = {
         "traffic_rate": None,
         "fault_traffic_rate": None,
         "traffic_max_per_window": None,
+        "traffic_endpoint_count": None,
         "fault": "dlq_depth",
         "story": (
             "a dead-letter queue that fills past its threshold with four replayable rows "
@@ -146,6 +150,7 @@ REPEAT_SAFE_HOOKS: Final[frozenset[str]] = frozenset({"poison_message", "kill_co
 #: anything — the fifth take's finding F5, 39 rows of it before the fault.
 BASELINE_PROBE_REASON: Final = "demo: baseline lag poll"
 FAULT_WATCH_PROBE_REASON: Final = "demo: fault watch read"
+WIND_DOWN_PROBE_REASON: Final = "demo: dead-letter count before the reset"
 
 #: Seconds of countdown before the fault, so the operator can get the console on screen.
 _FAULT_COUNTDOWN_SECONDS: Final = 10
@@ -247,8 +252,10 @@ class TrafficHandle:
     `make world-audit` then refuses, after somebody has already started recording.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, *, endpoint_count: str | None = None) -> None:
         self.process: subprocess.Popen[str] | None = None
+        #: Passed to every producer as `ENDPOINTS=`; ``None`` keeps the platform's default of 5.
+        self.endpoint_count = endpoint_count
 
     def start(
         self,
@@ -272,6 +279,7 @@ class TrafficHandle:
                 "traffic",
                 *([f"RATE={rate}"] if rate else []),
                 *([f"MAX_PER_WINDOW={max_per_window}"] if max_per_window else []),
+                *([f"ENDPOINTS={self.endpoint_count}"] if self.endpoint_count is not None else []),
             ],
             cwd=_REPO_ROOT,
             stdout=handle,
@@ -547,7 +555,8 @@ def main(argv: list[str] | None = None) -> int:
     console = Console(auto=args.auto)
     mode = MODES[args.mode]
     scenario = str(mode["scenario"])
-    traffic = TrafficHandle()
+    endpoints = mode.get("traffic_endpoint_count")
+    traffic = TrafficHandle(endpoint_count=None if endpoints is None else str(endpoints))
     wind_down = WindDown(traffic, drained=bool(mode["needs_traffic"]))
 
     # 4. Say what the audience is about to watch, including whether this run spends money.
@@ -928,7 +937,7 @@ def _lag_reading() -> LagReading:
     )
 
 
-def _dlq_total() -> tuple[int | None, bool]:
+def _dlq_total(reason: str = FAULT_WATCH_PROBE_REASON) -> tuple[int | None, bool]:
     """How many rows the dead-letter queue holds, and whether the platform answered.
 
     Under the SMOKE principal, like ``_lag_reading``: an observation of the world is made
@@ -936,7 +945,7 @@ def _dlq_total() -> tuple[int | None, bool]:
     """
     from evals.world_audit import Probe, read
 
-    client = _smoke_client(lab_probe=FAULT_WATCH_PROBE_REASON)
+    client = _smoke_client(lab_probe=reason)
     try:
         reading = read(
             client,
@@ -1187,13 +1196,43 @@ def _wait_for_a_drained_backlog(console: Console) -> None:
     )
 
 
+def _report_dead_letters(console: Console) -> None:
+    """Print the dead-letter total before the reset sweeps it, and warn if the take added rows.
+
+    A traffic mode's producer must add none: the sixth take's two pushed the queue past the
+    platform's depth rule and raised a second page nobody asked for (WO-R3-345). Never raises.
+    """
+    from evals.world_audit import BASELINE_DLQ_TOTAL
+
+    try:
+        total, ok = _dlq_total(WIND_DOWN_PROBE_REASON)
+    except Exception as err:  # noqa: BLE001 - the wind-down must still reset
+        console.say(f"  WARNING: could not read the dead-letter queue before the reset: {err}")
+        return
+    if not ok or total is None:
+        console.say(f"  WARNING: the dead-letter total was unreadable before the reset ({total})")
+    elif total > BASELINE_DLQ_TOTAL:
+        console.say(
+            f"  WARNING: {total} dead-letter rows before the reset, "
+            f"{total - BASELINE_DLQ_TOTAL} above the seeded {BASELINE_DLQ_TOTAL} — jobs from "
+            "this take were dead-lettered; read `event.job.dead_letter` in the audit log"
+        )
+    else:
+        console.say(
+            f"  dead-letter queue before the reset: {total} "
+            f"(the seeded {BASELINE_DLQ_TOTAL}) — this take added none"
+        )
+
+
 def _put_the_world_back(console: Console, *, drained: bool = False) -> None:
     """Reset and re-audit, on EVERY path out of this script including the failing ones.
 
     Reported rather than raised: a reset that fails after a failed demo must not hide the
     first failure, and the chaos-teardown latch already refuses the next live run. ``drained``
-    is the traffic modes' extra wait, passed from the MODE because this has four call sites.
+    marks a traffic mode, which also gets the dead-letter read and the backlog wait.
     """
+    if drained:
+        _report_dead_letters(console)
     console.say("  resetting the world")
     reset = _run(["make", "eval-reset", "PURGE_IDEMPOTENCY=1"])
     if reset.returncode != 0:

@@ -1033,6 +1033,24 @@ operate by:
   platform's own default of 30 a minute the same 20 takes **40 s**, which is
   what the fifth and sixth takes were paced by.
 
+  **`ENDPOINTS=0` makes jobs that cannot fail, and the demo uses it**
+  (WO-R3-345). Each `bulk_api_sync` job syncs `endpoint_count` simulated
+  endpoints (platform default 5), each of which fails 10% of the time, and
+  all of them go through ONE circuit breaker per platform process
+  (`bulk-api-sync`: opens after 3 failures in a row, stays open 30 s, then
+  lets a single test call through while it refuses every other). A job
+  whose five calls all fail — which is every job while the breaker is open
+  or testing — fails, is retried after 2 s and 4 s, and is dead-lettered on
+  the third failure. So a normal producer can, by chance, add rows to the
+  dead-letter queue, and a killed consumer makes it likely: the retries wait
+  in the backlog and all run in the burst after the restart. The sixth demo
+  take lost two jobs that way and the platform raised a second, unrelated
+  page (`dlq_depth_warning`, 6 > 5). `ENDPOINTS=0` sends
+  `endpoint_count: 0`, which completes without calling the breaker at all;
+  the backlog is the same, because lag counts messages, not work.
+  `make demo-live` passes it on both producers; plain `make traffic` leaves
+  the platform's default alone, so eval worlds recorded with it do not move.
+
   Expect 503s once lag passes 1000. That is not a failure: the platform's
   backpressure check reads `kafka:consumer_lag:worker-dispatcher`, the
   same key the scenario measures, so a 503 is the platform telling you the

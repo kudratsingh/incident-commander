@@ -540,12 +540,18 @@ traffic: export PLATFORM_SMOKE_TOKEN := $(PLATFORM_SMOKE_TOKEN)
 # `MAX_PER_WINDOW=0` switches the pacing off for anyone who wants to meet the
 # limit head-on.
 #
+# ENDPOINTS is the `endpoint_count` each bulk_api_sync job carries (platform default 5).
+# `ENDPOINTS=0` makes jobs that cannot fail: they never call the platform's shared
+# bulk-api circuit breaker, which, once the processor's simulated 10% endpoint
+# failures open it, fails EVERY job for 30 s and dead-letters them after three tries
+# (sixth demo take, WO-R3-345). `scripts/demo_live.py` passes it on both producers.
+#
 # `python -u` because `scripts/demo_live.py` redirects this to a file and stops it
 # with SIGTERM: a block-buffered stdout loses every line the loop printed, so the
 # log of a take read `Error 143` and nothing else — including the tally that says
 # whether the platform refused a submission.
 traffic:
-	uv run python -u scripts/traffic_loop.py $(if $(RATE),--interval $(RATE)) $(if $(MAX_PER_WINDOW),--max-per-window $(MAX_PER_WINDOW)) $(if $(UNTIL_LAG),--until-lag $(UNTIL_LAG)) $(if $(COUNT),--count $(COUNT))
+	uv run python -u scripts/traffic_loop.py $(if $(RATE),--interval $(RATE)) $(if $(MAX_PER_WINDOW),--max-per-window $(MAX_PER_WINDOW)) $(if $(UNTIL_LAG),--until-lag $(UNTIL_LAG)) $(if $(COUNT),--count $(COUNT)) $(if $(ENDPOINTS),--endpoint-count $(ENDPOINTS))
 
 chaos-help:
 	PYTHONPATH=. uv run python scripts/chaos_setup.py --help

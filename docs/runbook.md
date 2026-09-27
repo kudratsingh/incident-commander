@@ -1243,8 +1243,9 @@ first pin that moved the REQUEST and left `tools/list` byte-identical; the eleve
 with v0.6.18, the first pin that made a platform CONSTANT a setting this stack then
 sets to something else; the twelfth with v0.6.19, the first release that changes
 nothing on the agent's side of the wire at all; the thirteenth with v0.6.20, the
-first pin where the new setting changes how fast the DEMO can build its fault; and
-v0.6.21, the second console-only release, needed no new step — item 12 covers it):
+first pin where the new setting changes how fast the DEMO can build its fault;
+v0.6.21, the second console-only release, and v0.6.22, a backend fix with no contract
+change, needed no new step — item 12 covers both):
 
 1. Update `demo/compose.yml` — **all THREE platform-code services**
    (`migrate`, `platform`, `api`) and the prose that names the version:
@@ -1854,6 +1855,14 @@ v0.6.21, the second console-only release, needed no new step — item 12 covers 
     v0.6.21 (WO-R3-353's last item, for WO-R3-354's console) is the second: console-only
     again, `make snapshot` against the live v0.6.21 stack came back with **no diff** (40
     tools) and `make test-contract` passed. All four services re-pinned all the same.
+
+    v0.6.22 (WO-R3-357, for plat #239 / WO-R3-356) changes the backend but not the contract:
+    the platform's lag reading keeps coming through a consumer restart (platform ADR 0040).
+    `make snapshot` came back with **no diff** (40 tools) and `make test-contract` passed.
+    What to check on the stack is the timing, not the file: in three `consumer_outage`
+    rehearsals the restarted consumer's first lag sample landed 2.2 s, 4.2 s and 5.5 s after
+    `restart_consumer_group` (`GET /admin/consumer-lag`, target ≤ 10 s), no lag query timed
+    out, and every run resolved on verify poll 2.
 
     **The one-line rebless note still gets written**, in the hub's
     `docs/wave4-specs/rebless-notes.md`, and it says the diff was empty. A version

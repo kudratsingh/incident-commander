@@ -38,8 +38,12 @@ MANIFEST_KIND: Final[str] = "training_export_manifest"
 
 #: Bumped when a field is added, removed or re-meant. On the line, so a mixed
 #: directory of exports is still readable one line at a time. 2 adds ``reward``
-#: to the trajectory line and ``reward_detail`` to the labels line (WP-15.2).
-SCHEMA_VERSION: Final[int] = 2
+#: to the trajectory line and ``reward_detail`` to the labels line (WP-15.2); 3 adds the
+#: manifest's ``rehearsal_refused`` / ``rehearsal_included`` (WO-R3-318).
+SCHEMA_VERSION: Final[int] = 3
+
+#: The trace's ``execution_mode`` for a scripted planner driving the real platform (ADR 0069).
+REHEARSAL_MODE: Final[str] = "rehearsal"
 
 SCENARIO_DIRECTORY: Final[Path] = Path(__file__).parent / "scenarios"
 DEFAULT_TRACE_DIRECTORY: Final[Path] = Path(__file__).parent / "traces"
@@ -380,6 +384,10 @@ class ManifestRecord(BaseModel):
     #: Where the reward is defined, how many lines carry one, and the reasons the rest
     #: do not. A block rather than four fields, so the reward's story is read in one go.
     reward: dict[str, Any] = Field(default_factory=dict)
+    #: Rehearsal trajectories left out: a scripted planner's decisions are not a model's.
+    rehearsal_refused: int = 0
+    #: True only when ``--include-rehearsal`` asked for them.
+    rehearsal_included: bool = False
 
 
 @dataclass(frozen=True)
@@ -806,6 +814,7 @@ def build_export(
     timestamp: datetime,
     invocation_id: str,
     audit_windows: Mapping[str, reward.AuditWindow] | None = None,
+    include_rehearsal: bool = False,
 ) -> Export:
     """Render an export from trace files and the corpus. Writes nothing, mutates nothing.
 
@@ -813,6 +822,7 @@ def build_export(
     same bytes, and the trajectory and label lines carry no clock of their own at all.
     ``audit_windows`` are the platform's records keyed by ``trajectory_id``; without one
     a line's reward is withheld rather than computed from the trajectory (invariant 6).
+    A rehearsal invocation is left out and counted unless ``include_rehearsal`` (WO-R3-318).
     """
     by_name = {scenario.name: scenario for scenario in corpus}
     held_out = holdout_template_ids(by_name.values())
@@ -832,6 +842,9 @@ def build_export(
             "rather than assume."
         )
 
+    rehearsals = [found for found in invocations if _is_rehearsal(found)]
+    if not include_rehearsal:
+        invocations = [found for found in invocations if not _is_rehearsal(found)]
     ordered = sorted(invocations, key=lambda found: (found.scenario, found.invocation_id))
     pairs = [(found.invocation_id, by_name[found.scenario]) for found in ordered]
     _refuse_holdout(pairs, held_out)
@@ -881,6 +894,8 @@ def build_export(
             or any(getattr(record, key) is None for record in trajectories)
         },
         reward=_reward_manifest(rewards),
+        rehearsal_refused=0 if include_rehearsal else len(rehearsals),
+        rehearsal_included=include_rehearsal,
     )
     return Export(
         trajectories=trajectories,
@@ -890,6 +905,11 @@ def build_export(
         labels_jsonl=labels_jsonl,
         manifest_json=json.dumps(manifest.model_dump(mode="json"), indent=2, sort_keys=True) + "\n",
     )
+
+
+def _is_rehearsal(invocation: TraceInvocation) -> bool:
+    start = invocation.first(TraceKind.SCENARIO_START)
+    return start is not None and start.get("execution_mode") == REHEARSAL_MODE
 
 
 def write_export(
@@ -983,6 +1003,11 @@ def _main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="persist the export (default: report what it would contain and stop)",
     )
+    parser.add_argument(
+        "--include-rehearsal",
+        action="store_true",
+        help="keep rehearsal trajectories (a scripted planner's, ADR 0069); refused by default",
+    )
     args = parser.parse_args(argv)
 
     trace_dir = args.trace_dir if args.trace_dir is not None else _trace_directory()
@@ -1007,6 +1032,7 @@ def _main(argv: list[str] | None = None) -> int:
             corpus=load_scenarios(SCENARIO_DIRECTORY),
             timestamp=timestamp,
             invocation_id=invocation_id,
+            include_rehearsal=args.include_rehearsal,
         )
     except ExportError as err:
         print(str(err), file=sys.stderr)
@@ -1019,6 +1045,10 @@ def _main(argv: list[str] | None = None) -> int:
         f"{len(manifest.exported_template_ids)} template(s), "
         f"splits {list(manifest.splits_present)}"
     )
+    if manifest.rehearsal_included:
+        print("rehearsal trajectories INCLUDED (--include-rehearsal)")
+    else:
+        print(f"{manifest.rehearsal_refused} rehearsal trajectories refused")
     if not args.write:
         print("nothing written (pass --write to persist)")
         return 0

@@ -36,6 +36,10 @@ CANNED_ONLY: Final = "canned-only"
 #: uptime — calling it post-fault would claim a mechanism that is not there.
 COLD_STACK: Final = "cold-stack"
 WARM_STACK: Final = "warm-stack"
+#: The live value depends on `get_slo_status`'s rolling 24 h of the jobs table, which
+#: `make eval-reset` does not empty (WO-R3-326): a busy day makes the fault value live too,
+#: so the row can read "fixed" on any stack. Never held to the stale check.
+BUSY_WINDOW: Final = "busy-window"
 #: **THE HOOK NOW EXISTS, and this context's own note said what to do about it**
 #: (WO-R3-221, v0.6.12). It said "the work, if this scenario is ever to be run live,
 #: is a platform hook", and v0.6.12's `slow_db_queries` is precisely that hook — so
@@ -1507,13 +1511,14 @@ _JUSTIFIED: Final[dict[tuple[object, ...], tuple[str, str]]] = {
         "and CI's freshly booted stack caught the four of them. The three were corrected "
         "to null; this one is the real reading and is ledgered",
     ),
+    # busy-window: a day of traffic in the 24 h window can make live read this value too.
     (
         "api_latency_downstream",
         "get_slo_status",
         "objectives[].budget_remaining_pct[]",
         "not_live_reachable",
     ): (
-        POST_FAULT,
+        BUSY_WINDOW,
         "the same hook fails the bulk_api_sync jobs themselves, so they retry and "
         "dead-letter and spend the job-completion-rate error budget; the fixture "
         "reads -100.0 (the floor, on a budget spent and then some) where a healthy "
@@ -1533,13 +1538,14 @@ _JUSTIFIED: Final[dict[tuple[object, ...], tuple[str, str]]] = {
         "evaluator calls it fast-burning where a healthy world says false. The "
         "boolean is what the scenario grades; the rate behind it is volatile",
     ),
+    # busy-window: a day of traffic in the 24 h window can make live read this value too.
     (
         "api_latency_downstream",
         "get_slo_status",
         "objectives[].healthy[]",
         "not_live_reachable",
     ): (
-        POST_FAULT,
+        BUSY_WINDOW,
         "the same reading's other boolean — an objective below its target is not "
         "healthy — false in the fault world and true in an idle one. Ledgered "
         "beside `fast_burn` rather than folded into it because they answer "
@@ -1677,13 +1683,14 @@ _JUSTIFIED: Final[dict[tuple[object, ...], tuple[str, str]]] = {
         "same derivation again: 16x the sustainable rate is the premise, and it is the "
         "number the platform's own alert threshold (14.4) is read against",
     ),
+    # busy-window: a day of traffic in the 24 h window can make live read this value too.
     (
         "cascading_redis_starves_backpressure",
         "get_slo_status",
         "objectives[].healthy[]",
         "not_live_reachable",
     ): (
-        CANNED_ONLY,
+        BUSY_WINDOW,
         "an un-faulted stack reports every objective healthy, so the `false` this "
         "world's dispatch objective carries is not a value it can emit. The `true` "
         "beside it agrees with live and rides this row because both objectives merge "
@@ -1859,6 +1866,15 @@ def defect_count(path: Path | None = None) -> int:
     return sum(1 for entry in load_entries(path) if entry.is_defect)
 
 
+def _held_to_the_ratchet(context: str, stack_context: str) -> bool:
+    """Whether an unobserved row of this context means "fixed" on a stack in this context."""
+    if context == BUSY_WINDOW:
+        return False
+    if context in {COLD_STACK, WARM_STACK}:
+        return context.removesuffix("-stack") == stack_context
+    return True
+
+
 def split_for_bless(
     observed: Collection[DriftKey],
     prior: Collection[DriftKey],
@@ -1878,10 +1894,7 @@ def split_for_bless(
     unobserved = [key for key in prior if key not in seen]
 
     def observable_here(key: DriftKey) -> bool:
-        context = context_of(key)[0]
-        return context not in {COLD_STACK, WARM_STACK} or (
-            context.removesuffix("-stack") == stack_context
-        )
+        return _held_to_the_ratchet(context_of(key)[0], stack_context)
 
     def should_carry(key: DriftKey) -> bool:
         return (key[0], key[1]) not in reached or not observable_here(key)
@@ -1975,6 +1988,11 @@ def dump_ledger(
                     "world and the check ran against a volume that has been up long "
                     "enough to have measured one. Timing, not contract"
                 ),
+                BUSY_WINDOW: (
+                    "get_slo_status reads a rolling 24 h of the jobs table, which make "
+                    "eval-reset does not empty, so a busy day can make the fault value live "
+                    "too. Never reported stale; CI's empty window still reports it drifting"
+                ),
                 NO_HOOK: (
                     "the fixture describes a fault no chaos hook can produce, so the "
                     "canned value is the scenario's premise and the check probes a "
@@ -2019,10 +2037,7 @@ def classify(
             key
             for key in ledger - matched
             if (key[0], key[1]) not in unread
-            and (
-                context_of(key)[0] not in {COLD_STACK, WARM_STACK}
-                or context_of(key)[0].removesuffix("-stack") == stack_context
-            )
+            and _held_to_the_ratchet(context_of(key)[0], stack_context)
         )
     )
     return new, stale

@@ -1465,7 +1465,9 @@ first pin where the new setting changes how fast the DEMO can build its fault):
    `new` was empty. Unlike the cold/warm rows these carry NO context word that
    `classify()` can exempt, because the mechanism is not the stack's warmth; if
    this recurs on every pin, the honest fix is a `busy-window` context, not a
-   bless.
+   bless. **That context now exists (WO-R3-326):** the three rows carry
+   `busy-window`, which `classify()` never reports stale on any stack, while
+   CI's empty window still reports them drifting as recorded.
 
    One more reading from v0.6.14, on the two tools disagreeing again, because it
    is now reproducible rather than anecdotal: `make fixture-drift` printed

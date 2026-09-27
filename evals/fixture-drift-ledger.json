@@ -8,6 +8,7 @@
     "canned-only": "the scenario never runs live, so its recordings are its premise rather than a recording of anything",
     "cold-stack": "the recording is of a warm stack and the check ran on a cold one: worker-dispatcher's lag is unmeasured for about the first minute after boot, so a fresh platform answers null where the recording says 0. Timing, not contract, and not fixable from either side",
     "warm-stack": "the mirror of cold-stack: the recording caught a freshly seeded world and the check ran against a volume that has been up long enough to have measured one. Timing, not contract",
+    "busy-window": "get_slo_status reads a rolling 24 h of the jobs table, which make eval-reset does not empty, so a busy day can make the fault value live too. Never reported stale; CI's empty window still reports it drifting",
     "no-hook": "the fixture describes a fault no chaos hook can produce, so the canned value is the scenario's premise and the check probes a world that never had it. Not a defect; the fix, if that scenario is ever to run live, is a platform hook"
   },
   "_counts": {
@@ -141,7 +142,7 @@
       "tool": "get_slo_status",
       "path": "objectives[].budget_remaining_pct[]",
       "kind": "not_live_reachable",
-      "context": "post-fault",
+      "context": "busy-window",
       "why": "the same hook fails the bulk_api_sync jobs themselves, so they retry and dead-letter and spend the job-completion-rate error budget; the fixture reads -100.0 (the floor, on a budget spent and then some) where a healthy world reads 100.0. The value is CLAMPED rather than continuous, which is why it can be canned at all while `total`, `failed`, `burn_rate` and `current_success_rate` are volatile"
     },
     {
@@ -181,7 +182,7 @@
       "tool": "get_slo_status",
       "path": "objectives[].healthy[]",
       "kind": "not_live_reachable",
-      "context": "post-fault",
+      "context": "busy-window",
       "why": "the same reading's other boolean \u2014 an objective below its target is not healthy \u2014 false in the fault world and true in an idle one. Ledgered beside `fast_burn` rather than folded into it because they answer different questions (below target now, versus burning fast enough to page) and a world can be one without the other"
     },
     {
@@ -285,7 +286,7 @@
       "tool": "get_slo_status",
       "path": "objectives[].healthy[]",
       "kind": "not_live_reachable",
-      "context": "canned-only",
+      "context": "busy-window",
       "why": "an un-faulted stack reports every objective healthy, so the `false` this world's dispatch objective carries is not a value it can emit. The `true` beside it agrees with live and rides this row because both objectives merge into one"
     },
     {

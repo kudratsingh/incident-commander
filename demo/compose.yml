@@ -1,6 +1,6 @@
 # Live demo: full platform footprint sufficient for remediation eval.
 #
-# Pinned to the incident-platform v0.6.22 release by digest so the agent's
+# Pinned to the incident-platform v0.6.23 release by digest so the agent's
 # contract expectations don't shift under us. Every platform-code service
 # below uses the SAME pinned digest. Bump the digest whenever the platform
 # ships a new release and rerun `make eval-live` to catch drift.
@@ -137,7 +137,7 @@ services:
     # One-shot schema migration, mirroring the dev compose's migrate
     # service: with two app-code services (mcp + api) neither should
     # race `alembic upgrade head` at boot.
-    image: ghcr.io/kudratsingh/incident-platform:v0.6.22@sha256:3b19389273d6d39e15173036a1a5b1db3c8965ab72825c34d1c12876b132b3a1
+    image: ghcr.io/kudratsingh/incident-platform:v0.6.23@sha256:7b9f640968e3bcb64892b997367c0916006a8fab52800dea4320f8464aa2d1fb
     platform: linux/amd64
     environment:
       DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/incident_platform
@@ -149,12 +149,12 @@ services:
     restart: "no"
 
   platform:
-    # incident-platform v0.6.22 (INDEX digest published by the platform
+    # incident-platform v0.6.23 (INDEX digest published by the platform
     # release, confirmed with `docker buildx imagetools inspect` — the
     # top-level `Digest:`, not a per-platform child manifest).
     #
-    # What v0.6.22 changed (plat #239, WO-R3-356, platform ADR 0040): the lag reading keeps coming
-    # through a consumer restart; `tools/list` is unchanged. v0.6.21 changed the console only.
+    # What v0.6.23 changed (plat #240 + #241, WO-R3-358/359): console only — agent acting lights at
+    # triage, step-drawn lag line, nothing truncated in the ledger. `tools/list` is unchanged since v0.6.20.
     #
     # What v0.6.9 changed (plat #210 + #211 + #212): TWO NEW TOOLS, and no
     # existing tool's name, description or schema moved.
@@ -464,8 +464,8 @@ services:
     # Do not switch to `:latest` — the whole point of pinning by digest is
     # that a platform-side prompt or schema change can't shift agent
     # behavior without an explicit bump here.
-    image: ghcr.io/kudratsingh/incident-platform:v0.6.22@sha256:3b19389273d6d39e15173036a1a5b1db3c8965ab72825c34d1c12876b132b3a1
-    # v0.6.22 is an OCI index, but it still lists linux/amd64 ONLY (plus an
+    image: ghcr.io/kudratsingh/incident-platform:v0.6.23@sha256:7b9f640968e3bcb64892b997367c0916006a8fab52800dea4320f8464aa2d1fb
+    # v0.6.23 is an OCI index, but it still lists linux/amd64 ONLY (plus an
     # attestation manifest) — being an index is not the same as being
     # multi-arch, and this one is not. On Apple Silicon this runs under
     # Rosetta (slower cold start, correct output) — REQUIRED there; without
@@ -588,7 +588,7 @@ services:
     # Env copied deliberately from the dev compose's `app` service
     # (drift between services is platform bug #69's class); minio/jaeger
     # endpoints omitted with the services (see header note).
-    image: ghcr.io/kudratsingh/incident-platform:v0.6.22@sha256:3b19389273d6d39e15173036a1a5b1db3c8965ab72825c34d1c12876b132b3a1
+    image: ghcr.io/kudratsingh/incident-platform:v0.6.23@sha256:7b9f640968e3bcb64892b997367c0916006a8fab52800dea4320f8464aa2d1fb
     platform: linux/amd64
     ports:
       - "${DEMO_API_HOST_PORT:-8000}:8000"
@@ -697,7 +697,7 @@ services:
     # No `depends_on: service_healthy` on api, deliberately: nginx resolves
     # the upstream per request, so the console coming up first only means a
     # 502 until the backend is ready, and `make demo` waits on both anyway.
-    image: ghcr.io/kudratsingh/incident-platform-console:v0.6.22@sha256:f38ae2be8fdfcdc1c53bec0b17e63062c5a68ce38da03d4f0f09060322e26657
+    image: ghcr.io/kudratsingh/incident-platform-console:v0.6.23@sha256:7d07fc45b9de7aabd8a93c5db3384d11de3c742cb163d19e8728c20be31c4f74
     platform: linux/amd64
     environment:
       API_UPSTREAM: http://api:8000

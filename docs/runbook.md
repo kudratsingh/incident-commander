@@ -1856,6 +1856,8 @@ change, needed no new step — item 12 covers both):
     again, `make snapshot` against the live v0.6.21 stack came back with **no diff** (40
     tools) and `make test-contract` passed. All four services re-pinned all the same.
 
+    v0.6.23 (WO-R3-361, for plat #240/#241 / WO-R3-358/359) is console-only: digests moved, nothing else;
+    `make snapshot` showed no diff.
     v0.6.22 (WO-R3-357, for plat #239 / WO-R3-356) changes the backend but not the contract:
     the platform's lag reading keeps coming through a consumer restart (platform ADR 0040).
     `make snapshot` came back with **no diff** (40 tools) and `make test-contract` passed.

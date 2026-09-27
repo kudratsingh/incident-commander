@@ -106,35 +106,17 @@ _VOLATILE: Final[Mapping[str, frozenset[str]]] = {
     # `records_referenced` / `records_found`: they are counts of SEEDED records, so
     # a fresh stack answers 3 / 3 every time and a recording can be right.
     "get_cache_key_info": frozenset({"ttl_seconds"}),
-    # v0.6.11 (plat #218, WO-R3-217), read by WO-R3-229's cascade. One field, and it is a
-    # clock by the tool's own description: `measured_at` is the answering process's time,
-    # and every objective's window ends at it. Nothing else here is exempt — the counts,
-    # the rates and both flags ARE the reading a scenario grades, so a canned world's
-    # numbers stay guarded and its disagreement with an un-faulted stack is ledgered.
-    #
-    # WO-R3-221 (WP-8.5) tried to widen this to `objectives.{total, failed,
-    # current_success_rate, burn_rate}` and **backed out**, because the two packets want
-    # opposite things from one per-tool map and the cascade's claim is the stronger one.
-    # For `cascading_redis_starves_backpressure` those four are AUTHORED premise — it is
-    # canned-only, so its numbers are the world — and four of its seven ledger rows are
-    # exactly them, which a volatility declaration would make stale and red the ratchet.
-    # For the `api_latency` family's four LIVE worlds the same four fields are a function
-    # of how long `make traffic` had been running (`total` read 143, 155, 174 and 221
-    # across recordings of worlds that differ in nothing else), so no canned value can be
-    # right and every one of them is ledgered post-fault instead.
-    #
-    # Both readings are correct about their own scenario and `_VOLATILE` is keyed by TOOL,
-    # so it cannot hold both. The same gap bit `get_outbox_status.unpublished_count` in
-    # the same packet, from the other side. Widening this map is not the fix; a per-
-    # scenario exemption would be, and until one exists the ledger carries the difference.
+    # One clock, `measured_at`. The counters are readings: the `api_latency` worlds declare
+    # `objectives.total` volatile in their own YAML (WO-R3-309) and the cascade does not.
     "get_slo_status": frozenset({"measured_at"}),
     # v0.6.9 (plat #211, WO-R3-201), made from the four recordings under
     # `evals/recorded_worlds/jobs_not_progressing_*`. Two clocks (`measured_at`,
     # `relay_last_tick_at`), the two ages derived from them, `last_publish_at` (the
     # seeder writes no outbox rows), and the four `oldest_/newest_unpublished_*`
     # that flip to null with load. DELIBERATELY OUT: `unpublished_count` IS the
-    # family's evidence, and `unpublished_past_attempt_limit`,
-    # `relay_heartbeat_known` and `relay_tick_interval_s` are stable.
+    # outbox family's evidence (the `api_latency` worlds declare it volatile in their
+    # own YAML), and `unpublished_past_attempt_limit`, `relay_heartbeat_known` and
+    # `relay_tick_interval_s` are stable.
     "get_outbox_status": frozenset(
         {
             "measured_at",
@@ -204,6 +186,8 @@ class CannedCall:
     # exist" against the UN-faulted world is an observation, not a probe failure —
     # see ``evals/fixture_probe.py``.
     chaos_seeded: bool = False
+    # Paths the scenario's own ``volatile:`` list adds to ``_VOLATILE`` for this tool.
+    volatile: frozenset[str] = frozenset()
 
     @property
     def label(self) -> str:
@@ -302,6 +286,7 @@ def canned_calls(scenarios: Iterable[Scenario]) -> tuple[CannedCall, ...]:
                             payload=payload,
                             index=index,
                             chaos_seeded=scenario.seeds_chaos,
+                            volatile=scenario.volatile_paths(tool),
                         )
                     )
     return tuple(calls)
@@ -332,13 +317,12 @@ def compare(
 ) -> list[Drift]:
     """Every way ``call``'s canned payload disagrees with the live response.
 
-    ``live`` must be the snapshot for THIS element's position in the sequence
-    (``fixture_probe.probe_live``). ``shape_only`` — normalized paths compared for
-    JSON type only, cut at that node — is EMPTY by default, so widening
-    ``_VOLATILE`` stays the only way to forgive a canned fixture. Its one caller is
-    ``evals/world_drift.py``, which asks a different question and declares its own.
+    ``live`` must be the snapshot for THIS element's position in the sequence. A value is
+    forgiven only by ``_VOLATILE`` (clocks, every scenario) or the scenario's own
+    ``volatile:`` list (``call.volatile``). ``shape_only`` (type only, cut at that node) is
+    empty by default; ``evals/world_drift.py`` is its one caller.
     """
-    volatile = _VOLATILE.get(call.tool, frozenset())
+    volatile = _VOLATILE.get(call.tool, frozenset()) | call.volatile
     unbounded = _UNBOUNDED_TEXT.get(call.tool, frozenset())
     drifts: list[Drift] = []
 

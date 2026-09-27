@@ -36,19 +36,6 @@ CANNED_ONLY: Final = "canned-only"
 #: uptime — calling it post-fault would claim a mechanism that is not there.
 COLD_STACK: Final = "cold-stack"
 WARM_STACK: Final = "warm-stack"
-#: The recording is of a stack under SUBMITTED TRAFFIC and the check probes a quiet one
-#: (WO-R3-221, WP-8.5). `get_slo_status` computes both objectives over a rolling 24h of the
-#: jobs table, so `objectives[].total` is a count of how much `make traffic` had submitted
-#: when the recording was taken — 154, 155, 186 and 221 across four worlds that differ in
-#: nothing else — and a quiet stack answers 0. The `api_latency` family REQUIRES sustained
-#: traffic (its own preconditions assert `total >= 1`, because `total: 0` is an absence of
-#: evidence rather than health) and the drift walk does not run it, so the two cannot
-#: agree. Its own word rather than POST_FAULT for COLD_STACK's exact reason: POST_FAULT
-#: claims a hook produced the value, and no hook submits a job. Like COLD_STACK and
-#: WARM_STACK it describes what the STACK was doing, so `classify` exempts it from the
-#: stale check — a row here is not a fixture anyone can fix, and deleting it would red
-#: CI's own quiet stack.
-TRAFFIC_STACK: Final = "traffic-stack"
 #: **THE HOOK NOW EXISTS, and this context's own note said what to do about it**
 #: (WO-R3-221, v0.6.12). It said "the work, if this scenario is ever to be run live,
 #: is a platform hook", and v0.6.12's `slow_db_queries` is precisely that hook — so
@@ -1453,42 +1440,6 @@ _JUSTIFIED: Final[dict[tuple[object, ...], tuple[str, str]]] = {
         "1 or 2 depending which half of the offset the read caught, so the scenario "
         "grades `at_least: 1`",
     ),
-    # The traffic premise, in four worlds. `objectives[].total` is a count over what
-    # `make traffic` had submitted when each recording was taken, so no canned value can
-    # agree with a quiet check — see TRAFFIC_STACK above for why that is its own word and
-    # not POST_FAULT. Four rows, one per world, all the same sentence.
-    ("api_latency_db_query", "get_slo_status", "objectives[].total[]", "not_live_reachable"): (
-        TRAFFIC_STACK,
-        "the recording was taken under sustained `make traffic`, which this family's "
-        "preconditions require (`total >= 1`, because `total: 0` is an absence of evidence "
-        "rather than health); the drift walk probes a quiet stack, which answers 0",
-    ),
-    (
-        "api_latency_downstream",
-        "get_slo_status",
-        "objectives[].total[]",
-        "not_live_reachable",
-    ): (
-        TRAFFIC_STACK,
-        "same premise, same walk: 186 submitted jobs against a quiet stack's 0. Here the "
-        "count also scopes the failure claims beside it — 28 of 186 is a statement about "
-        "these dispatches",
-    ),
-    (
-        "api_latency_healthy_control",
-        "get_slo_status",
-        "objectives[].total[]",
-        "not_live_reachable",
-    ): (
-        TRAFFIC_STACK,
-        "same premise, and on the control it is load-bearing twice: without traffic the "
-        "world's central claim (both budgets intact) would be asserted over no samples, "
-        "which is INC-003's mistake in its strongest form",
-    ),
-    ("api_latency_redis", "get_slo_status", "objectives[].total[]", "not_live_reachable"): (
-        TRAFFIC_STACK,
-        "same premise, same walk: 154 submitted jobs against a quiet stack's 0",
-    ),
     (
         "api_latency_downstream",
         "get_slo_status",
@@ -1928,7 +1879,7 @@ def split_for_bless(
 
     def observable_here(key: DriftKey) -> bool:
         context = context_of(key)[0]
-        return context not in {COLD_STACK, WARM_STACK, TRAFFIC_STACK} or (
+        return context not in {COLD_STACK, WARM_STACK} or (
             context.removesuffix("-stack") == stack_context
         )
 
@@ -2069,7 +2020,7 @@ def classify(
             for key in ledger - matched
             if (key[0], key[1]) not in unread
             and (
-                context_of(key)[0] not in {COLD_STACK, WARM_STACK, TRAFFIC_STACK}
+                context_of(key)[0] not in {COLD_STACK, WARM_STACK}
                 or context_of(key)[0].removesuffix("-stack") == stack_context
             )
         )

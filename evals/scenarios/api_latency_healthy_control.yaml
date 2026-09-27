@@ -447,3 +447,6 @@ volatile:
 - tool: get_outbox_status
   path: unpublished_count
   why: under sustained traffic the relay publishes in batches, so two honest readings a moment apart read 0 or 1 depending on when they land
+- tool: get_postgres_health
+  path: longest_active_query_ms
+  why: a quiet world reads null here unless the probe's own read (or the seeder) is in flight, when it reads a few ms — CI's fresh stack caught 2.256 ms once; this world's fault is not a slow query, so the value carries no claim

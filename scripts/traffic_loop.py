@@ -101,13 +101,26 @@ def login(client: httpx.Client, email: str, password: str) -> str:
     return token
 
 
-def submit_one(client: httpx.Client, jwt: str, job_type: str, tally: Tally) -> None:
-    """One job. Classifies the response rather than raising on it."""
+def submit_one(
+    client: httpx.Client,
+    jwt: str,
+    job_type: str,
+    tally: Tally,
+    *,
+    endpoint_count: int | None = None,
+) -> None:
+    """One job. Classifies the response rather than raising on it.
+
+    ``endpoint_count`` goes into the payload only when given; see ``--endpoint-count``.
+    """
+    payload: dict[str, Any] = {"source": "eval-traffic-loop"}
+    if endpoint_count is not None:
+        payload["endpoint_count"] = endpoint_count
     response = client.post(
         "/jobs",
         json={
             "type": job_type,
-            "payload": {"source": "eval-traffic-loop"},
+            "payload": payload,
             # Unique per submission: a repeated idempotency key has the platform dedupe the
             # traffic away, leaving one job however long the loop runs.
             "idempotency_key": f"traffic-{uuid.uuid4()}",
@@ -244,6 +257,7 @@ def run(
     until_lag: int | None,
     lag_reader: LagReader | None = None,
     pacer: WindowPacer | None = None,
+    endpoint_count: int | None = None,
     sleep: Any = time.sleep,
     on_tick: Any = print,
 ) -> Tally:
@@ -272,7 +286,7 @@ def run(
         # 1. Submit one job, and tell the pacer what it cost: one creation against this
         #    window's allowance, or a refusal, which means the allowance is already gone.
         refused_before = tally.rate_limited
-        submit_one(client, jwt, job_type, tally)
+        submit_one(client, jwt, job_type, tally, endpoint_count=endpoint_count)
         if pacer is not None:
             pacer.spend()
             if tally.rate_limited > refused_before:
@@ -321,6 +335,14 @@ def main(argv: list[str] | None = None) -> int:
         default=DEFAULT_WINDOW_SECONDS,
         help=f"the length of that fixed window (default {DEFAULT_WINDOW_SECONDS:.0f})",
     )
+    parser.add_argument(
+        "--endpoint-count",
+        type=int,
+        default=None,
+        help="the `endpoint_count` each bulk_api_sync job asks the platform to sync (platform "
+        "default 5). 0 makes a job that cannot fail: it never calls the platform's shared "
+        "bulk-api circuit breaker, so it can never be dead-lettered by it",
+    )
     parser.add_argument("--count", type=int, default=None, help="stop after N submissions")
     parser.add_argument(
         "--until-lag",
@@ -365,8 +387,9 @@ def main(argv: list[str] | None = None) -> int:
             if args.max_per_window > 0
             else "unpaced"
         )
+        shape = "" if args.endpoint_count is None else f" (endpoint_count {args.endpoint_count})"
         print(
-            f"submitting {args.job_type} every {args.interval}s at most, within the "
+            f"submitting {args.job_type}{shape} every {args.interval}s at most, within the "
             f"platform's allowance ({allowance}), as {args.email} (Ctrl-C to stop)"
         )
         reader = LagReader(args.mcp_url, smoke_token) if can_read_lag else None
@@ -384,6 +407,7 @@ def main(argv: list[str] | None = None) -> int:
                     window=args.window_seconds,
                     floor=args.interval,
                 ),
+                endpoint_count=args.endpoint_count,
             )
         finally:
             if reader is not None:

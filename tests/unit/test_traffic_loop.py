@@ -416,3 +416,46 @@ class TestCountAlwaysTerminates:
         )
         assert tally.created + len(tally.errors) == 4
         assert seen["n"] == 4, "exactly --count requests, whatever they returned"
+
+
+class TestTheEndpointCount:
+    """WO-R3-345: `endpoint_count: 0` is a job the platform's bulk-api breaker cannot fail."""
+
+    @staticmethod
+    def _payloads(**kwargs: Any) -> list[dict[str, Any]]:
+        seen: list[dict[str, Any]] = []
+
+        def _capture(request: httpx.Request) -> httpx.Response:
+            seen.append(json.loads(request.content)["payload"])
+            return httpx.Response(201, json={"id": "x"})
+
+        submit_one(_client(_capture), "jwt", "bulk_api_sync", Tally(), **kwargs)
+        return seen
+
+    def test_it_rides_in_the_payload_when_given(self) -> None:
+        assert self._payloads(endpoint_count=0) == [
+            {"source": "eval-traffic-loop", "endpoint_count": 0}
+        ]
+
+    def test_without_it_the_payload_is_unchanged(self) -> None:
+        assert self._payloads() == [{"source": "eval-traffic-loop"}]
+
+    def test_the_loop_passes_it_to_every_submission(self) -> None:
+        seen: list[dict[str, Any]] = []
+
+        def _capture(request: httpx.Request) -> httpx.Response:
+            seen.append(json.loads(request.content)["payload"])
+            return httpx.Response(201, json={"id": "x"})
+
+        run(
+            _client(_capture),
+            "jwt",
+            job_type="bulk_api_sync",
+            interval=0.01,
+            max_submissions=3,
+            until_lag=None,
+            endpoint_count=0,
+            sleep=lambda _s: None,
+            on_tick=lambda _line: None,
+        )
+        assert [p["endpoint_count"] for p in seen] == [0, 0, 0]

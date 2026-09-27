@@ -416,6 +416,65 @@ measurement: its page landed at 11:39:26.7 and its `restart_consumer_group` at 1
 low 60s rather than the low 20s. Read the rehearsal's 23 as "the machine is fast", not as "this
 is how deep the sixth take's backlog will be".
 
+### The producer's jobs cannot be dead-lettered (WO-R3-345)
+
+**What the sixth take showed.** At 15:57:48.355, 40 s after `alert.resolved consumer_stalled`, the
+platform raised `dlq_depth_warning` — "6 jobs are in the dead-letter queue (threshold 5)". The
+seeded baseline is 4. The platform's own audit log names the other two: `event.job.dead_letter`
+at 15:57:47.959 and 15:57:48.038, both the producer's `bulk_api_sync` jobs, both
+`bulk api sync failed: all 5 endpoint calls failed (0 of 5 endpoints returned a result)`, both
+"exhausted after 3 attempts".
+
+**Why.** The platform's `bulk_api_sync` processor fails each simulated endpoint call 10% of the
+time, and every call goes through one shared circuit breaker per process (`bulk-api-sync`:
+3 failures in a row open it for 30 s; after that it lets ONE test call through and refuses every
+other call until that one answers). A job whose five calls all fail is a failed job, and every
+job run while the breaker is open or testing fails that way. In the sixth take the breaker had
+opened by 15:56:44 (a job at 15:56:44 and two after it failed their first attempt), the consumer
+was killed at 15:56:49 so their 2-second retries waited in the backlog, and when the agent
+restarted the group (about 15:57:47) the whole backlog ran at once against a breaker that was
+admitting one test call: between 15:57:47.94 and 15:57:48.04 seven more attempts failed, and the
+two jobs already on their third attempt were dead-lettered. The breaker is the platform working as designed; what was wrong is the
+demo's producer submitting work that can fail at all.
+
+**The fix, on this side only.** Both producers now submit `endpoint_count: 0`
+(`MODES["consumer_outage"]["traffic_endpoint_count"]`, `make traffic ENDPOINTS=0`,
+`scripts/traffic_loop.py --endpoint-count 0`). Such a job completes without making a single call,
+so it never touches the breaker and cannot be failed or dead-lettered by it. The backlog climbs
+exactly as before, because lag counts messages and not work. And the wind-down now reads the
+dead-letter total BEFORE the reset sweeps it and prints it — `dead-letter queue before the reset:
+4 (the seeded 4) — this take added none`, or a WARNING with the count above the baseline — so a
+take that adds rows says so on the operator's screen instead of in a page nobody expected.
+
+**Rehearsed 2026-09-27 on v0.6.20, all free (`AUTO=1`), all PASS, `make world-audit` PASS before
+and after each.** The audit stream of each take (`alert.`, `chaos.`, `lab.world_reset`):
+
+```text
+consumer_outage HOLD=5   reset 08:20:39.8 → kill_consumer 08:20:51.3 → alert.raised consumer_stalled 08:21:11.8 (lag 26)
+                         → [guards] → alert.resolved 08:21:22.3 → reset 08:21:25.2      jobs 46 submitted / 46 completed / 0 failed
+consumer_outage HOLD=5   reset 08:21:55.3 → kill_consumer 08:22:06.9 → alert.raised consumer_stalled 08:22:24.3 (lag 20)
+                         → [guards] → alert.resolved 08:22:29.6 → reset 08:22:35.7      jobs 39 / 39 / 0
+consumer_outage HOLD=60  reset 08:23:18.7 → kill_consumer 08:23:30.2 → alert.raised consumer_stalled 08:23:47.6 (lag 21)
+                         → [guards] → alert.resolved 08:23:58.3 → reset 08:24:54.6      jobs 108 / 108 / 0
+dlq_backlog     HOLD=5   reset 08:25:05.0 → seed_dlq_messages 08:25:16.7 → alert.raised dlq_depth_warning 08:25:21.3 (depth 7)
+                         → [guards] → alert.resolved 08:25:26.4 → reset 08:25:31.9      jobs 4 / 4 / 0 (the replay)
+```
+
+Exactly ONE `alert.raised` per take, the scenario's own; zero `event.job.failed` and zero
+`event.job.dead_letter`; the pre-reset read printed `4 (the seeded 4)` on every `consumer_outage`
+take, and the wind-down audit read `DLQ total: 4` on all four. The third take holds 60 s like the
+owner's takes, so the world stood for 56 s after the page resolved — longer than the 40 s the
+sixth take's second page needed. The lag ring still climbs strictly: `0 → 5 → 13 → 19 → 26 → 32`
+then `26 → 19 → 13 → 5 → 0` on the first take.
+
+**The lag ring survives the reset.** `GET /admin/consumer-lag` before and after `make eval-reset
+PURGE_IDEMPOTENCY=1` read the same 25 samples with the same oldest (08:12:23.9); read again at
+08:23:05, after two more takes and four more resets, it still started at 08:12:23.9 and held both
+takes' climbs (`lag_samples_cleared: 0`, as v0.6.17 promised). What DOES empty it is time: the
+ring is a 15-minute window (`sample_window_seconds: 900`) — at 08:31:05 it started at 08:16:02 —
+so a read-back taken more than 15 minutes after a take comes back without it — which is the likeliest reading of the
+sixth take's empty read-back; nothing in the reset clears it.
+
 ## What the operator endpoints showed, per phase
 
 `consumer_outage`, the same rehearsal, polled every 2 s as the operator console polls. All four
@@ -489,7 +548,7 @@ excludes them by principal (they are not the run's), which is why they were left
    and runs `make world-audit` as a **gate**: a demo that starts from a world somebody else
    left dirty shows the audience a fault that is not yours. Non-zero stops the demo.
 2. **Baseline.** In `consumer_outage`, starts `make traffic` at the mode's baseline rate
-   (`RATE=2.0 MAX_PER_WINDOW=240`) and waits for a healthy reading (lag known, small). 2.0 s is
+   (`RATE=2.0 MAX_PER_WINDOW=240 ENDPOINTS=0` — jobs that cannot be dead-lettered) and waits for a healthy reading (lag known, small). 2.0 s is
    ordinary-looking traffic that fits even the platform's DEFAULT allowance of 30 creations a
    minute. In `dlq_backlog`, nothing — the world is seeded and quiet. Prints
    **BASELINE — START RECORDING NOW**.
@@ -517,7 +576,8 @@ excludes them by principal (they are not the run's), which is why they were left
    / trace paths, then **HOLDS the world for `HOLD` seconds (default 60)** so the finished run
    stays on the page — the reset opens the next take and the page follows the newest one, which
    is how the fifth take's run left the screen eleven seconds after it resolved. Then it stops
-   traffic, waits for the backlog in a traffic mode, resets and re-audits. Ctrl-C during the hold
+   traffic and, in a traffic mode, prints the dead-letter total before the reset (a WARNING if
+   the take added rows), resets, waits for the backlog and re-audits. Ctrl-C during the hold
    skips the rest of it; the world still goes back. Prints **DONE — STOP RECORDING**.
 
 **Every failure path stops the traffic, resets and re-audits** — including a bug in the demo

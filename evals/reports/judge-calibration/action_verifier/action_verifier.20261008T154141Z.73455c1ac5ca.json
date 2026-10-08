@@ -1,0 +1,554 @@
+{
+  "report_id": "73455c1ac5ca",
+  "judge": "action_verifier",
+  "what_it_decides": "whether an executed Tier-1 action worked. `verified` marks the incident RESOLVED; `not_verified` escalates it to a human. The only one of the three whose verdict gates a live outcome, and the reason plan 03 \u00a7 104's omission of it is divergence J6.",
+  "generated_at": "2026-10-08T15:41:41.299218+00:00",
+  "model": "claude-haiku-4-5",
+  "judge_client": "live",
+  "reps": 5,
+  "protocol": "plan 03 \u00a7 9 (WP-6.3). Four legs: a hand-built trap set whose verdicts the evaluator asserts; self-agreement over N identical asks; an independent ground-truth leg where one exists; and a stated refusal where one does not. Rubric edits are ONE LINE AT A TIME with a rerun (plan 03 \u00a7 110), which is why rubric.sha256 is here: a delta between two calibrations is attributable only if each says which rubric bytes it measured. No selector or judge number is reported anywhere until its id appears in research_report.CALIBRATION_REPORTS or JUDGE_CALIBRATION_REPORTS (plan 02:243, plan 04:169).",
+  "rubric": {
+    "prompt": "verification_judge",
+    "sha256": "d5481fe856e23afabd05bdb60925cf01d2efc49c2035f757ce2fb329d58c8c00",
+    "lines": 34,
+    "one_line_at_a_time": "a rubric edit lands one line at a time with a rerun (plan 03 \u00a7 110); a delta between two calibrations is attributable only if this hash differs by a change a reviewer can see. The convention is in docs/eval-methodology.md and ADR 0052"
+  },
+  "determinism": {
+    "temperature_sent": null,
+    "why_no_temperature": "owner decision O-24 and ADR 0048: nothing built from 2026-09-17 on may REQUIRE a sampling parameter, because llm/client.SAMPLING_REJECTED_MODELS lists the model families that reject temperature with a 400 \u2014 a calibration pinned to temperature 0 would stop working on the first re-pin, which is exactly when a calibration is most needed",
+    "instead": "stability is MEASURED (self_agreement over N identical asks) rather than assumed from a setting, and the schema does the constraining: forced tool use against a fixed JSON schema, a closed verdict space, and validators that reject an out-of-set answer (ADR 0052)",
+    "fixed_json_schema": true,
+    "judge_client": "live"
+  },
+  "trap_agreement": {
+    "cases": 6,
+    "answered": 6,
+    "errors": [],
+    "agreed": 6,
+    "accuracy": 1.0,
+    "verdict_space": [
+      "verified",
+      "not_verified"
+    ],
+    "approval_prefix": "verified",
+    "asserted_approvals": 3,
+    "false_rejects": 0,
+    "false_reject_rate": 0.0,
+    "asserted_refusals": 3,
+    "false_approves": 0,
+    "false_approve_rate": 0.0,
+    "wrong_approvals": 0,
+    "by_shape": [
+      {
+        "case_id": "av-01-read-shows-recovery",
+        "shape": "the verify read shows the alerted value recovered",
+        "asserts": "verified",
+        "observed": "verified",
+        "agrees": true
+      },
+      {
+        "case_id": "av-02-read-shows-no-movement",
+        "shape": "the verify read shows the alerted value unchanged",
+        "asserts": "not_verified",
+        "observed": "not_verified",
+        "agrees": true
+      },
+      {
+        "case_id": "av-03-effect-is-reported-not-observed",
+        "shape": "the action REPORTS its effect; the world cannot have moved yet",
+        "asserts": "verified",
+        "observed": "verified",
+        "agrees": true
+      },
+      {
+        "case_id": "av-04-read-carries-an-error",
+        "shape": "the verify read came back as an error",
+        "asserts": "not_verified",
+        "observed": "not_verified",
+        "agrees": true
+      },
+      {
+        "case_id": "av-05-filtered-read-proves-its-slice",
+        "shape": "the verify read is filtered and proves only that slice",
+        "asserts": "verified",
+        "observed": "verified",
+        "agrees": true
+      },
+      {
+        "case_id": "av-06-read-is-of-another-resource",
+        "shape": "the verify read is healthy, but of a different resource",
+        "asserts": "not_verified",
+        "observed": "not_verified",
+        "agrees": true
+      }
+    ],
+    "minimum_cases_required": 5
+  },
+  "self_agreement": {
+    "reps": 5,
+    "cases": 6,
+    "identical": 5,
+    "fraction_identical": 0.8333,
+    "reading": "low stability means the rubric is ambiguous; high stability with low accuracy means the rubric is wrong (plan 03 \u00a7 109)",
+    "unstable": [
+      {
+        "case_id": "av-05-filtered-read-proves-its-slice",
+        "observed": [
+          "verified",
+          "not_verified",
+          "verified",
+          "not_verified",
+          "not_verified"
+        ]
+      }
+    ]
+  },
+  "ground_truth_agreement": {
+    "leg": "track record: archived verdicts vs the scenario's own expectation",
+    "measured": true,
+    "value": {
+      "ground_truth": "the scenario's own expectation, from the corpus: a scenario that declares a Tier-1 action and expects to end resolved is one whose action was meant to work, so 'verified' is the right verdict. Evaluator-owned (ADR 0038) and scoped to the world the scenario describes (ADR 0040).",
+      "spent": "nothing \u2014 every verdict is read from a committed archive",
+      "it_is_a_bound": "an upper bound on this judge's agreement, not an accuracy: see a_disagreement_is_not_only_a_judge_error below",
+      "scanned": 36,
+      "not_paired": [
+        {
+          "archive": "2988f414afb4",
+          "scenario": "dlq_human_required_escalates",
+          "verdict": "verified",
+          "final_state": "escalated",
+          "because": "the scenario expects to end 'escalated' even though its action is meant to work \u2014 the stabilize-only handover (the fix landed and the incident is still not over). The right verdict there is 'verified' and the right terminal state is an escalation, so the two cannot be read off one another"
+        },
+        {
+          "archive": "a0aa257bf865",
+          "scenario": "dlq_human_required_escalates",
+          "verdict": "verified",
+          "final_state": "resolved",
+          "because": "the scenario expects to end 'escalated' even though its action is meant to work \u2014 the stabilize-only handover (the fix landed and the incident is still not over). The right verdict there is 'verified' and the right terminal state is an escalation, so the two cannot be read off one another"
+        },
+        {
+          "archive": "e72b5ffb9df0",
+          "scenario": "consumer_lag_analytics_critical",
+          "verdict": "verified",
+          "final_state": "resolved",
+          "because": "the scenario declares no Tier-1 action (a read-only scenario), so 'did the action work' is not a question it is about. Its OUTCOME dimension grades whether the run ended in the expected state, which is a finding about the loop rather than about this judge \u2014 applying it here would be INC-003's error in judge form"
+        },
+        {
+          "archive": "e72b5ffb9df0",
+          "scenario": "consumer_lag_medium",
+          "verdict": "verified",
+          "final_state": "resolved",
+          "because": "the scenario declares no Tier-1 action (a read-only scenario), so 'did the action work' is not a question it is about. Its OUTCOME dimension grades whether the run ended in the expected state, which is a finding about the loop rather than about this judge \u2014 applying it here would be INC-003's error in judge form"
+        },
+        {
+          "archive": "e72b5ffb9df0",
+          "scenario": "consumer_lag_orders_high",
+          "verdict": "verified",
+          "final_state": "resolved",
+          "because": "the scenario declares no Tier-1 action (a read-only scenario), so 'did the action work' is not a question it is about. Its OUTCOME dimension grades whether the run ended in the expected state, which is a finding about the loop rather than about this judge \u2014 applying it here would be INC-003's error in judge form"
+        },
+        {
+          "archive": "e72b5ffb9df0",
+          "scenario": "consumer_lag_payments_critical",
+          "verdict": "verified",
+          "final_state": "resolved",
+          "because": "the scenario declares no Tier-1 action (a read-only scenario), so 'did the action work' is not a question it is about. Its OUTCOME dimension grades whether the run ended in the expected state, which is a finding about the loop rather than about this judge \u2014 applying it here would be INC-003's error in judge form"
+        },
+        {
+          "archive": "e72b5ffb9df0",
+          "scenario": "consumer_lag_shipping_extreme",
+          "verdict": "not_verified",
+          "final_state": "escalated",
+          "because": "the scenario declares no Tier-1 action (a read-only scenario), so 'did the action work' is not a question it is about. Its OUTCOME dimension grades whether the run ended in the expected state, which is a finding about the loop rather than about this judge \u2014 applying it here would be INC-003's error in judge form"
+        },
+        {
+          "archive": "e72b5ffb9df0",
+          "scenario": "dlq_backlog",
+          "verdict": "verified",
+          "final_state": "resolved",
+          "because": "the scenario declares no Tier-1 action (a read-only scenario), so 'did the action work' is not a question it is about. Its OUTCOME dimension grades whether the run ended in the expected state, which is a finding about the loop rather than about this judge \u2014 applying it here would be INC-003's error in judge form"
+        },
+        {
+          "archive": "e72b5ffb9df0",
+          "scenario": "failed_traces_scan",
+          "verdict": "verified",
+          "final_state": "resolved",
+          "because": "the scenario declares no Tier-1 action (a read-only scenario), so 'did the action work' is not a question it is about. Its OUTCOME dimension grades whether the run ended in the expected state, which is a finding about the loop rather than about this judge \u2014 applying it here would be INC-003's error in judge form"
+        },
+        {
+          "archive": "e72b5ffb9df0",
+          "scenario": "multi_probe_billing",
+          "verdict": "verified",
+          "final_state": "resolved",
+          "because": "the scenario declares no Tier-1 action (a read-only scenario), so 'did the action work' is not a question it is about. Its OUTCOME dimension grades whether the run ended in the expected state, which is a finding about the loop rather than about this judge \u2014 applying it here would be INC-003's error in judge form"
+        },
+        {
+          "archive": "f32f023eaf33",
+          "scenario": "dlq_poison_unclassified",
+          "verdict": "verified",
+          "final_state": "escalated",
+          "because": "the scenario expects to end 'escalated' even though its action is meant to work \u2014 the stabilize-only handover (the fix landed and the incident is still not over). The right verdict there is 'verified' and the right terminal state is an escalation, so the two cannot be read off one another"
+        }
+      ],
+      "paired": 25,
+      "agreed": 24,
+      "agreement": 0.96,
+      "verifications_called_for": 25,
+      "false_rejects": 1,
+      "false_reject_rate": 0.04,
+      "refusals_called_for": 0,
+      "false_approve_rate": null,
+      "false_approve_is_unmeasured_because": "no live run in the committed archives was ever supposed to end 'not_verified': only remediate_verify_fails makes a refusal the right answer and it has never run live. A null here is 'not measured', never 'zero' \u2014 the trap set (av-02, av-04, av-06) is what covers this direction",
+      "a_disagreement_is_not_only_a_judge_error": "this leg cannot tell a wrong verdict from a run that genuinely did not recover; every disagreeing row is named below so the trajectory can be read",
+      "disagreements": [
+        {
+          "archive": "7acd2b441961",
+          "scenario": "remediate_stale_cache_success",
+          "family": "cache_redis",
+          "verdict": "not_verified",
+          "called_for": "verified"
+        }
+      ],
+      "by_family": [
+        {
+          "family": "cache_redis",
+          "paired": 4,
+          "agreed": 3,
+          "agreement": 0.75,
+          "verifications_called_for": 4,
+          "false_rejects": 1,
+          "false_reject_rate": 0.25,
+          "refusals_called_for": 0,
+          "false_approve_rate": null,
+          "false_approve_is_unmeasured_because": "no live run in the committed archives was ever supposed to end 'not_verified': only remediate_verify_fails makes a refusal the right answer and it has never run live. A null here is 'not measured', never 'zero' \u2014 the trap set (av-02, av-04, av-06) is what covers this direction",
+          "a_disagreement_is_not_only_a_judge_error": "this leg cannot tell a wrong verdict from a run that genuinely did not recover; every disagreeing row is named below so the trajectory can be read",
+          "disagreements": [
+            {
+              "archive": "7acd2b441961",
+              "scenario": "remediate_stale_cache_success",
+              "family": "cache_redis",
+              "verdict": "not_verified",
+              "called_for": "verified"
+            }
+          ]
+        },
+        {
+          "family": "consumer_lag",
+          "paired": 11,
+          "agreed": 11,
+          "agreement": 1.0,
+          "verifications_called_for": 11,
+          "false_rejects": 0,
+          "false_reject_rate": 0.0,
+          "refusals_called_for": 0,
+          "false_approve_rate": null,
+          "false_approve_is_unmeasured_because": "no live run in the committed archives was ever supposed to end 'not_verified': only remediate_verify_fails makes a refusal the right answer and it has never run live. A null here is 'not measured', never 'zero' \u2014 the trap set (av-02, av-04, av-06) is what covers this direction",
+          "a_disagreement_is_not_only_a_judge_error": "this leg cannot tell a wrong verdict from a run that genuinely did not recover; every disagreeing row is named below so the trajectory can be read",
+          "disagreements": []
+        },
+        {
+          "family": "dlq",
+          "paired": 9,
+          "agreed": 9,
+          "agreement": 1.0,
+          "verifications_called_for": 9,
+          "false_rejects": 0,
+          "false_reject_rate": 0.0,
+          "refusals_called_for": 0,
+          "false_approve_rate": null,
+          "false_approve_is_unmeasured_because": "no live run in the committed archives was ever supposed to end 'not_verified': only remediate_verify_fails makes a refusal the right answer and it has never run live. A null here is 'not measured', never 'zero' \u2014 the trap set (av-02, av-04, av-06) is what covers this direction",
+          "a_disagreement_is_not_only_a_judge_error": "this leg cannot tell a wrong verdict from a run that genuinely did not recover; every disagreeing row is named below so the trajectory can be read",
+          "disagreements": []
+        },
+        {
+          "family": "workflow",
+          "paired": 1,
+          "agreed": 1,
+          "agreement": 1.0,
+          "verifications_called_for": 1,
+          "false_rejects": 0,
+          "false_reject_rate": 0.0,
+          "refusals_called_for": 0,
+          "false_approve_rate": null,
+          "false_approve_is_unmeasured_because": "no live run in the committed archives was ever supposed to end 'not_verified': only remediate_verify_fails makes a refusal the right answer and it has never run live. A null here is 'not measured', never 'zero' \u2014 the trap set (av-02, av-04, av-06) is what covers this direction",
+          "a_disagreement_is_not_only_a_judge_error": "this leg cannot tell a wrong verdict from a run that genuinely did not recover; every disagreeing row is named below so the trajectory can be read",
+          "disagreements": []
+        }
+      ],
+      "rows": [
+        {
+          "archive": "16ae3c7a4c9d",
+          "scenario": "remediate_consumer_lag_success",
+          "family": "consumer_lag",
+          "verdict": "verified",
+          "called_for": "verified"
+        },
+        {
+          "archive": "3c65c04326d4",
+          "scenario": "dlq_replay_safe_success",
+          "family": "dlq",
+          "verdict": "verified",
+          "called_for": "verified"
+        },
+        {
+          "archive": "42c675d9c145",
+          "scenario": "remediate_dlq_backlog_success",
+          "family": "dlq",
+          "verdict": "verified",
+          "called_for": "verified"
+        },
+        {
+          "archive": "4753c12f8132",
+          "scenario": "remediate_stale_cache_success",
+          "family": "cache_redis",
+          "verdict": "verified",
+          "called_for": "verified"
+        },
+        {
+          "archive": "47abb70a2b9e",
+          "scenario": "remediate_dlq_backlog_success",
+          "family": "dlq",
+          "verdict": "verified",
+          "called_for": "verified"
+        },
+        {
+          "archive": "4974811d236f",
+          "scenario": "remediate_dlq_backlog_success",
+          "family": "dlq",
+          "verdict": "verified",
+          "called_for": "verified"
+        },
+        {
+          "archive": "54ab08425f82",
+          "scenario": "remediate_dlq_backlog_success",
+          "family": "dlq",
+          "verdict": "verified",
+          "called_for": "verified"
+        },
+        {
+          "archive": "5b1b710b52e9",
+          "scenario": "remediate_consumer_lag_success",
+          "family": "consumer_lag",
+          "verdict": "verified",
+          "called_for": "verified"
+        },
+        {
+          "archive": "6f657c6ca613",
+          "scenario": "remediate_consumer_lag_success",
+          "family": "consumer_lag",
+          "verdict": "verified",
+          "called_for": "verified"
+        },
+        {
+          "archive": "759e198cdd27",
+          "scenario": "remediate_consumer_lag_success",
+          "family": "consumer_lag",
+          "verdict": "verified",
+          "called_for": "verified"
+        },
+        {
+          "archive": "77fc1f45deba",
+          "scenario": "remediate_consumer_lag_success",
+          "family": "consumer_lag",
+          "verdict": "verified",
+          "called_for": "verified"
+        },
+        {
+          "archive": "7acd2b441961",
+          "scenario": "remediate_stale_cache_success",
+          "family": "cache_redis",
+          "verdict": "not_verified",
+          "called_for": "verified"
+        },
+        {
+          "archive": "7e16c8966ff1",
+          "scenario": "remediate_consumer_lag_success",
+          "family": "consumer_lag",
+          "verdict": "verified",
+          "called_for": "verified"
+        },
+        {
+          "archive": "845bdae22195",
+          "scenario": "remediate_consumer_lag_success",
+          "family": "consumer_lag",
+          "verdict": "verified",
+          "called_for": "verified"
+        },
+        {
+          "archive": "8fbbeadb6998",
+          "scenario": "remediate_consumer_lag_success",
+          "family": "consumer_lag",
+          "verdict": "verified",
+          "called_for": "verified"
+        },
+        {
+          "archive": "9949c45145d4",
+          "scenario": "dlq_wait_and_replay_success",
+          "family": "dlq",
+          "verdict": "verified",
+          "called_for": "verified"
+        },
+        {
+          "archive": "a6ad732b145f",
+          "scenario": "remediate_consumer_lag_success",
+          "family": "consumer_lag",
+          "verdict": "verified",
+          "called_for": "verified"
+        },
+        {
+          "archive": "adcdcadd94a3",
+          "scenario": "remediate_consumer_lag_success",
+          "family": "consumer_lag",
+          "verdict": "verified",
+          "called_for": "verified"
+        },
+        {
+          "archive": "aeadd5ef3edd",
+          "scenario": "remediate_runaway_saga_success",
+          "family": "workflow",
+          "verdict": "verified",
+          "called_for": "verified"
+        },
+        {
+          "archive": "bb1fa70abb4c",
+          "scenario": "remediate_consumer_lag_success",
+          "family": "consumer_lag",
+          "verdict": "verified",
+          "called_for": "verified"
+        },
+        {
+          "archive": "d16aa18dce08",
+          "scenario": "remediate_stale_cache_success",
+          "family": "cache_redis",
+          "verdict": "verified",
+          "called_for": "verified"
+        },
+        {
+          "archive": "e72b5ffb9df0",
+          "scenario": "remediate_dlq_backlog_success",
+          "family": "dlq",
+          "verdict": "verified",
+          "called_for": "verified"
+        },
+        {
+          "archive": "e8404306138c",
+          "scenario": "remediate_dlq_backlog_success",
+          "family": "dlq",
+          "verdict": "verified",
+          "called_for": "verified"
+        },
+        {
+          "archive": "ee183c85429c",
+          "scenario": "remediate_stale_cache_success",
+          "family": "cache_redis",
+          "verdict": "verified",
+          "called_for": "verified"
+        },
+        {
+          "archive": "fc896b25a09c",
+          "scenario": "remediate_dlq_backlog_success",
+          "family": "dlq",
+          "verdict": "verified",
+          "called_for": "verified"
+        }
+      ]
+    },
+    "why": "",
+    "requires": []
+  },
+  "absent_roles": {
+    "plan_approval_judge": "does not exist in any form, and is not planned: every approve/refuse decision about a remediation plan is deterministic guard code (ADRs 0024, 0025, 0027, 0028, 0030, 0032), because CLAUDE.md invariant 4 forbids deriving a control from model output. `grep load_prompt src/incident_commander/agent/*.py` returns four agent-side roles (investigation_planner, remediation_planner, verification_judge, briefing_writer) and none of them approves a plan. There is nothing to calibrate here; plan 02:22's 'Exists today? Yes' is wrong (divergence B6). Calibrating a judge that does not exist would mean building one first, and building an LLM plan-approver is a change to invariant 4, not a calibration packet."
+  },
+  "cases": [
+    {
+      "case_id": "av-01-read-shows-recovery",
+      "shape": "the verify read shows the alerted value recovered",
+      "asserts": "verified",
+      "observed": [
+        "verified",
+        "verified",
+        "verified",
+        "verified",
+        "verified"
+      ],
+      "agrees": true,
+      "stable": true,
+      "error": null
+    },
+    {
+      "case_id": "av-02-read-shows-no-movement",
+      "shape": "the verify read shows the alerted value unchanged",
+      "asserts": "not_verified",
+      "observed": [
+        "not_verified",
+        "not_verified",
+        "not_verified",
+        "not_verified",
+        "not_verified"
+      ],
+      "agrees": true,
+      "stable": true,
+      "error": null
+    },
+    {
+      "case_id": "av-03-effect-is-reported-not-observed",
+      "shape": "the action REPORTS its effect; the world cannot have moved yet",
+      "asserts": "verified",
+      "observed": [
+        "verified",
+        "verified",
+        "verified",
+        "verified",
+        "verified"
+      ],
+      "agrees": true,
+      "stable": true,
+      "error": null
+    },
+    {
+      "case_id": "av-04-read-carries-an-error",
+      "shape": "the verify read came back as an error",
+      "asserts": "not_verified",
+      "observed": [
+        "not_verified",
+        "not_verified",
+        "not_verified",
+        "not_verified",
+        "not_verified"
+      ],
+      "agrees": true,
+      "stable": true,
+      "error": null
+    },
+    {
+      "case_id": "av-05-filtered-read-proves-its-slice",
+      "shape": "the verify read is filtered and proves only that slice",
+      "asserts": "verified",
+      "observed": [
+        "verified",
+        "not_verified",
+        "verified",
+        "not_verified",
+        "not_verified"
+      ],
+      "agrees": true,
+      "stable": false,
+      "error": null
+    },
+    {
+      "case_id": "av-06-read-is-of-another-resource",
+      "shape": "the verify read is healthy, but of a different resource",
+      "asserts": "not_verified",
+      "observed": [
+        "not_verified",
+        "not_verified",
+        "not_verified",
+        "not_verified",
+        "not_verified"
+      ],
+      "agrees": true,
+      "stable": true,
+      "error": null
+    }
+  ]
+}

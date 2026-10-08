@@ -30,8 +30,10 @@ from typing import Any, Final
 from uuid import uuid4
 
 from evals import artifacts
+from evals.judge_calibration.label_leg import label_agreement
 from evals.judge_calibration.roles import (
     ABSENT_ROLES,
+    BRIEFING_JUDGE,
     CALIBRATED_ROLES,
     is_approval,
     role,
@@ -102,9 +104,11 @@ class CalibrationReport:
     self_agreement: Mapping[str, Any]
     ground_truth_agreement: Mapping[str, Any]
     outcomes: tuple[TrapOutcome, ...] = field(default_factory=tuple)
+    # The owner-label leg (WO-R3-278); ``None`` unless asked for with ``labels``.
+    label_agreement: Mapping[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        payload: dict[str, Any] = {
             "report_id": self.report_id,
             "judge": self.judge,
             "what_it_decides": role(self.judge).what_it_decides,
@@ -132,6 +136,9 @@ class CalibrationReport:
                 for outcome in self.outcomes
             ],
         }
+        if self.label_agreement is not None:
+            payload["label_agreement"] = dict(self.label_agreement)
+        return payload
 
     def to_json(self) -> str:
         return json.dumps(self.to_dict(), indent=2, sort_keys=False) + "\n"
@@ -316,15 +323,22 @@ def calibrate(
     root: Path | None = None,
     now: datetime | None = None,
     report_id: str | None = None,
+    labels: Path | None = None,
 ) -> CalibrationReport:
     """Calibrate one judge and return its report. Writes nothing.
 
-    ``client_kind`` is DECLARED by the caller, not sniffed, on the register's principle:
-    a fact deciding whether a number may be quoted is stated by whoever knows it.
-    ``reps`` below 1 is refused rather than clamped.
+    ``client_kind`` is declared by the caller, not sniffed; ``reps`` below 1 is refused.
+    ``labels`` (``briefing_judge`` only) adds the owner-label leg; zero labels refuses.
     """
     if reps < 1:
         raise ValueError(f"reps must be at least 1; got {reps}")
+    if labels is not None and judge != BRIEFING_JUDGE:
+        raise ValueError(f"owner labels exist for {BRIEFING_JUDGE} only, not {judge}")
+    labelled = (
+        label_agreement(client=client, model=model, reps=reps, labels_path=labels, root=root)
+        if labels is not None
+        else None
+    )
     cases = traps_for(judge)
     if len(cases) < MINIMUM_TRAPS_PER_JUDGE:
         raise ValueError(
@@ -346,6 +360,7 @@ def calibrate(
         self_agreement=_self_agreement(outcomes, reps=reps),
         ground_truth_agreement=ground_truth_agreement(judge, root=root),
         outcomes=outcomes,
+        label_agreement=labelled,
     )
 
 

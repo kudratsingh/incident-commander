@@ -13,10 +13,13 @@ unscripted question RAISES rather than inventing a verdict.
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from pathlib import Path
 from typing import Any
 
 from pydantic import BaseModel
 
+from evals.graders.llm_judge import format_briefing_context
+from evals.judge_calibration import labels
 from evals.judge_calibration.roles import (
     ACTION_VERIFIER,
     BRIEFING_JUDGE,
@@ -176,4 +179,27 @@ def answers_for(
                 payload_for(case, unstable[case.case_id])
             ]
         script[case.context()] = payloads
+    return script
+
+
+def answers_for_labels(
+    labels_path: Path | None = None,
+    *,
+    wrong: Sequence[str] = (),
+    root: Path | None = None,
+) -> dict[str, list[Mapping[str, Any]]]:
+    """A script for the owner-label leg: agree with every label in force but those in ``wrong``."""
+    script: dict[str, list[Mapping[str, Any]]] = {}
+    for label_id, row in labels.current_labels(labels_path).items():
+        if not labels.briefing_path(label_id, root=root).is_file():
+            continue
+        useful = (row["label"] == labels.USEFUL) != (label_id in wrong)
+        context = format_briefing_context(labels.load_briefing(label_id, root=root))
+        script[context] = [
+            {
+                "groundedness": _score(useful),
+                "actionability": _score(useful),
+                "reasoning": f"scripted fake judge answer for label {label_id}; not a measurement",
+            }
+        ]
     return script

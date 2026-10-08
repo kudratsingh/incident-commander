@@ -327,9 +327,9 @@ def ground_truth_agreement(judge: str, *, root: Path | None = None) -> dict[str,
             "about its prose, and a proxy built from them would score this judge "
             "against a different question",
             (
-                "human labels for a sample of committed briefings (grounded yes/no, "
-                "actionable yes/no) — the shape INC-002 produced by hand for one "
-                "briefing, which is trap bj-05",
+                "human labels for a sample of committed briefings — the owner-label leg "
+                "(WO-R3-278: make label-packet, then --labels), reported as "
+                "label_agreement; INC-002's hand-labelled briefing is trap bj-05",
             ),
         )
     if judge != ACTION_VERIFIER:

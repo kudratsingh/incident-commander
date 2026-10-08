@@ -60,6 +60,9 @@ help:
 	@echo "                   JUDGE=<role> picks one; WRITE=1 persists; SCAN=1 asks nothing."
 	@echo "                   LIVE=1 asks the real JUDGE_MODEL and SPENDS MONEY: it also"
 	@echo "                   needs YES_SPEND=1 and the owner's explicit yes for that run"
+	@echo "                   LABELS=1 (with JUDGE=briefing_judge) adds the owner-label leg"
+	@echo "  label-packet     FREE: write the briefing labelling packet from committed archives;"
+	@echo "                   IMPORT=<filled packet> appends its labels (append-only)"
 	@echo "  regrade-archive  re-grade one locked run archive under today's rules from its own"
 	@echo "                   trajectories; ARCHIVE=<run id> REQUIRED. Reads only, spends"
 	@echo "                   nothing, never touches the archive. WRITE=1 persists the report"
@@ -133,7 +136,15 @@ judge-calibration:
 	uv run python -m evals.judge_calibration \
 		$(if $(SCAN),--scan,) $(if $(JUDGE),--judge $(JUDGE),) \
 		$(if $(REPS),--reps $(REPS),) $(if $(WRITE),--write,) \
-		$(if $(LIVE),--live,) $(if $(YES_SPEND),--yes-spend,)
+		$(if $(LIVE),--live,) $(if $(YES_SPEND),--yes-spend,) \
+		$(if $(LABELS),--labels $(filter-out 1,$(LABELS)),)
+
+# Owner labels for briefing usefulness (WO-R3-278). Free: picks 16 committed
+# briefings and writes evals/judge_calibration/labels/packet.<YYYYMMDD>.md.
+# IMPORT=<filled packet> appends its labels to briefings.jsonl (append-only).
+.PHONY: label-packet
+label-packet:
+	uv run python -m evals.judge_calibration.label_packet $(if $(IMPORT),--import $(IMPORT),)
 
 # Re-grade one locked archive under today's rules (WO-R3-265, INC-003). Reads
 # only: no model call, no platform, nothing spent, and the archive itself is

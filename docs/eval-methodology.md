@@ -2339,6 +2339,19 @@ computing it here would certify a judge with the measurement the certificate unl
 `briefing_judge` has none because nothing in this system deterministically labels a briefing useful;
 the five graded dimensions are statements about the run, not about its prose.
 
+*The owner-label leg* (WO-R3-278) is what turns that `briefing_judge` refusal into a measurement.
+`make label-packet` picks 16 briefings from committed live archives — INC-002's always first, then at
+most two per scenario, spread across outcomes (resolved, escalated, failed) and families, newest first,
+pinned by `tests/unit/test_briefing_labels.py` — and writes them, rendered exactly as the judge sees
+them, into `evals/judge_calibration/labels/packet.<YYYYMMDD>.md`. The owner writes `useful` (an on-call
+human would act correctly from this briefing alone) or `not_useful` with one line of reason, and
+`make label-packet IMPORT=<packet>` appends them to `labels/briefings.jsonl`. That file is evidence:
+an id already in it is refused, never replaced, and a correction is a new line carrying
+`supersedes`. `make judge-calibration JUDGE=briefing_judge LABELS=1` then asks the judge each labelled
+briefing N times, calls it useful when both floats clear `USEFUL_THRESHOLD`, and reports `label_agreement`:
+N, agree, disagree, both disagreement directions, stability, and a per-briefing table with the judge's
+two floats on every disagreement. It refuses to run with zero labels, and a model never writes a label.
+
 **Stability is measured, not set.** Plan 03 § 9.1 asks for temperature 0. No judge call in this repo
 sends a temperature and none may be made to require one (owner decision O-24, ADR 0048):
 `llm/client.SAMPLING_REJECTED_MODELS` lists the model families that reject the parameter outright, so

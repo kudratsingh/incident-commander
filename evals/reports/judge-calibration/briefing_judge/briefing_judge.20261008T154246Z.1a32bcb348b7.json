@@ -1,0 +1,232 @@
+{
+  "report_id": "1a32bcb348b7",
+  "judge": "briefing_judge",
+  "what_it_decides": "how grounded and how actionable one escalation briefing is. Informational: the run is already graded on five deterministic dimensions by the time this is called, and nothing passes or fails on it. INC-002 is this judge scoring an honest briefing 0.0 for groundedness.",
+  "generated_at": "2026-10-08T15:42:46.378976+00:00",
+  "model": "claude-haiku-4-5",
+  "judge_client": "live",
+  "reps": 5,
+  "protocol": "plan 03 \u00a7 9 (WP-6.3). Four legs: a hand-built trap set whose verdicts the evaluator asserts; self-agreement over N identical asks; an independent ground-truth leg where one exists; and a stated refusal where one does not. Rubric edits are ONE LINE AT A TIME with a rerun (plan 03 \u00a7 110), which is why rubric.sha256 is here: a delta between two calibrations is attributable only if each says which rubric bytes it measured. No selector or judge number is reported anywhere until its id appears in research_report.CALIBRATION_REPORTS or JUDGE_CALIBRATION_REPORTS (plan 02:243, plan 04:169).",
+  "rubric": {
+    "prompt": "briefing_judge",
+    "sha256": "b2cb7fbda94200f26dd7a42258abbf6b9a9c9faaa91954d83808b477ccb3dcfb",
+    "lines": 26,
+    "one_line_at_a_time": "a rubric edit lands one line at a time with a rerun (plan 03 \u00a7 110); a delta between two calibrations is attributable only if this hash differs by a change a reviewer can see. The convention is in docs/eval-methodology.md and ADR 0052"
+  },
+  "determinism": {
+    "temperature_sent": null,
+    "why_no_temperature": "owner decision O-24 and ADR 0048: nothing built from 2026-09-17 on may REQUIRE a sampling parameter, because llm/client.SAMPLING_REJECTED_MODELS lists the model families that reject temperature with a 400 \u2014 a calibration pinned to temperature 0 would stop working on the first re-pin, which is exactly when a calibration is most needed",
+    "instead": "stability is MEASURED (self_agreement over N identical asks) rather than assumed from a setting, and the schema does the constraining: forced tool use against a fixed JSON schema, a closed verdict space, and validators that reject an out-of-set answer (ADR 0052)",
+    "fixed_json_schema": true,
+    "judge_client": "live"
+  },
+  "trap_agreement": {
+    "cases": 6,
+    "answered": 6,
+    "errors": [],
+    "agreed": 4,
+    "accuracy": 0.6667,
+    "verdict_space": [
+      "grounded=yes actionable=yes",
+      "grounded=yes actionable=no",
+      "grounded=no actionable=yes",
+      "grounded=no actionable=no"
+    ],
+    "approval_prefix": "grounded=yes actionable=yes",
+    "asserted_approvals": 2,
+    "false_rejects": 1,
+    "false_reject_rate": 0.5,
+    "asserted_refusals": 4,
+    "false_approves": 0,
+    "false_approve_rate": 0.0,
+    "wrong_approvals": 0,
+    "by_shape": [
+      {
+        "case_id": "bj-01-grounded-and-actionable",
+        "shape": "a briefing that is right on both dimensions",
+        "asserts": "grounded=yes actionable=yes",
+        "observed": "grounded=yes actionable=yes",
+        "agrees": true
+      },
+      {
+        "case_id": "bj-02-grounded-but-useless",
+        "shape": "grounded, and gives the human nothing to do (\u00a7 107)",
+        "asserts": "grounded=yes actionable=no",
+        "observed": "grounded=yes actionable=no",
+        "agrees": true
+      },
+      {
+        "case_id": "bj-03-actionable-but-invented",
+        "shape": "useful, and carries an invented fact (\u00a7 107)",
+        "asserts": "grounded=no actionable=yes",
+        "observed": "grounded=no actionable=no",
+        "agrees": false
+      },
+      {
+        "case_id": "bj-04-stabilizer-reported-as-resolution",
+        "shape": "a stabilizer reported as a resolution (\u00a7 107)",
+        "asserts": "grounded=no actionable=no",
+        "observed": "grounded=no actionable=no",
+        "agrees": true
+      },
+      {
+        "case_id": "bj-05-inc-002-honest-after-a-filtered-read",
+        "shape": "INC-002: an honest briefing after a filtered read is GROUNDED",
+        "asserts": "grounded=yes actionable=yes",
+        "observed": "grounded=yes actionable=no",
+        "agrees": false
+      },
+      {
+        "case_id": "bj-06-invented-and-useless",
+        "shape": "wrong on both dimensions",
+        "asserts": "grounded=no actionable=no",
+        "observed": "grounded=no actionable=no",
+        "agrees": true
+      }
+    ],
+    "minimum_cases_required": 5
+  },
+  "self_agreement": {
+    "reps": 5,
+    "cases": 6,
+    "identical": 3,
+    "fraction_identical": 0.5,
+    "reading": "low stability means the rubric is ambiguous; high stability with low accuracy means the rubric is wrong (plan 03 \u00a7 109)",
+    "unstable": [
+      {
+        "case_id": "bj-01-grounded-and-actionable",
+        "observed": [
+          "grounded=yes actionable=yes",
+          "grounded=yes actionable=no",
+          "grounded=yes actionable=yes",
+          "grounded=yes actionable=yes",
+          "grounded=yes actionable=yes"
+        ]
+      },
+      {
+        "case_id": "bj-02-grounded-but-useless",
+        "observed": [
+          "grounded=yes actionable=no",
+          "grounded=no actionable=no",
+          "grounded=no actionable=no",
+          "grounded=no actionable=no",
+          "grounded=yes actionable=no"
+        ]
+      },
+      {
+        "case_id": "bj-05-inc-002-honest-after-a-filtered-read",
+        "observed": [
+          "grounded=yes actionable=no",
+          "grounded=yes actionable=yes",
+          "grounded=yes actionable=yes",
+          "grounded=yes actionable=yes",
+          "grounded=yes actionable=yes"
+        ]
+      }
+    ]
+  },
+  "ground_truth_agreement": {
+    "leg": "ground-truth agreement over recorded-world runs (plan 03 \u00a7 109)",
+    "measured": false,
+    "value": null,
+    "why": "no deterministic label for briefing usefulness exists anywhere in the system: the five graded dimensions are statements about the run, not about its prose, and a proxy built from them would score this judge against a different question",
+    "requires": [
+      "human labels for a sample of committed briefings (grounded yes/no, actionable yes/no) \u2014 the shape INC-002 produced by hand for one briefing, which is trap bj-05"
+    ]
+  },
+  "absent_roles": {
+    "plan_approval_judge": "does not exist in any form, and is not planned: every approve/refuse decision about a remediation plan is deterministic guard code (ADRs 0024, 0025, 0027, 0028, 0030, 0032), because CLAUDE.md invariant 4 forbids deriving a control from model output. `grep load_prompt src/incident_commander/agent/*.py` returns four agent-side roles (investigation_planner, remediation_planner, verification_judge, briefing_writer) and none of them approves a plan. There is nothing to calibrate here; plan 02:22's 'Exists today? Yes' is wrong (divergence B6). Calibrating a judge that does not exist would mean building one first, and building an LLM plan-approver is a change to invariant 4, not a calibration packet."
+  },
+  "cases": [
+    {
+      "case_id": "bj-01-grounded-and-actionable",
+      "shape": "a briefing that is right on both dimensions",
+      "asserts": "grounded=yes actionable=yes",
+      "observed": [
+        "grounded=yes actionable=yes",
+        "grounded=yes actionable=no",
+        "grounded=yes actionable=yes",
+        "grounded=yes actionable=yes",
+        "grounded=yes actionable=yes"
+      ],
+      "agrees": true,
+      "stable": false,
+      "error": null
+    },
+    {
+      "case_id": "bj-02-grounded-but-useless",
+      "shape": "grounded, and gives the human nothing to do (\u00a7 107)",
+      "asserts": "grounded=yes actionable=no",
+      "observed": [
+        "grounded=yes actionable=no",
+        "grounded=no actionable=no",
+        "grounded=no actionable=no",
+        "grounded=no actionable=no",
+        "grounded=yes actionable=no"
+      ],
+      "agrees": true,
+      "stable": false,
+      "error": null
+    },
+    {
+      "case_id": "bj-03-actionable-but-invented",
+      "shape": "useful, and carries an invented fact (\u00a7 107)",
+      "asserts": "grounded=no actionable=yes",
+      "observed": [
+        "grounded=no actionable=no",
+        "grounded=no actionable=no",
+        "grounded=no actionable=no",
+        "grounded=no actionable=no",
+        "grounded=no actionable=no"
+      ],
+      "agrees": false,
+      "stable": true,
+      "error": null
+    },
+    {
+      "case_id": "bj-04-stabilizer-reported-as-resolution",
+      "shape": "a stabilizer reported as a resolution (\u00a7 107)",
+      "asserts": "grounded=no actionable=no",
+      "observed": [
+        "grounded=no actionable=no",
+        "grounded=no actionable=no",
+        "grounded=no actionable=no",
+        "grounded=no actionable=no",
+        "grounded=no actionable=no"
+      ],
+      "agrees": true,
+      "stable": true,
+      "error": null
+    },
+    {
+      "case_id": "bj-05-inc-002-honest-after-a-filtered-read",
+      "shape": "INC-002: an honest briefing after a filtered read is GROUNDED",
+      "asserts": "grounded=yes actionable=yes",
+      "observed": [
+        "grounded=yes actionable=no",
+        "grounded=yes actionable=yes",
+        "grounded=yes actionable=yes",
+        "grounded=yes actionable=yes",
+        "grounded=yes actionable=yes"
+      ],
+      "agrees": false,
+      "stable": false,
+      "error": null
+    },
+    {
+      "case_id": "bj-06-invented-and-useless",
+      "shape": "wrong on both dimensions",
+      "asserts": "grounded=no actionable=no",
+      "observed": [
+        "grounded=no actionable=no",
+        "grounded=no actionable=no",
+        "grounded=no actionable=no",
+        "grounded=no actionable=no",
+        "grounded=no actionable=no"
+      ],
+      "agrees": true,
+      "stable": true,
+      "error": null
+    }
+  ]
+}

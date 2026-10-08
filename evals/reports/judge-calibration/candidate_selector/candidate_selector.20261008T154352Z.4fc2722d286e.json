@@ -1,0 +1,211 @@
+{
+  "report_id": "4fc2722d286e",
+  "judge": "candidate_selector",
+  "what_it_decides": "which candidate diagnosis a run commits to, or that it should read more, or that a human is needed. Selection is not authorization: the tier policy and every refusal apply afterwards unchanged (ADR 0048).",
+  "generated_at": "2026-10-08T15:43:52.620761+00:00",
+  "model": "claude-haiku-4-5",
+  "judge_client": "live",
+  "reps": 5,
+  "protocol": "plan 03 \u00a7 9 (WP-6.3). Four legs: a hand-built trap set whose verdicts the evaluator asserts; self-agreement over N identical asks; an independent ground-truth leg where one exists; and a stated refusal where one does not. Rubric edits are ONE LINE AT A TIME with a rerun (plan 03 \u00a7 110), which is why rubric.sha256 is here: a delta between two calibrations is attributable only if each says which rubric bytes it measured. No selector or judge number is reported anywhere until its id appears in research_report.CALIBRATION_REPORTS or JUDGE_CALIBRATION_REPORTS (plan 02:243, plan 04:169).",
+  "rubric": {
+    "prompt": "candidate_selector",
+    "sha256": "c48060fe449a344476bfd6ed976b639bf25657bf7963f974958444131f1cb192",
+    "lines": 45,
+    "one_line_at_a_time": "a rubric edit lands one line at a time with a rerun (plan 03 \u00a7 110); a delta between two calibrations is attributable only if this hash differs by a change a reviewer can see. The convention is in docs/eval-methodology.md and ADR 0052"
+  },
+  "determinism": {
+    "temperature_sent": null,
+    "why_no_temperature": "owner decision O-24 and ADR 0048: nothing built from 2026-09-17 on may REQUIRE a sampling parameter, because llm/client.SAMPLING_REJECTED_MODELS lists the model families that reject temperature with a 400 \u2014 a calibration pinned to temperature 0 would stop working on the first re-pin, which is exactly when a calibration is most needed",
+    "instead": "stability is MEASURED (self_agreement over N identical asks) rather than assumed from a setting, and the schema does the constraining: forced tool use against a fixed JSON schema, a closed verdict space, and validators that reject an out-of-set answer (ADR 0052)",
+    "fixed_json_schema": true,
+    "judge_client": "live"
+  },
+  "trap_agreement": {
+    "cases": 6,
+    "answered": 6,
+    "errors": [],
+    "agreed": 5,
+    "accuracy": 0.8333,
+    "verdict_space": [
+      "select:<candidate_id>",
+      "probe_more",
+      "escalate"
+    ],
+    "approval_prefix": "select:",
+    "asserted_approvals": 4,
+    "false_rejects": 1,
+    "false_reject_rate": 0.25,
+    "asserted_refusals": 2,
+    "false_approves": 0,
+    "false_approve_rate": 0.0,
+    "wrong_approvals": 0,
+    "by_shape": [
+      {
+        "case_id": "cs-01-correct-candidate-thin-evidence",
+        "shape": "the correct candidate, and its evidence is thin (\u00a7 107)",
+        "asserts": "select:c1",
+        "observed": "select:c1",
+        "agrees": true
+      },
+      {
+        "case_id": "cs-02-wrong-candidate-plausible-evidence",
+        "shape": "the wrong candidate, dressed in plausible evidence (\u00a7 107)",
+        "asserts": "select:c2",
+        "observed": "probe_more",
+        "agrees": false
+      },
+      {
+        "case_id": "cs-03-near-duplicates-one-correct",
+        "shape": "two near-duplicates, one of them correct (\u00a7 107)",
+        "asserts": "select:c1",
+        "observed": "select:c1",
+        "agrees": true
+      },
+      {
+        "case_id": "cs-04-all-wrong-so-escalate",
+        "shape": "every candidate is wrong and no read would decide it (\u00a7 107)",
+        "asserts": "escalate",
+        "observed": "escalate",
+        "agrees": true
+      },
+      {
+        "case_id": "cs-05-contradicted-candidate",
+        "shape": "a candidate contradicted by a reading in its own trail",
+        "asserts": "select:c2",
+        "observed": "select:c2",
+        "agrees": true
+      },
+      {
+        "case_id": "cs-06-one-more-read-would-decide-it",
+        "shape": "the trail cannot separate the leaders and one read would",
+        "asserts": "probe_more",
+        "observed": "probe_more",
+        "agrees": true
+      }
+    ],
+    "minimum_cases_required": 5
+  },
+  "self_agreement": {
+    "reps": 5,
+    "cases": 6,
+    "identical": 5,
+    "fraction_identical": 0.8333,
+    "reading": "low stability means the rubric is ambiguous; high stability with low accuracy means the rubric is wrong (plan 03 \u00a7 109)",
+    "unstable": [
+      {
+        "case_id": "cs-05-contradicted-candidate",
+        "observed": [
+          "select:c2",
+          "select:c2",
+          "probe_more",
+          "select:c2",
+          "select:c2"
+        ]
+      }
+    ]
+  },
+  "ground_truth_agreement": {
+    "leg": "ground-truth agreement over recorded-world runs (plan 03 \u00a7 109)",
+    "measured": false,
+    "value": null,
+    "why": "refused as circular: this judge's agreement with a scenario's labelled root cause is selected@k at k=1, which is the term oracle_gap@k is built from and the number a calibration report is what releases (plan 02:243). A calibration may not be certified by the measurement it certifies",
+    "requires": [
+      "an independent label for a selection that is not derived from the scenario's root cause \u2014 human adjudication of a candidate set, or the trap set, which is what this report uses instead"
+    ]
+  },
+  "absent_roles": {
+    "plan_approval_judge": "does not exist in any form, and is not planned: every approve/refuse decision about a remediation plan is deterministic guard code (ADRs 0024, 0025, 0027, 0028, 0030, 0032), because CLAUDE.md invariant 4 forbids deriving a control from model output. `grep load_prompt src/incident_commander/agent/*.py` returns four agent-side roles (investigation_planner, remediation_planner, verification_judge, briefing_writer) and none of them approves a plan. There is nothing to calibrate here; plan 02:22's 'Exists today? Yes' is wrong (divergence B6). Calibrating a judge that does not exist would mean building one first, and building an LLM plan-approver is a change to invariant 4, not a calibration packet."
+  },
+  "cases": [
+    {
+      "case_id": "cs-01-correct-candidate-thin-evidence",
+      "shape": "the correct candidate, and its evidence is thin (\u00a7 107)",
+      "asserts": "select:c1",
+      "observed": [
+        "select:c1",
+        "select:c1",
+        "select:c1",
+        "select:c1",
+        "select:c1"
+      ],
+      "agrees": true,
+      "stable": true,
+      "error": null
+    },
+    {
+      "case_id": "cs-02-wrong-candidate-plausible-evidence",
+      "shape": "the wrong candidate, dressed in plausible evidence (\u00a7 107)",
+      "asserts": "select:c2",
+      "observed": [
+        "probe_more",
+        "probe_more",
+        "probe_more",
+        "probe_more",
+        "probe_more"
+      ],
+      "agrees": false,
+      "stable": true,
+      "error": null
+    },
+    {
+      "case_id": "cs-03-near-duplicates-one-correct",
+      "shape": "two near-duplicates, one of them correct (\u00a7 107)",
+      "asserts": "select:c1",
+      "observed": [
+        "select:c1",
+        "select:c1",
+        "select:c1",
+        "select:c1",
+        "select:c1"
+      ],
+      "agrees": true,
+      "stable": true,
+      "error": null
+    },
+    {
+      "case_id": "cs-04-all-wrong-so-escalate",
+      "shape": "every candidate is wrong and no read would decide it (\u00a7 107)",
+      "asserts": "escalate",
+      "observed": [
+        "escalate",
+        "escalate",
+        "escalate",
+        "escalate",
+        "escalate"
+      ],
+      "agrees": true,
+      "stable": true,
+      "error": null
+    },
+    {
+      "case_id": "cs-05-contradicted-candidate",
+      "shape": "a candidate contradicted by a reading in its own trail",
+      "asserts": "select:c2",
+      "observed": [
+        "select:c2",
+        "select:c2",
+        "probe_more",
+        "select:c2",
+        "select:c2"
+      ],
+      "agrees": true,
+      "stable": false,
+      "error": null
+    },
+    {
+      "case_id": "cs-06-one-more-read-would-decide-it",
+      "shape": "the trail cannot separate the leaders and one read would",
+      "asserts": "probe_more",
+      "observed": [
+        "probe_more",
+        "probe_more",
+        "probe_more",
+        "probe_more",
+        "probe_more"
+      ],
+      "agrees": true,
+      "stable": true,
+      "error": null
+    }
+  ]
+}

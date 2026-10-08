@@ -34,6 +34,7 @@ from evals.graders.llm_judge import (
 )
 from evals.graders.llm_judge import (
     USEFUL_THRESHOLD,
+    JudgeScore,
     format_briefing_context,
     judge_briefing,
 )
@@ -138,11 +139,7 @@ class BriefingSubject:
         return format_briefing_context(self.briefing)
 
     def ask(self, *, client: LLMClientProtocol, model: str) -> str:
-        score = judge_briefing(self.briefing, client, model)
-        return briefing_verdict(
-            grounded=score.groundedness >= USEFUL_THRESHOLD,
-            actionable=score.actionability >= USEFUL_THRESHOLD,
-        )
+        return score_verdict(judge_briefing(self.briefing, client, model))
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -189,6 +186,14 @@ def briefing_verdict(*, grounded: bool, actionable: bool) -> str:
     disagree about what "grounded but useless" reads as.
     """
     return f"grounded={_yn(grounded)} actionable={_yn(actionable)}"
+
+
+def score_verdict(score: JudgeScore) -> str:
+    """One ``briefing_judge`` score as its verdict, each dimension cut at ``USEFUL_THRESHOLD``."""
+    return briefing_verdict(
+        grounded=score.groundedness >= USEFUL_THRESHOLD,
+        actionable=score.actionability >= USEFUL_THRESHOLD,
+    )
 
 
 def _yn(value: bool) -> str:

@@ -14,10 +14,11 @@ from __future__ import annotations
 import argparse
 import sys
 from collections.abc import Sequence
-from typing import Final
+from pathlib import Path
+from typing import Any, Final
 
-from evals.judge_calibration import track_record
-from evals.judge_calibration.fakes import FakeJudgeClient, answers_for
+from evals.judge_calibration import labels, track_record
+from evals.judge_calibration.fakes import FakeJudgeClient, answers_for, answers_for_labels
 from evals.judge_calibration.harness import (
     FAKE_CLIENT,
     LIVE_CLIENT,
@@ -26,7 +27,8 @@ from evals.judge_calibration.harness import (
     calibrate,
     write_report,
 )
-from evals.judge_calibration.roles import ABSENT_ROLES, CALIBRATED_ROLES
+from evals.judge_calibration.label_leg import NoLabelsError
+from evals.judge_calibration.roles import ABSENT_ROLES, BRIEFING_JUDGE, CALIBRATED_ROLES
 from evals.judge_calibration.traps import traps_for
 
 #: The imperfection the fake judge is scripted with, deliberately: a fake that agreed
@@ -91,7 +93,37 @@ def _summarize(report: CalibrationReport) -> list[str]:
         lines.append(f"    UNSTABLE   {case['case_id']}: {case['observed']}")
     for entry in traps["errors"]:
         lines.append(f"    ERRORED    {entry['case_id']}: {entry['error']}")
+    if report.label_agreement is not None:
+        lines.extend(_summarize_labels(report.label_agreement["value"]))
     return lines
+
+
+def _summarize_labels(value: dict[str, Any]) -> list[str]:
+    stability = value["stability"]
+    lines = [
+        f"  owner labels {value['agree']}/{value['n']} agreed   agreement {value['agreement']}"
+        f"   judge useful / owner not {value['judge_useful_owner_not']}"
+        f"   judge not useful / owner useful {value['judge_not_useful_owner_useful']}"
+        f"   stable {stability['identical']}/{value['n']} over N={stability['reps']}"
+        f"  ({value['labels_file']})",
+    ]
+    for row in value["disagreements"]:
+        lines.append(
+            f"    LABEL DISAGREED  {row['id']}: owner {row['owner_label']}, judge "
+            f"{row['judge_label']} (groundedness {row['groundedness']}, "
+            f"actionability {row['actionability']})"
+        )
+    for label_id in value["missing_briefings"]:
+        lines.append(f"    MISSING    {label_id}: briefing not in this checkout")
+    for entry in value["errors"]:
+        lines.append(f"    ERRORED    {entry['id']}: {entry['error']}")
+    return lines
+
+
+def _scripted_wrong_label(path: Path) -> tuple[str, ...]:
+    """The fake disagrees with the first label in force, so the disagreement fields run."""
+    in_force = labels.current_labels(path)
+    return tuple(list(in_force)[:1])
 
 
 def _scan() -> int:
@@ -141,12 +173,25 @@ def main(argv: Sequence[str] | None = None) -> int:
         help="the explicit second flag --live requires (PROTOCOL: readiness is not authorization).",
     )
     parser.add_argument("--scan", action="store_true", help="what the free legs see; asks nothing.")
+    parser.add_argument(
+        "--labels",
+        nargs="?",
+        const=labels.LABELS_FILE,
+        type=Path,
+        help=f"briefing_judge only: add the owner-label leg (default {labels.LABELS_FILE.name}).",
+    )
     args = parser.parse_args(argv)
 
     if args.scan:
         return _scan()
 
     judges = tuple(args.judge) if args.judge else CALIBRATED_ROLES
+    if args.labels is not None and judges != (BRIEFING_JUDGE,):
+        print(
+            f"refusing: --labels needs --judge {BRIEFING_JUDGE} and no other judge.",
+            file=sys.stderr,
+        )
+        return 2
     if args.live and not args.yes_spend:
         print(
             "refusing: --live asks the real judge and spends money. Pass "
@@ -176,21 +221,27 @@ def main(argv: Sequence[str] | None = None) -> int:
     exit_code = 0
     for judge in judges:
         if not args.live:
-            client = FakeJudgeClient(
-                answers_for(
-                    judge,
-                    wrong=_SCRIPTED_WRONG.get(judge),
-                    unstable=_SCRIPTED_UNSTABLE.get(judge),
-                    reps=args.reps,
-                )
+            script = answers_for(
+                judge,
+                wrong=_SCRIPTED_WRONG.get(judge),
+                unstable=_SCRIPTED_UNSTABLE.get(judge),
+                reps=args.reps,
             )
-        report = calibrate(
-            judge,
-            client=client,  # type: ignore[arg-type]
-            model=model,
-            reps=args.reps,
-            client_kind=client_kind,
-        )
+            if args.labels is not None:
+                script |= answers_for_labels(args.labels, wrong=_scripted_wrong_label(args.labels))
+            client = FakeJudgeClient(script)
+        try:
+            report = calibrate(
+                judge,
+                client=client,  # type: ignore[arg-type]
+                model=model,
+                reps=args.reps,
+                client_kind=client_kind,
+                labels=args.labels,
+            )
+        except NoLabelsError as err:
+            print(str(err), file=sys.stderr)
+            return 2
         print("\n".join(_summarize(report)))
         if not report.is_a_measurement:
             print(f"  {_NOT_A_MEASUREMENT}")

@@ -64,6 +64,7 @@ _NON_SETTINGS_TOKENS: Final[frozenset[str]] = frozenset(
         "PURGE_IDEMPOTENCY",  # `make eval-reset` opt-in purge flag
         "SMOKE_ONLY",  # `make eval-smoke` scenario-list override
         "UNTIL_LAG",  # `make traffic` stop-at-this-backlog flag (scripts/traffic_loop.py)
+        "YES_SPEND",  # `make judge-calibration` second flag a paid LIVE=1 run requires
         # Platform-side metrics-pass interval, a SETTING since platform v0.6.18 / ADR 0039
         # and set to 5 on both platform-code services in demo/compose.yml (owner decision
         # O-35). Not a commander setting and deliberately not mirrored as one: the agent

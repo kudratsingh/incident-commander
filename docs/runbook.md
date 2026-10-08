@@ -1150,6 +1150,27 @@ If the drift check and `make fixture-drift` disagree, re-run `make fixture-drift
 
 Two fingerprints are printed either way. `recorder.world_fingerprint` is exact, so it moves for every platform clock; the verdict is the walk, which knows which of those movements are honest. "The documents differ and nothing meaningful moved" is the normal, healthy outcome.
 
+## Judge calibration: the owner-label leg (WO-R3-278)
+
+`make judge-calibration` is free by default (a scripted fake judge); see
+[eval-methodology.md § Judge calibration](eval-methodology.md#judge-calibration) for its legs.
+The `briefing_judge` leg against the owner's labels runs in three steps:
+
+1. **Label (free, the owner only).** Open the committed packet
+   `evals/judge_calibration/labels/packet.<YYYYMMDD>.md` (a new one: `make label-packet`, which
+   refuses to replace an existing packet for the same day). After each briefing write `LABEL: useful`
+   or `LABEL: not_useful` and a one-line `REASON:`. Leave a block blank to skip it.
+2. **Import (free).** `make label-packet IMPORT=evals/judge_calibration/labels/packet.<YYYYMMDD>.md`
+   appends one line per labelled block to `evals/judge_calibration/labels/briefings.jsonl` and
+   commits nothing; commit the file in its own PR. An id already labelled is refused (exit 1) and the
+   file is untouched; to correct a label, add `SUPERSEDES: <the same id>` under the block and import
+   again, which appends a new line and keeps the old one.
+3. **Measure (PAID, the owner's explicit yes for this run).**
+   `make judge-calibration JUDGE=briefing_judge LABELS=1 LIVE=1 YES_SPEND=1 WRITE=1` asks the pinned
+   `JUDGE_MODEL` every labelled briefing 5 times plus the six traps 5 times (110 calls) and writes the
+   versioned report with its `label_agreement` leg. Without labels it refuses (exit 2) before any call.
+   Try it free first: `make judge-calibration JUDGE=briefing_judge LABELS=1`.
+
 ## Debugging one scenario
 
 The per-scenario trace file is the fastest path:

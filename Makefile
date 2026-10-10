@@ -44,6 +44,8 @@ help:
 	@echo "  eval-smoke       read-only smoke pass under the read-scoped smoke token"
 	@echo "  world-audit      FREE (zero-LLM, read-only) audit of the seeded world against"
 	@echo "                   the runbook baseline; exits non-zero on any FAIL."
+	@echo "                   Also reads the SLO budgets: one under 100% is a WARN"
+	@echo "                   (not a FAIL) naming the families that will refuse"
 	@echo "                   ROOTS=<job id[,id...]> also checks those chains are unpaused"
 	@echo "  baseline-report  assemble the Phase 0 baseline from the committed archives;"
 	@echo "                   reads only, spends nothing, writes nothing. FORMAT: --format"

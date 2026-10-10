@@ -1,7 +1,8 @@
 """Read-only seeded-world audit; the dossier imports the same baseline checks.
 
 No scenario, chaos setup, reset or LLM is run. The standalone command adds
-pre-run checks to the dossier's shared post-reset audit.
+pre-run checks to the dossier's shared post-reset audit, and a WARN-only read of
+the platform's objectives (WO-R3-367).
 """
 
 from __future__ import annotations
@@ -10,14 +11,19 @@ import argparse
 import json
 import os
 import subprocess
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, Final
 
 from pydantic import ValidationError
 
+from evals.graders.deterministic import resolve_path
 from evals.guards import PrincipalGuardError, assert_read_only_principal
+from evals.preconditions import unmet
+from evals.scenarios.loader import ScenarioLoadError, load_scenarios
+from evals.scenarios.schema import PreconditionProbe, Scenario
 from incident_commander.config import Settings
 from incident_commander.tools.mcp_client import (
     LabProbeClient,
@@ -60,6 +66,13 @@ BASELINE_FAILED_TRACE_IDS: Final[frozenset[str]] = frozenset(
 _COMPOSE_FILE_ENV: Final[str] = "PLATFORM_COMPOSE"
 _DEFAULT_COMPOSE_FILE: Final[str] = "demo/compose.yml"
 _REDIS_SERVICE: Final[str] = "redis"
+
+# The objectives read (WO-R3-367, INC-007). A budget under 100% is a WARN, never a FAIL: the
+# world can be clean while a scenario whose premise needs a whole budget still refuses to start.
+SLO_TOOL: Final[str] = "get_slo_status"
+BUDGET_PATH: Final[str] = "objectives[].budget_remaining_pct"
+WHOLE_BUDGET_PCT: Final[float] = 100.0
+_SCENARIOS_DIR: Final[Path] = _REPO_ROOT / "evals" / "scenarios"
 
 
 @dataclass(frozen=True)
@@ -364,6 +377,147 @@ def audit_world(
     return lines, rows
 
 
+@dataclass(frozen=True)
+class BudgetDemand:
+    """One scenario precondition on an objective's budget; ``probe`` holds just that check."""
+
+    scenario: str
+    family: str
+    probe: PreconditionProbe
+
+    def reads(self, objective: Mapping[str, Any]) -> bool:
+        """Whether this check's row selector picks ``objective`` (no selector picks every row)."""
+        where = self.probe.expect[0].where
+        return where is None or any(
+            where.satisfied_by(value) for value in resolve_path(objective, where.field)
+        )
+
+    def refuses(self, payload: Mapping[str, Any]) -> bool:
+        """Whether the runner's own precondition rule refuses on this reading."""
+        return bool(unmet(self.probe, payload))
+
+
+def budget_demands(scenarios: Iterable[Scenario]) -> tuple[BudgetDemand, ...]:
+    """Every precondition check in the corpus that reads an objective's remaining budget."""
+    return tuple(
+        BudgetDemand(
+            scenario.name,
+            scenario.family.value if scenario.family else "(no family)",
+            probe.model_copy(update={"expect": (field,)}),
+        )
+        for scenario in scenarios
+        for probe in scenario.expected_precondition
+        if probe.tool == SLO_TOOL
+        for field in probe.expect
+        if field.path == BUDGET_PATH
+    )
+
+
+@dataclass(frozen=True)
+class SloLine:
+    """One printed objectives row. A ``warn`` row is repeated on the summary line."""
+
+    name: str
+    detail: str
+    warn: bool
+
+
+def _families(demands: Iterable[BudgetDemand]) -> str:
+    """``family (scenario, ...)`` per family, or ``none``."""
+    by_family: dict[str, set[str]] = {}
+    for demand in demands:
+        by_family.setdefault(demand.family, set()).add(demand.scenario)
+    if not by_family:
+        return "none"
+    return "; ".join(
+        f"{family} ({', '.join(sorted(names))})" for family, names in sorted(by_family.items())
+    )
+
+
+def _number(value: object) -> float | None:
+    return float(value) if isinstance(value, int | float) and not isinstance(value, bool) else None
+
+
+def clears_at(objective: Mapping[str, Any], measured_at: object) -> str:
+    """When this objective's budget is whole again, as far as one reading can say.
+
+    get_slo_status does not say when the failed jobs were created, only that each sits in the
+    window ending at ``measured_at``; so all of them are out by ``measured_at`` plus the window.
+    """
+    hours = objective.get("window_hours")
+    if not isinstance(hours, int) or isinstance(hours, bool) or hours <= 0:
+        hours = 24
+    rule = f"it clears {hours} h after the last failure in its window"
+    try:
+        moment = datetime.fromisoformat(str(measured_at))
+    except ValueError:
+        return f"{rule} (measured_at {measured_at!r} unreadable, so no clock time)"
+    moment = moment.replace(tzinfo=UTC) if moment.tzinfo is None else moment.astimezone(UTC)
+    latest = moment + timedelta(hours=hours)
+    return (
+        f"{rule}: no later than {latest:%Y-%m-%d %H:%M} UTC if nothing new fails "
+        f"(measured_at {measured_at}; get_slo_status does not say when the failed jobs were "
+        "created, so this is the latest it can be)"
+    )
+
+
+def audit_slo_budgets(client: MCPClientProtocol, demands: Sequence[BudgetDemand]) -> list[SloLine]:
+    """One INFO row per objective, and a WARN row for each budget under 100% or unreadable.
+
+    The WARN names the families whose preconditions refuse on this reading and when the budget
+    clears. Nothing here fails the audit: waiting is the fix (INC-007).
+    """
+    # 1. One read. If no list of objectives comes back, nobody can say any budget is whole,
+    #    so warn and name every family whose premise reads a budget.
+    reading = read(client, _probe(SLO_TOOL, {}, "world audit SLO budgets"))
+    payload = reading.payload if reading.ok and reading.payload is not None else {}
+    objectives = payload.get("objectives")
+    if not isinstance(objectives, list) or not objectives:
+        why = reading.error or "no objectives in the answer"
+        detail = f"unreadable ({why}); cannot tell whether these preconditions will refuse"
+        return [SloLine("SLO budgets", f"{detail}: {_families(demands)}", True)]
+    lines: list[SloLine] = []
+    for objective in objectives:
+        if not isinstance(objective, dict):
+            lines.append(SloLine("SLO budgets", f"unreadable objective row {objective!r}", True))
+            continue
+        # 2. The platform's own numbers for this objective, as one row.
+        name = f"SLO {objective.get('id')}"
+        budget = _number(objective.get("budget_remaining_pct"))
+        shown = "unreadable" if budget is None else f"{budget:g}"
+        lines.append(
+            SloLine(
+                name,
+                f"{objective.get('failed')} failed of {objective.get('total')}, "
+                f"budget_remaining_pct {shown}, healthy {objective.get('healthy')}",
+                False,
+            )
+        )
+        if budget is not None and budget >= WHOLE_BUDGET_PCT:
+            continue
+        # 3. A spent budget: which scenarios' own precondition checks refuse on this reading,
+        #    and the latest moment the window can have forgotten every failure.
+        refusing = [d for d in demands if d.reads(objective) and d.refuses(payload)]
+        lines.append(
+            SloLine(
+                f"{name} budget",
+                f"{shown}% left, want {WHOLE_BUDGET_PCT:g}%; preconditions that refuse until then: "
+                f"{_families(refusing)}; {clears_at(objective, payload.get('measured_at'))}",
+                True,
+            )
+        )
+    return lines
+
+
+def _corpus_demands() -> tuple[tuple[BudgetDemand, ...], list[SloLine]]:
+    """The corpus's budget checks, or a WARN saying the corpus could not be read."""
+    try:
+        return budget_demands(load_scenarios(_SCENARIOS_DIR)), []
+    except ScenarioLoadError as error:
+        detail = f"unreadable ({error}); the families that refuse cannot be named"
+        return (), [SloLine("scenario corpus", detail, True)]
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     """Audit the seeded world under the read-only token and print PASS/FAIL per line."""
     # 1. Read the optional list of job chain roots the caller wants checked as well.
@@ -397,17 +551,26 @@ def main(argv: Sequence[str] | None = None) -> int:
         #    probes as a new agent run. The platform lets this account label its own reads.
         lab_client = LabProbeClient(client, reason=LAB_PROBE_REASON, principal_token=credential)
         lines, rows = audit_world(lab_client, roots)
-        # 5. Print one line per check, then the dead-letter rows in full, then the verdict.
+        # 5. Read the platform's objectives. A budget under 100% only warns: the scenarios
+        #    whose precondition needs it whole will refuse until the failures age out.
+        demands, slo_lines = _corpus_demands()
+        slo_lines += audit_slo_budgets(lab_client, demands)
+        # 6. Print one line per check, the objectives, the dead-letter rows in full, then the
+        #    verdict; a WARN is repeated on the verdict line so a script reading it sees it.
         for line in lines:
             print(
                 f"[{'PASS' if line.passed else 'FAIL'}] {line.name}: "
                 f"{line.observed} (want {line.expected})"
             )
+        for slo in slo_lines:
+            print(f"[{'WARN' if slo.warn else 'INFO'}] {slo.name}: {slo.detail}")
         print("DLQ rows:")
         for row in rows:
             print(json.dumps(row, sort_keys=True))
         passed = all(line.passed for line in lines)
-        print(f"WORLD AUDIT: {'PASS' if passed else 'FAIL'}")
+        warnings = " | ".join(f"{slo.name}: {slo.detail}" for slo in slo_lines if slo.warn)
+        verdict = f"WORLD AUDIT: {'PASS' if passed else 'FAIL'}"
+        print(f"{verdict} — WARN: {warnings}" if warnings else verdict)
         return 0 if passed else 1
     finally:
         client.close()

@@ -231,6 +231,22 @@ harness artifacts — see [`docs/lessons/live-eval-sequence-2026-09.md`](lessons
    chaos keys); lag remains a pre-run check because its cached reading can
    predate a reset. A green audit is not permission for a live eval.
 
+   It also reads `get_slo_status` once (WO-R3-367) and prints one `[INFO]` row
+   per objective: failed of total, `budget_remaining_pct`, `healthy`. A budget
+   under 100% adds a **`[WARN]`** row, never a FAIL — the world is clean, but
+   every scenario whose precondition needs that budget whole will refuse before
+   any model call. The row names those scenarios by family (worked out from the
+   corpus's own `expected_precondition` checks; today the four `api_latency`
+   worlds) and when the budget clears. Both objectives cover the last 24 hours of
+   the `jobs` table and `make eval-reset` never deletes job rows, so **waiting is
+   the fix** (INC-007): never delete rows or `make demo-destroy` to clear it.
+   `get_slo_status` does not say when the failed jobs were created, so the clear
+   time printed is the latest it can be — the reading's `measured_at` plus the
+   24-hour window, if nothing new fails; the true time is 24 hours after the
+   last late job, which may be earlier. An unreadable objectives read or scenario
+   corpus is a WARN too. Every WARN is repeated on the `WORLD AUDIT:` line, so a
+   script that reads only that line still sees it; the exit code is unchanged.
+
    Anything else is a stop. `lag_known: false` is not "lag 0" — it means the
    metric is unreadable, and a run started on it grades the agent for a
    world nobody can see. Stray alerts above the baseline 3 are the known

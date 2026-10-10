@@ -248,6 +248,8 @@ class TestTheWorldAuditsReadsAreTheLabs:
         assert set(platform.actions()) == {"lab.probe"}
         assert "agent.tool_invoked" not in platform.actions()
         assert audit.LAB_PROBE_REASON in platform.reasons()
+        # The objectives read (WO-R3-367) is labelled like every other audit read.
+        assert "get_slo_status" in {row["tool"] for row in platform.rows}
         # The guard's probe carries its own reason, naming what it proves.
         guard_rows = [row for row in platform.rows if row["tool"] == _PROBE_TOOL]
         assert len(guard_rows) == 1

@@ -200,6 +200,23 @@ canned_tool_responses:
     - type: text
       text: '{"requested":1,"replayed":1,"scheduled":0,"failed":0,"results":[{"id":"4a30546f-d3c5-549f-a772-633c0b26219d","ok":true,"error":null,"scheduled":false,"execute_at":null}]}'
     is_error: false
+  # THE FAMILY'S TWO OTHER READS (ADR 0078, ADR 0080, WO-R3-372): the resolver
+  # that promotes the chain's waiting children, by name, and the background
+  # loops. Transcribed verbatim from the v0.6.24 recording
+  # `…20261010T160701Z.9a5f9c4260f2`. Here both rule the outside-the-chain
+  # stall OUT: the resolver is polling (last_poll_age_seconds 4, level with
+  # age_seconds 4) and no loop is paused, so the dead-lettered root is the
+  # whole story.
+  get_consumer_lag:
+    content:
+    - type: text
+      text: '{"consumer_group":"dependency-resolver","lag":0,"lag_known":true,"source":"live","cache_key":"kafka:consumer_lag:dependency-resolver","measured_at":"2026-10-10T16:07:02.507417Z","age_seconds":4,"recent_samples":[{"lag":0,"measured_at":"2026-10-10T16:07:02.507417Z"},{"lag":0,"measured_at":"2026-10-10T16:06:57.331292Z"},{"lag":0,"measured_at":"2026-10-10T16:06:52.116618Z"},{"lag":0,"measured_at":"2026-10-10T16:06:46.869718Z"},{"lag":0,"measured_at":"2026-10-10T16:06:41.611608Z"},{"lag":0,"measured_at":"2026-10-10T16:06:36.360524Z"},{"lag":0,"measured_at":"2026-10-10T16:06:31.154162Z"},{"lag":0,"measured_at":"2026-10-10T16:06:25.948595Z"},{"lag":0,"measured_at":"2026-10-10T16:06:20.763786Z"},{"lag":0,"measured_at":"2026-10-10T16:06:15.558704Z"},{"lag":0,"measured_at":"2026-10-10T16:06:10.320844Z"},{"lag":0,"measured_at":"2026-10-10T16:06:05.073926Z"},{"lag":0,"measured_at":"2026-10-10T16:05:59.836030Z"},{"lag":0,"measured_at":"2026-10-10T16:05:54.615307Z"},{"lag":0,"measured_at":"2026-10-10T16:05:49.436851Z"}],"last_poll_at":"2026-10-10T16:07:02.499187Z","last_poll_age_seconds":4}'
+    is_error: false
+  get_control_loops:
+    content:
+    - type: text
+      text: '{"measured_at":"2026-10-10T16:07:07.024862Z","loops":[{"name":"outbox_relay","paused":false,"paused_expires_in_seconds":null,"tick_interval_seconds":1.0,"last_run_at":"2026-10-10T16:07:06.123255Z","last_run_age_seconds":0.9},{"name":"delayed_retry_promote","paused":false,"paused_expires_in_seconds":null,"tick_interval_seconds":0.5,"last_run_at":"2026-10-10T16:07:06.632973Z","last_run_age_seconds":0.4},{"name":"dlq_replay_promote","paused":false,"paused_expires_in_seconds":null,"tick_interval_seconds":0.5,"last_run_at":"2026-10-10T16:07:06.633906Z","last_run_age_seconds":0.4},{"name":"resume_unblocked_waiting","paused":false,"paused_expires_in_seconds":null,"tick_interval_seconds":10.0,"last_run_at":"2026-10-10T16:07:04.118796Z","last_run_age_seconds":2.9},{"name":"stale_pending_backstop","paused":false,"paused_expires_in_seconds":null,"tick_interval_seconds":60.0,"last_run_at":"2026-10-10T16:06:55.246546Z","last_run_age_seconds":11.8},{"name":"stale_running_sweep","paused":false,"paused_expires_in_seconds":null,"tick_interval_seconds":60.0,"last_run_at":"2026-10-10T16:06:55.245928Z","last_run_age_seconds":11.8},{"name":"lease_renewal","paused":false,"paused_expires_in_seconds":null,"tick_interval_seconds":20.0,"last_run_at":"2026-10-10T16:06:55.242195Z","last_run_age_seconds":11.8},{"name":"slo_evaluation","paused":false,"paused_expires_in_seconds":null,"tick_interval_seconds":300.0,"last_run_at":"2026-10-10T16:05:53.676534Z","last_run_age_seconds":73.3},{"name":"metrics","paused":false,"paused_expires_in_seconds":null,"tick_interval_seconds":5.0,"last_run_at":"2026-10-10T16:07:02.540608Z","last_run_age_seconds":4.5},{"name":"digest","paused":false,"paused_expires_in_seconds":null,"tick_interval_seconds":86400.0,"last_run_at":null,"last_run_age_seconds":null},{"name":"idempotency_reaper","paused":false,"paused_expires_in_seconds":null,"tick_interval_seconds":3600.0,"last_run_at":"2026-10-10T15:40:53.191044Z","last_run_age_seconds":1573.8}],"total":11,"unknown_reason":null}'
+    is_error: false
 
 canned_llm_responses:
   investigation_planner:
@@ -234,6 +251,35 @@ canned_llm_responses:
     next_action:
       kind: probe
       tool_name: list_dlq_messages
+      arguments: {}
+  # THE FAMILY'S OTHER TWO READS before any verdict (ADR 0078, ADR 0080): the
+  # loop refuses a conclusion about this chain until both are in the evidence.
+  - hypotheses:
+    - category: runaway_saga
+      name: a node in the chain stopped it
+      confidence: 0.75
+      reasoning: >
+        The root's own row is replay_safe, so a replay by id is the fix. Before
+        acting, read the resolver that promotes the descendants once the root
+        completes: if it had stopped polling, the replayed root would complete and
+        its children would still wait.
+    next_action:
+      kind: probe
+      tool_name: get_consumer_lag
+      arguments:
+        consumer_group: dependency-resolver
+  - hypotheses:
+    - category: runaway_saga
+      name: a node in the chain stopped it
+      confidence: 0.8
+      reasoning: >
+        dependency-resolver is polling: last_poll_age_seconds 4, level with its
+        age_seconds, so once the replayed root completes the descendants will be
+        promoted. Read the background loops too, so the handoff can say nothing
+        outside the chain is holding it.
+    next_action:
+      kind: probe
+      tool_name: get_control_loops
       arguments: {}
   - hypotheses:
     - category: runaway_saga

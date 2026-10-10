@@ -39,6 +39,7 @@ from incident_commander.llm.prompts.shared_rules import (
     CHAIN_NODE_ACTION_RULE,
     CONFIRMING_READ_BOUND_RULE,
     SHARED_RULES,
+    STALLED_CHAIN_RULE,
     STUCK_CHAIN_ROOT_RULE,
     UNRESOLVED_REMAINDER_RULE,
     UnknownSharedRuleError,
@@ -71,6 +72,17 @@ _REMAINDER_RULE_READERS: Final[tuple[str, ...]] = (
 # the directory in both directions, as above.
 _CHAIN_NODE_RULE_READERS: Final[tuple[str, ...]] = (
     "briefing_judge",
+    "investigation_planner",
+    "remediation_planner",
+)
+
+# WO-R3-372's readers of the stalled-chain rule (ADR 0080): the planner that reads the resolver
+# and the loops and picks the label, the fix table that restarts the resolver, the writer that
+# names the held sweep in the handoff, and the judge that grades that handoff. Compared against
+# the directory in both directions, as above.
+_STALLED_CHAIN_RULE_READERS: Final[tuple[str, ...]] = (
+    "briefing_judge",
+    "briefing_writer",
     "investigation_planner",
     "remediation_planner",
 )
@@ -111,7 +123,9 @@ _EXPECTED_HASHES: Final[dict[str, str]] = {
     # `llm/prompts/shared_rules.py` tells the writer that produces the briefing and the judge
     # that grades it how to read the structured remainder. A rule given to one of them is half
     # a rule (INC-002), so the two hashes move together or the change is wrong.
-    "briefing_writer": ("3f745f8c9e3cf704c1532841655a1bd5950686fff60439abb0fcc70da659437b"),
+    # Moved by WO-R3-372 / ADR 0080 with the three below: `{{rule:stalled_chain}}` tells the writer
+    # to name a held loop and its expiry in the handoff, resolved run or not.
+    "briefing_writer": ("23912b2eb95990c4b80c7cf41f60e3b762b48211f00c510e0103be73757a0b24"),
     # Moved by WP-1.6 (nine category rows and the healthy-world rule) and again by
     # WO-R3-263 / O-19 / ADR 0054, whose three moved hashes are named in that PR's
     # body. Note what those three have in common: ONE sentence held in
@@ -142,7 +156,10 @@ _EXPECTED_HASHES: Final[dict[str, str]] = {
     # sentence says so. One hash, again: no other prompt carries the rule.
     # WO-R3-363 (ADR 0078): the stuck-chain rule and the healthy-world rule each gain one
     # sentence naming the reads the loop now requires before a verdict. One hash moves.
-    "investigation_planner": ("a0204b7c333cfbc1de7bb695948b96da9a71a1a6623ee6cfb360e6ad343ee415"),
+    # WO-R3-372 (O-49, ADR 0080): the `resolver_stall` row gains its Tier-1 fix, the coordinator
+    # row says it is only what remains, the stuck-chain verdict sentence names the two new
+    # required reads, and `{{rule:stalled_chain}}` is served. Four hashes move together.
+    "investigation_planner": ("e98983f79d63ff70ed52abfa777f8c3a08203a1efc42ac9e826c300a82b42a17"),
     # WP-5.2's addendum, appended to `investigation_planner` by
     # `best_of_n_enumerated` and never loaded alone — which is why the planner prompt's
     # own hash did not move: the control group's system prompt is byte-for-byte what it was.
@@ -164,13 +181,16 @@ _EXPECTED_HASHES: Final[dict[str, str]] = {
     # again by WO-R3-284 / ADR 0070, the chain-node rule's third reader, and again by
     # WO-R3-321 / ADR 0071, the attribution rule's third reader (which also quotes the
     # attribution block's own heading to it).
-    "briefing_judge": ("478362176cda8a81a9202e5d3920891a3b22686544b9f2036dba83b6cf289c0f"),
+    # And by WO-R3-372 / ADR 0080, the stalled-chain rule's fourth reader.
+    "briefing_judge": ("b1322bf44d1f00a89c22ad39b8da157e8147b6a2386575c55d09f6a2e87f3595"),
     # Moved by WO-R3-226 / ADR 0056: two sentences cited ADR 0008 for "you get one Tier-1
     # call", which is now true of a PLAN and not of a run. The rules themselves are
     # unchanged — a plan still proposes exactly one action. Moved again by WO-R3-284 /
     # ADR 0070: the fix table now says which node of the chain the routing is aimed at. And
     # by WO-R3-321 / ADR 0071: it is told the cleared-before-action refusal is structural.
-    "remediation_planner": ("8b6026da7b47322170f65a5fe08099ff78196f738856779bf15f461480531dea"),
+    # And by WO-R3-372 / ADR 0080: `resolver_stall` routes to a restart of `dependency-resolver`,
+    # verified on its poll age, with the shared stalled-chain rule beside it.
+    "remediation_planner": ("1dd3c25c8234aa14f433b6470f4023abe8e9dda52eb3591c0ebca7559070a2f8"),
     # Moved by WO-R3-353 / ADR 0077 (INC-005): the judge is told how its reading's sample
     # history is laid out — oldest first, with a computed trend and the action's time.
     "verification_judge": ("2aa252b4a168105c6246caa3b1ff96ed498b6043c9165059af213d03ef279f73"),
@@ -1088,6 +1108,54 @@ class TestTheChainNodeActionRuleReachesEveryReader:
 
         for tool_name in GRAPH_VIEW_FOR_SUBJECT:
             assert f"`{tool_name}`" in CHAIN_NODE_ACTION_RULE, tool_name
+
+    def test_the_rule_is_in_the_table(self) -> None:
+        assert self._KEY in SHARED_RULES
+
+
+class TestTheStalledChainRuleReachesEveryReader:
+    """WO-R3-372 (INC-008, O-49, ADR 0080): what holds a chain whose own rows are healthy.
+
+    Four readers, because four prompts act on the reading: the planner that must read the
+    resolver and the loops and pick the label, the fix table that restarts the resolver and
+    verifies on its poll age, the writer that must name the held sweep and its expiry in the
+    handoff, and the judge that must score "the resolver polls again, the children still
+    wait" as grounded rather than as a contradiction of a verified restart (INC-002).
+    """
+
+    _KEY: Final = "stalled_chain"
+    _PLACEHOLDER: Final = "{{rule:stalled_chain}}"
+
+    def test_the_rule_is_one_sentence(self) -> None:
+        rule = STALLED_CHAIN_RULE.strip()
+        assert rule.endswith("."), rule
+        assert ". " not in rule, rule
+
+    @pytest.mark.parametrize("name", _STALLED_CHAIN_RULE_READERS)
+    def test_every_reader_is_served_the_identical_rule(self, name: str) -> None:
+        assert STALLED_CHAIN_RULE in load_prompt(name)
+
+    @pytest.mark.parametrize("name", _STALLED_CHAIN_RULE_READERS)
+    def test_every_reader_delegates_the_rule_rather_than_copying_it(self, name: str) -> None:
+        raw = raw_prompt(name)
+        assert self._PLACEHOLDER in raw
+        assert STALLED_CHAIN_RULE not in raw
+
+    def test_the_readers_are_exactly_the_four(self) -> None:
+        carrying = tuple(
+            sorted(name for name in available_prompts() if self._PLACEHOLDER in raw_prompt(name))
+        )
+        assert carrying == _STALLED_CHAIN_RULE_READERS
+
+    def test_the_rule_names_the_reads_the_loop_requires_and_the_fix_the_map_routes(self) -> None:
+        """The words and the machinery are about the same reads and the same tool."""
+        from incident_commander.agent.required_reads import CHAIN_RESOLVER_GROUP
+
+        assert f'`get_consumer_lag(consumer_group="{CHAIN_RESOLVER_GROUP}")`' in STALLED_CHAIN_RULE
+        assert "`get_control_loops`" in STALLED_CHAIN_RULE
+        assert "`last_poll_age_seconds`" in STALLED_CHAIN_RULE
+        assert f"`{FIX_MAP[HypothesisCategory.RESOLVER_STALL]}`" in STALLED_CHAIN_RULE
+        assert "`saga_coordinator_stall`" in STALLED_CHAIN_RULE
 
     def test_the_rule_is_in_the_table(self) -> None:
         assert self._KEY in SHARED_RULES

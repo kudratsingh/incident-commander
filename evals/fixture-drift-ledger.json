@@ -12,9 +12,9 @@
     "no-hook": "the fixture describes a fault no chaos hook can produce, so the canned value is the scenario's premise and the check probes a world that never had it. Not a defect; the fix, if that scenario is ever to run live, is a platform hook"
   },
   "_counts": {
-    "recorded": 183,
+    "recorded": 184,
     "fixture-defect": 10,
-    "explained": 173
+    "explained": 174
   },
   "known_drift": [
     {
@@ -1409,6 +1409,14 @@
       "kind": "not_live_reachable",
       "context": "post-fault",
       "why": "create_stuck_dag stamps each descendant's trace_id from the same namespace and chain_name, so the two trace ids appear and disappear with the rows themselves"
+    },
+    {
+      "scenario": "workflow_stuck_resolver_stall",
+      "tool": "get_control_loops",
+      "path": "loops[].paused[]",
+      "kind": "not_live_reachable",
+      "context": "post-fault",
+      "why": "pause_control_loop('resume_unblocked_waiting') holds the sweep that backstops the resolver, so the canned reading carries one loop with `paused: true`; an un-faulted world runs every loop and its reading offers only `false`, and no lab state but the seeded pause can produce the canned value"
     },
     {
       "scenario": "workflow_stuck_resolver_stall",

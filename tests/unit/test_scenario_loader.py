@@ -321,11 +321,13 @@ class TestEvidenceExpectationHygiene:
         )
 
 
-# The eight groups the platform can resolve: `worker-dispatcher` plus the seven the eval seed
-# populates, mirroring platform `SEEDED_CONSUMER_GROUPS`. Any other is answered `lag: null`.
+# The nine groups the platform can resolve: the two it measures live (`worker-dispatcher`, and
+# since v0.6.24 `dependency-resolver` — platform ADR 0041, `LIVE_REFRESHED_GROUPS`) plus the seven
+# the eval seed populates, mirroring platform `SEEDED_CONSUMER_GROUPS`. Any other answers `null`.
 _PLATFORM_RESOLVABLE_GROUPS: frozenset[str] = frozenset(
     {
         "worker-dispatcher",
+        "dependency-resolver",
         "billing-consumer",
         "orders-consumer",
         "notifications-consumer",

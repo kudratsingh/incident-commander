@@ -1808,7 +1808,7 @@ class TestConfirmingReadBound:
         Such a run's only move is `stop`, and it is entitled to keep reading until it is sure.
         """
         step = {
-            "hypotheses": [_hyp("resolver_stall", 0.95)],
+            "hypotheses": [_hyp("saga_coordinator_stall", 0.95)],
             "next_action": _lag_probe("worker-dispatcher"),
         }
         llm = CannedLLMClient([step, step, step])
@@ -2110,7 +2110,7 @@ class TestTheExhaustedIterationsReason:
         and did not" from "there was nothing it could do".
         """
         step = {
-            "hypotheses": [_hyp("resolver_stall", 0.95)],
+            "hypotheses": [_hyp("saga_coordinator_stall", 0.95)],
             "next_action": _lag_probe("worker-dispatcher"),
         }
         llm = CannedLLMClient([step, step])

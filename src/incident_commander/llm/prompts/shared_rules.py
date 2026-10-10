@@ -36,6 +36,27 @@ STUCK_CHAIN_ROOT_RULE: Final[str] = (
 )
 
 
+#: What holds a stuck chain whose own rows are healthy, and how each reading of it is acted on:
+#: the resolver is restarted, the paused sweep is named and left to expire, and the coordinator is
+#: only what remains once both are ruled out (INC-008, O-49, ADR 0080). Same words to every reader.
+STALLED_CHAIN_RULE: Final[str] = (
+    "A stuck dependency chain whose own nodes are healthy — nothing in it dead-lettered, "
+    "the chain not paused, children `waiting` behind parents that `completed` — is held "
+    "by what promotes it, and two reads show which: "
+    '`get_consumer_lag(consumer_group="dependency-resolver")` with '
+    "`last_poll_age_seconds` far above its `age_seconds` means the resolver stopped "
+    "polling (a stopped resolver's lag can read 0 exactly like a healthy one's, so the "
+    "lag proves nothing here), which is `resolver_stall`, fixed with "
+    "`restart_consumer_group` on `dependency-resolver` and verified by "
+    "`last_poll_age_seconds` back within a few seconds of `age_seconds`; "
+    "`get_control_loops` reading the `resume_unblocked_waiting` loop as `paused: true` "
+    "means the sweep that backstops the resolver is held, which no tool lifts, so it is "
+    "left to expire and named in the report with its `paused_expires_in_seconds`; and "
+    "only when the resolver is polling and that sweep is running is "
+    "`saga_coordinator_stall` what remains, a label no reading confirms."
+)
+
+
 #: How to read the list of causes a run did NOT address: everything in it is still open, and no
 #: run may call any of them fixed. The briefing writer and the judge get the same words (ADR 0065).
 UNRESOLVED_REMAINDER_RULE: Final[str] = (
@@ -97,6 +118,7 @@ CONFIRMING_READ_BOUND_RULE: Final[str] = (
 #: Every shared rule, by the key a prompt file names it with.
 SHARED_RULES: Final[dict[str, str]] = {
     "chain_node_action": CHAIN_NODE_ACTION_RULE,
+    "stalled_chain": STALLED_CHAIN_RULE,
     "stuck_chain_root": STUCK_CHAIN_ROOT_RULE,
     "unresolved_remainder": UNRESOLVED_REMAINDER_RULE,
     "attribution": ATTRIBUTION_RULE,

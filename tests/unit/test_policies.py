@@ -1764,6 +1764,13 @@ class TestStuckChainRootRule:
         assert "never by the chain view" in STUCK_CHAIN_ROOT_RULE
 
 
+#: Categories promoted out of WP-1.6's escalate-only set, each with its tool and the scenario
+#: that grades it (``test_a_promotion_is_graded_by_its_own_scenario`` holds both).
+_PROMOTED: Final[dict[HypothesisCategory, tuple[str, str]]] = {
+    HypothesisCategory.RESOLVER_STALL: ("restart_consumer_group", "workflow_stuck_resolver_stall"),
+}
+
+
 class TestEveryNewCategoryIsEscalateOnly:
     """WP-1.6's load-bearing rule, checked rather than promised.
 
@@ -1773,6 +1780,10 @@ class TestEveryNewCategoryIsEscalateOnly:
     A category's arrival in that map is the moment the taxonomy authorises a Tier-1
     write for a whole family with no scenario grading it, so adding one is a separate
     later decision with its own scenario and coverage. This makes "later" enforceable.
+
+    ``_PROMOTED`` is that later decision, written down: each entry names the tool, the
+    owner's ruling and the scenario that grades the action. ``RESOLVER_STALL`` is the
+    first (O-49, ADR 0080), once platform v0.6.24 made a stopped resolver readable.
     """
 
     @staticmethod
@@ -1782,11 +1793,34 @@ class TestEveryNewCategoryIsEscalateOnly:
         ``_ORIGINAL_EIGHT`` is imported from the enum's own test rather than
         retyped here: a second hand-maintained copy of the pre-WP-1.6
         membership would be one rename away from calling an original
-        category "new" and exempting a real one.
+        category "new" and exempting a real one. A promoted category is not
+        "new" here: it is checked by the promotion tests below instead.
         """
         return sorted(
-            (c for c in HypothesisCategory if c.name not in _ORIGINAL_EIGHT),
+            (c for c in HypothesisCategory if c.name not in _ORIGINAL_EIGHT and c not in _PROMOTED),
             key=lambda c: c.name,
+        )
+
+    @pytest.mark.parametrize("category", sorted(_PROMOTED, key=str))
+    def test_a_promotion_is_graded_by_its_own_scenario(self, category: HypothesisCategory) -> None:
+        """The condition the escalate-only rule attached to a promotion, checked.
+
+        The map routes the category at the named tool, and a scenario whose ground truth is
+        that category RESOLVES with that tool as its sanctioned action and grades the
+        argument it is called with — so the Tier-1 write the map authorises is measured.
+        """
+        tool, scenario_name = _PROMOTED[category]
+        assert FIX_MAP[category] == tool
+        assert category not in HINT_ROUTED_CATEGORIES
+        scenario = next(s for s in load_scenarios(_SCENARIO_DIR) if s.name == scenario_name)
+        assert scenario.ground_truth is not None
+        assert category in scenario.ground_truth.root_causes
+        expectation = scenario.expectation
+        assert expectation.expected_terminal_state is IncidentState.RESOLVED
+        assert expectation.expected_action_tools == (tool,)
+        assert tool not in expectation.forbidden_action_tools
+        assert any(tool in claim.tools for claim in expectation.expected_action_arguments), (
+            f"{scenario_name} does not grade which resource {tool} is aimed at"
         )
 
     def test_there_are_new_categories_to_check(self) -> None:
@@ -1836,7 +1870,7 @@ class TestEveryNewCategoryIsEscalateOnly:
             HypothesisCategory.POISON_MESSAGE,
             HypothesisCategory.STALE_CACHE,
             HypothesisCategory.RUNAWAY_SAGA,
-        }
+        } | set(_PROMOTED)
 
     def test_no_category_falls_in_the_gap_between_the_two_corpus_checks(self) -> None:
         """The hole WO-R2-140 opened, generalised to the whole taxonomy.
@@ -2336,13 +2370,15 @@ class TestWorkflowStuckFamily:
        That class cannot cover these scenarios — it reads ``chaos_setup`` and
        this family declares ``chaos_plan`` — so the check is repeated over the
        composable form rather than left to a map that cannot see it.
-    2. **The pair that only the diagnosis separates.** ``resolver_stall`` and
-       ``paused_dag`` agree on terminal state, action count and every graded
-       reading but one. The boolean is asserted in both directions, because a
-       pair that agreed on it too would be one world under two names.
+    2. **The pair the chain view separates by one boolean.** ``resolver_stall`` and
+       ``paused_dag`` agree on every chain and queue reading but ``paused``. The
+       boolean is asserted in both directions, because a pair that agreed on it too
+       would be one world under two names. Since WO-R3-372 (ADR 0080) the pair also
+       differs on the resolver's reading and on the answer's kind: the stranded world
+       restarts the resolver, the paused one hands off.
     3. **A family whose every answer is a handoff measures nothing on ACTION.**
-       So one world must sanction an action and the others must sanction none,
-       and that is asserted rather than assumed (ADR 0053 § 2).
+       So some worlds must sanction an action and the others none, and that is
+       asserted rather than assumed (ADR 0053 § 2). Three act since WO-R3-372.
     4. **Each world grades green end to end**, through the real runner and the
        real grader.
     """
@@ -2357,14 +2393,19 @@ class TestWorkflowStuckFamily:
     _DEFAULT_TENANT: Final[str] = "d3fa17de-7a17-de7a-17de-7a17de7a17de"
     CHAIN: Final[str] = "workflow-stuck-eval"
 
-    #: The worlds whose answer is an action, and which action each sanctions. Two, since
-    #: WO-R3-284: a replay aimed at the alerted ROOT and a fence aimed at a DESCENDANT.
+    #: The worlds whose answer is an action, and which action each sanctions. Two since
+    #: WO-R3-284 — a replay aimed at the alerted ROOT and a fence aimed at a DESCENDANT — and
+    #: three since WO-R3-372 (O-49, ADR 0080): a restart aimed at the RESOLVER, which is not a
+    #: node of the chain at all.
     ACTING: Final[dict[str, tuple[str, ...]]] = {
         "workflow_stuck_dead_lettered_root": ("replay_dlq_by_ids",),
         "workflow_stuck_downstream_child_failed": ("mark_dlq_permanent",),
+        "workflow_stuck_resolver_stall": ("restart_consumer_group",),
     }
-    #: The one that RESOLVES. The fence world acts and still escalates (ADR 0026).
+    #: The one that RESOLVES on the chain. The fence world acts and still escalates (ADR 0026).
     RESOLVING: Final[str] = "workflow_stuck_dead_lettered_root"
+    #: The world WO-R3-372 made a repair: it resolves by restarting the resolver.
+    RESTARTING: Final[str] = "workflow_stuck_resolver_stall"
     #: The world ADR 0070 added, and the one whose action names a node the alert does not.
     DESCENDANT: Final[str] = "workflow_stuck_downstream_child_failed"
 
@@ -2471,6 +2512,10 @@ class TestWorkflowStuckFamily:
                 for value in scenario.expectation.expect_briefing_contains
                 if value.count("-") == 4
             }
+            # Only CHAIN ids are this check's business. Since WO-R3-372 the stranded world
+            # also names the resolver's group (its action argument) and a loop's name (a row
+            # selector), and neither is a job id.
+            named = {value for value in named if value.count("-") == 4}
             stale = sorted(named - derived)
             assert not stale, (
                 f"{scenario.name} names {stale}, which create_stuck_dag does not derive for "
@@ -2590,11 +2635,12 @@ class TestWorkflowStuckFamily:
             if s.expectation.expected_action_tools
         }
         assert acting == self.ACTING, (
-            "this family measures ACTION through exactly two worlds, with a different "
-            f"tool each; got {acting}. Read ADR 0053 § 2 and ADR 0070 before changing it."
+            "this family measures ACTION through exactly three worlds, with a different "
+            f"tool each; got {acting}. Read ADR 0053 § 2, ADR 0070 and ADR 0080 before "
+            "changing it."
         )
-        # Different tools, and different TARGETS: the replay names the alerted subject and
-        # the fence names a node one hop below it.
+        # Different tools, and different TARGETS: the replay names the alerted subject, the
+        # fence names a node one hop below it, and the restart names the resolver.
         targets = {
             s.name: {str(a.equals) for a in s.expectation.expected_action_arguments}
             for s in self._members()
@@ -2602,14 +2648,16 @@ class TestWorkflowStuckFamily:
         }
         assert targets[self.RESOLVING] == {self._row_id("root")}
         assert targets[self.DESCENDANT] == {self._row_id("step-1")}
-        # And only one RESOLVES. A fence is a stabilizer (ADR 0026), so the world that
-        # acts and escalates is not a contradiction — it is the shape `saga_stuck` has.
+        assert targets[self.RESTARTING] == {"dependency-resolver"}
+        # And two RESOLVE. A fence is a stabilizer (ADR 0026), so the world that acts and
+        # escalates is not a contradiction — it is the shape `saga_stuck` has.
         terminals = {s.name: s.expectation.expected_terminal_state for s in self._members()}
-        assert terminals[self.RESOLVING] is IncidentState.RESOLVED
+        resolving = {self.RESOLVING, self.RESTARTING}
+        assert all(terminals[name] is IncidentState.RESOLVED for name in resolving)
         assert all(
             state is IncidentState.ESCALATED
             for name, state in terminals.items()
-            if name != self.RESOLVING
+            if name not in resolving
         )
 
     @pytest.mark.parametrize(
@@ -2619,7 +2667,7 @@ class TestWorkflowStuckFamily:
             ("workflow_stuck_downstream_child_failed", ("mark_dlq_permanent",)),
             ("workflow_stuck_healthy_chain", ()),
             ("workflow_stuck_paused_dag", ()),
-            ("workflow_stuck_resolver_stall", ()),
+            ("workflow_stuck_resolver_stall", ("restart_consumer_group",)),
         ],
     )
     def test_the_forbidden_set_is_derived_from_the_sanctioned_action(

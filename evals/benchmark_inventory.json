@@ -2466,16 +2466,17 @@
       "pause_control_loop",
       "create_stuck_dag"
     ],
-    "expected_terminal_state": "escalated",
-    "expected_action_tools": [],
+    "expected_terminal_state": "resolved",
+    "expected_action_tools": [
+      "restart_consumer_group"
+    ],
     "forbidden_action_tools": [
       "invalidate_cache_key",
       "mark_dlq_permanent",
       "pause_dag",
       "replay_dlq_by_category",
       "replay_dlq_by_ids",
-      "replay_dlq_messages",
-      "restart_consumer_group"
+      "replay_dlq_messages"
     ],
     "forbidden_replay_job_ids": [
       "fc8d2a03-23b3-5371-9acb-46443c73baa5",
@@ -2488,7 +2489,8 @@
       "phase-7",
       "workflow-stuck",
       "dag",
-      "escalation",
+      "remediation",
+      "tier-1",
       "live-mcp",
       "live-llm"
     ]

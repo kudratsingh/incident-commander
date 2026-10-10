@@ -43,9 +43,19 @@ _SLICE: Final[str] = "replay_safe"
 _LATENCY_SWEEP: Final[tuple[RequiredReading, ...]] = FAMILY_REQUIRED_BEFORE_VERDICT[
     ScenarioFamily.API_LATENCY
 ]
-_WHOLE_QUEUE: Final[tuple[RequiredReading, ...]] = FAMILY_REQUIRED_BEFORE_VERDICT[
+# The workflow_stuck family's declaration: the whole queue (ADR 0078), the resolver BY NAME and
+# the background loops (O-49, ADR 0080).
+_CHAIN_SWEEP: Final[tuple[RequiredReading, ...]] = FAMILY_REQUIRED_BEFORE_VERDICT[
     ScenarioFamily.WORKFLOW_STUCK
 ]
+# ADR 0078's mechanism on its own, as the tests below were written against it: one read of the
+# whole queue before any chain verdict. Declared here rather than taken from the family, so the
+# mechanism's tests do not move when the family's sweep grows.
+_WHOLE_QUEUE: Final[tuple[RequiredReading, ...]] = (
+    RequiredReading(tool="list_dlq_messages", when=VerdictCondition.STUCK_CHAIN),
+)
+_RESOLVER: Final[str] = "dependency-resolver"
+_RESOLVER_READ: Final[str] = f"get_consumer_lag(consumer_group={_RESOLVER})"
 
 
 def _step(category: str, confidence: float, action: dict[str, Any]) -> dict[str, Any]:
@@ -356,8 +366,10 @@ class TestTheScenarioDeclaresIt:
                 "get_circuit_breakers",
             )
         ]
-        assert [(r.tool, r.when) for r in _WHOLE_QUEUE] == [
-            ("list_dlq_messages", VerdictCondition.STUCK_CHAIN)
+        assert [(r.tool, r.when, dict(r.arguments)) for r in _CHAIN_SWEEP] == [
+            ("list_dlq_messages", VerdictCondition.STUCK_CHAIN, {}),
+            ("get_consumer_lag", VerdictCondition.STUCK_CHAIN, {"consumer_group": _RESOLVER}),
+            ("get_control_loops", VerdictCondition.STUCK_CHAIN, {}),
         ]
 
     def test_an_explicit_empty_list_opts_out(self) -> None:
@@ -367,7 +379,7 @@ class TestTheScenarioDeclaresIt:
 
     def test_the_agent_visible_projection_carries_it(self) -> None:
         scenario = _CORPUS["workflow_stuck_paused_dag"]
-        assert scenario.agent_visible().required_before_verdict == _WHOLE_QUEUE
+        assert scenario.agent_visible().required_before_verdict == _CHAIN_SWEEP
 
     def test_only_read_tools_may_be_required(self) -> None:
         with pytest.raises(ValidationError):
@@ -404,12 +416,9 @@ class TestRedBeforeGreenAfterOnTheCannedFamilies:
         _step("runaway_saga", 0.5, _probe("get_dag_state", job_id=_CHAIN)),
         _step("dag_paused", 0.9, _stop("the chain is paused by its root")),
         _step("dag_paused", 0.9, _probe("list_dlq_messages")),
+        _step("dag_paused", 0.9, _probe("get_consumer_lag", consumer_group=_RESOLVER)),
+        _step("dag_paused", 0.9, _probe("get_control_loops")),
         _step("dag_paused", 0.9, _stop("paused by its root; nothing of it is dead-lettered")),
-    ]
-    # The shape of 4e729b6803a2: the right diagnosis, five reads, no verdict, out of steps.
-    _STALL: Final[list[dict[str, Any]]] = [
-        *[_step("resolver_stall", 0.75, _probe("get_dag_state", job_id=_CHAIN))] * 5,
-        _step("resolver_stall", 0.8, _probe("list_dlq_messages")),
     ]
 
     @pytest.mark.parametrize(
@@ -417,7 +426,6 @@ class TestRedBeforeGreenAfterOnTheCannedFamilies:
         [
             ("api_latency_healthy_control", _CONTROL),
             ("workflow_stuck_paused_dag", _PAUSED),
-            ("workflow_stuck_resolver_stall", _STALL),
         ],
     )
     def test_without_the_rule_the_run_concludes_early_and_evidence_fails(
@@ -432,7 +440,6 @@ class TestRedBeforeGreenAfterOnTheCannedFamilies:
         [
             ("api_latency_healthy_control", _CONTROL),
             ("workflow_stuck_paused_dag", _PAUSED),
-            ("workflow_stuck_resolver_stall", _STALL),
         ],
     )
     def test_with_the_rule_the_reads_are_forced_and_every_dimension_passes(

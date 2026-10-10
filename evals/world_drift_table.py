@@ -65,6 +65,11 @@ EXIT_REASONS: Final[dict[int, str]] = {
 _PIN_RE: Final[re.Pattern[str]] = re.compile(r"incident-platform:(v[0-9][0-9.]*)@")
 _WORLD_RE: Final[re.Pattern[str]] = re.compile(r"evals\.world_drift --world (\S+)")
 _RECORDING_RE: Final[re.Pattern[str]] = re.compile(r"^DRIFT: recording\s+(\S+)$", re.M)
+#: The scenario the check itself resolved. `--world` takes a recording id OR a scenario name
+#: (`make world-drift`'s own comment), so the argument is a scenario only half the time; a log
+#: of a check run by recording id once keyed its row by the id (WO-R3-374). The check prints
+#: this line whenever it got as far as a recording, and the argument is the fallback.
+_SCENARIO_RE: Final[re.Pattern[str]] = re.compile(r"^DRIFT: scenario\s+(\S+)$", re.M)
 _COUNT_RE: Final[re.Pattern[str]] = re.compile(r"^DRIFT: (\d+) disagreement\(s\):", re.M)
 _REFUSAL_RE: Final[re.Pattern[str]] = re.compile(
     r"^DRIFT FAIL \(([^)]+)\): (.*)$(?:\n  - (.*)$)?", re.M
@@ -209,9 +214,9 @@ def row_from_log(text: str, *, checked_at: str) -> DriftRow:
         raise ValueError(f"log for `{world.group(1)}` holds no verdict line")
     code = int(make_exit.group(1)) if make_exit is not None else (1 if verdict == DRIFT else 0)
     output = _strip_checkout(text)
-    return DriftRow(
-        world.group(1), recording, verdict, code, disagreements, detail, checked_at, output
-    )
+    named = _SCENARIO_RE.search(text)
+    scenario = named.group(1) if named is not None else world.group(1)
+    return DriftRow(scenario, recording, verdict, code, disagreements, detail, checked_at, output)
 
 
 def rows_from_logs(directory: Path) -> list[DriftRow]:

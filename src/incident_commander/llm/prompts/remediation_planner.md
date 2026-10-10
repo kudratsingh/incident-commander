@@ -24,7 +24,7 @@ For non-DLQ hypotheses:
 
 ## A chain held from outside itself (`resolver_stall`)
 
-{{rule:stalled_chain}} So the plan is `restart_consumer_group` with `consumer_group` exactly `"dependency-resolver"`, copied from the reading that showed it stopped, and nothing else: no job of the chain is replayed, fenced or paused, because none of them failed. Verify with `get_consumer_lag` on that same group, and write the expectation as the resolver reading — `last_poll_age_seconds` back within a few seconds of `age_seconds` — not as the chain draining: the children promote only when the held sweep expires, so the chain still reads `waiting` after a restart that worked.
+{{rule:stalled_chain}} So the plan is `restart_consumer_group` with `consumer_group` exactly `"dependency-resolver"`, copied from the reading that showed it stopped, and nothing else: no job of the chain is replayed, fenced or paused, because none of them failed. Verify with `get_consumer_lag` on that same group, and write the expectation as the resolver's verdict — `polling: true` on a reading taken after the restart (the read right after it can still say `polling: false`, because the platform publishes the new poll time at its next pass) — not as the chain draining: the children promote only when the held sweep expires, so the chain still reads `waiting` after a restart that worked.
 
 ## Stuck dependency chains (`runaway_saga` / `stuck_dag`)
 

@@ -32,6 +32,9 @@ _TABLE_WO_R3_366 = (
 _TABLE_WO_R3_372 = (
     _REPO / "evals/reports/world-drift/world_drift_table.20261010T161830Z.50d52e3fe322.json"
 )
+_TABLE_WO_R3_374 = (
+    _REPO / "evals/reports/world-drift/world_drift_table.20261010T190122Z.0f08672ecce9.json"
+)
 
 _CMD = 'PLATFORM_COMPOSE="demo/compose.yml" uv run python -m evals.world_drift --world '
 _FILE = "dlq_backlog/dlq_backlog.20260917T182256Z"
@@ -184,6 +187,33 @@ def test_a_clean_and_a_refused_log_read_back_as_such() -> None:
     assert "unpublished_count" in refused.detail
 
 
+def test_a_check_run_by_recording_id_is_keyed_by_its_scenario() -> None:
+    """WO-R3-374: `--world` takes a recording id or a scenario name. A check run by id printed
+    its scenario on a `DRIFT: scenario` line, and the table keyed the row by the id instead."""
+    by_id = "\n".join(
+        (
+            _CMD + "6f030e848a9d",
+            "DRIFT: world      6f030e848a9d",
+            "DRIFT: scenario   workflow_stuck_resolver_stall",
+            "DRIFT: recording  /Users/someone/incident-commander/evals/recorded_worlds/"
+            "workflow_stuck_resolver_stall/workflow_stuck_resolver_stall.20261010T183856Z."
+            "6f030e848a9d.json",
+            "DRIFT: none — every recorded call still answers the same.",
+            "",
+        )
+    )
+    row = world_drift_table.row_from_log(by_id, checked_at="t")
+    assert (row.scenario, row.recording, row.verdict) == (
+        "workflow_stuck_resolver_stall",
+        "6f030e848a9d",
+        CLEAN,
+    )
+    # A check refused before it reached a recording prints no scenario line: the argument stands.
+    assert world_drift_table.row_from_log(_REFUSED_LOG, checked_at="t").scenario == (
+        "jobs_not_progressing_outbox_stall"
+    )
+
+
 def test_a_log_with_no_verdict_is_refused() -> None:
     with pytest.raises(ValueError, match="not a `make world-drift` log"):
         world_drift_table.row_from_log("hello", checked_at="t")
@@ -321,7 +351,6 @@ def test_the_wo_r3_372_table_checks_the_five_re_recorded_worlds_on_v0624() -> No
     assert len(table["rows"]) == 17
     assert table["counts"] == {CLEAN: 5, DRIFT: 0, REFUSED: 0, NOT_RUN: 12}
     assert table["platform_pin"] == "v0.6.24"
-    assert artifacts.newest("world_drift_table") == _TABLE_WO_R3_372
     rows = {row["scenario"]: row for row in table["rows"]}
     assert {name: row["recording"] for name, row in rows.items() if row["verdict"] == CLEAN} == {
         "workflow_stuck_dead_lettered_root": "9a5f9c4260f2",
@@ -334,6 +363,33 @@ def test_the_wo_r3_372_table_checks_the_five_re_recorded_worlds_on_v0624() -> No
     for name, row in rows.items():
         if row["verdict"] == NOT_RUN:
             assert "not checked by WO-R3-372" in row["detail"]
+            assert row["recording"] == previous[name]["recording"], name
+
+
+def test_the_wo_r3_374_table_checks_the_five_worlds_re_recorded_on_v0625() -> None:
+    """WO-R3-374: the five workflow_stuck worlds re-recorded on v0.6.25, where the resolver
+    reading carries the platform's `polling` verdict, and checked — all CLEAN.
+
+    The twelve other worlds were not part of the order: each row is NOT RUN, says why, and names
+    the same recording the WO-R3-372 table named — nothing was re-recorded behind it.
+    """
+    table = json.loads(_TABLE_WO_R3_374.read_text())
+    assert len(table["rows"]) == 17
+    assert table["counts"] == {CLEAN: 5, DRIFT: 0, REFUSED: 0, NOT_RUN: 12}
+    assert table["platform_pin"] == "v0.6.25"
+    assert artifacts.newest("world_drift_table") == _TABLE_WO_R3_374
+    rows = {row["scenario"]: row for row in table["rows"]}
+    assert {name: row["recording"] for name, row in rows.items() if row["verdict"] == CLEAN} == {
+        "workflow_stuck_dead_lettered_root": "b9fe65835de7",
+        "workflow_stuck_downstream_child_failed": "415e668be1d6",
+        "workflow_stuck_healthy_chain": "ad5c84e2e49f",
+        "workflow_stuck_paused_dag": "e5f484c3f34f",
+        "workflow_stuck_resolver_stall": "6f030e848a9d",
+    }
+    previous = {row["scenario"]: row for row in json.loads(_TABLE_WO_R3_372.read_text())["rows"]}
+    for name, row in rows.items():
+        if row["verdict"] == NOT_RUN:
+            assert "not checked by WO-R3-374" in row["detail"]
             assert row["recording"] == previous[name]["recording"], name
 
 

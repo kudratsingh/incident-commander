@@ -60,6 +60,18 @@ with its expiry and left to run out. The other four worlds keep their verdicts:
 in each the resolver reads polling and no loop is paused, so the two new reads
 rule the outside-the-chain stall OUT and the answer is what it was.
 
+**Since platform v0.6.25 (WO-R3-374, owner decision O-51, [ADR
+0081](../../docs/ADR/0081-a-stalled-resolver-is-read-on-the-platforms-polling-verdict.md)).**
+The first paid run on the repair (archive `daea4943f3a5`, INC-008 addendum) made all
+three reads and still read the dead resolver's `last_poll_age_seconds 39` (beside
+`age_seconds 3`) as "polling", then anchored on the paused sweep. The platform now
+states the verdict — `get_consumer_lag` carries `polling` (false once the consumer
+has not asked for 10 s) — and the family is read and graded on it: the shared rule
+says read `polling` first, `polling: false` is a stopped resolver whatever its lag
+says, and a paused backstop loop never explains a stalled resolver (and is not
+`dag_paused`, which is the chain's own pause). In world 2 the resolver reads
+`polling: false`; in the other four it reads `polling: true`.
+
 ## The alert, in all five
 
 ```yaml
@@ -118,7 +130,8 @@ runner asserts before spending; `→ graded` marks one an
 | `list_dlq_messages.items[].remediation_hint` where `id` = the dead row → precondition, graded | **`replay_safe`** on the ROOT, read BEFORE the replay | **`human_required`** on STEP-1, read BEFORE the fence | (no such row) | (no such row) | (no such row) |
 | `list_dlq_messages.items[].error_message` where `id` = step-1 → precondition | — | the schema fault naming `user_id` | — | — | — |
 | `list_dlq_messages.items[].fenced_at` where `id` = step-1 → precondition, graded | — | null before the fence, non-null after | — | — | — |
-| `get_consumer_lag(consumer_group="dependency-resolver").last_poll_age_seconds` vs `age_seconds` → required read in all five; precondition + graded in world 2 (since WO-R3-372) | 4 vs 4 — polling | 4 vs 4 — polling | **20 vs 2 — stopped**; after the restart 2 vs 2 | 0 vs 0 — polling | 2 vs 2 — polling |
+| `get_consumer_lag(consumer_group="dependency-resolver").polling` → required read in all five; precondition + graded in world 2 (since WO-R3-374; v0.6.25 recordings) | `true` | `true` | **`false`**; after the restart `true` | `true` | `true` |
+| `get_consumer_lag(...dependency-resolver).last_poll_age_seconds` vs `age_seconds` — the number behind `polling`; precondition in world 2, and the verify group's second member | 4 vs 4 | 4 vs 4 | **20 vs 2**; after the restart 2 vs 2 | 0 vs 0 | 2 vs 2 |
 | `get_consumer_lag(...dependency-resolver).lag` | 0 | 0 | **0** — a stopped resolver over a chain where nothing completes reads exactly what a healthy idle one does (INC-008) | 0 | 0 |
 | `get_control_loops.loops[].paused` where `name` = `resume_unblocked_waiting` → required read in all five; precondition + graded in world 2 | false | false | **true** (`paused_expires_in_seconds` 880 when read) | false | false |
 
@@ -142,19 +155,23 @@ runner asserts before spending; `→ graded` marks one an
   `at_most 4` split; and `search_traces(status=waiting)` returns ONE row there
   where the stranded worlds return two, because step-1 is dead rather than
   waiting.
-* **World 2 from world 3:** the chain's `paused`, and — since v0.6.24 — the
-  resolver's poll age. Both have a completed root over a waiting descendant and
-  an empty-of-this-chain queue. World 3 reads `paused: true` on the chain and a
-  polling resolver, and hands off; world 2 reads `paused: false`, a resolver
-  whose `last_poll_age_seconds` is far above its `age_seconds`, and the
-  `resume_unblocked_waiting` loop paused, and restarts the resolver.
+* **World 2 from world 3:** the chain's `paused`, and — since v0.6.24, as a
+  verdict since v0.6.25 — the resolver's `polling`. Both have a completed root
+  over a waiting descendant and an empty-of-this-chain queue. World 3 reads
+  `paused: true` on the CHAIN and a resolver reading `polling: true`, and hands
+  off; world 2 reads `paused: false` on the chain, a resolver reading
+  `polling: false`, and the `resume_unblocked_waiting` LOOP paused, and restarts
+  the resolver. The paused loop is not world 3's pause: `dag_paused` is
+  `get_dag_state`'s field, and a held backstop loop never explains a stopped
+  resolver (ADR 0081; the INC-008 addendum's planner read it as `dag_paused`).
 * **World 2 from `saga_coordinator_stall`** (no world builds it): the resolver
   reading. A stopped coordinator would leave the same chain view with the resolver
-  POLLING and the sweep running; no reading shows the coordinator itself
-  (platform ADR 0041 did not build one), so that label is asserted only by ruling
-  the resolver out. This is the separation INC-008 found missing, and PROTOCOL
-  step 4's third question is now answered for world 2: the read exists and the
-  family requires it.
+  reading `polling: true` and the sweep running; no reading shows the coordinator
+  itself (platform ADR 0041 did not build one), so that label is asserted only by
+  ruling the resolver out. This is the separation INC-008 found missing, and
+  PROTOCOL step 4's third question is now answered for world 2: the read exists,
+  the family requires it, and since v0.6.25 it answers as a verdict rather than a
+  number to threshold.
 * **The control from worlds 2 and 3:** step-1 ran. `get_dag_state` on the root
   reads every node in view `completed`, which is why the control's graded claim
   on that field is `rows: all` — with the default any-row reading, "some node is
@@ -296,9 +313,9 @@ repeated in each bullet.
   the tool.
 * **resolver_stall** (a repair since WO-R3-372) — probe `get_dag_state(<root>)`,
   probe `list_dlq_messages()` unfiltered, probe the resolver and the loops,
-  restart `dependency-resolver` once, verify on its `last_poll_age_seconds`,
-  resolve. Every read is required by a graded claim: the resolver read is graded
-  BEFORE the restart (`last_poll_age_seconds at_least 20`, so a run cannot act
+  restart `dependency-resolver` once, verify it reads `polling: true`, resolve.
+  Every read is required by a graded claim: the resolver read is graded BEFORE
+  the restart (`polling equals false` since WO-R3-374, so a run cannot act
   without having seen the stall), the loop read is graded on the
   `resume_unblocked_waiting` row's `paused`, and the verify claim is on the last
   post-restart reading. Six Tier-1 tools are forbidden and the restart's
@@ -328,13 +345,20 @@ World 2 (since WO-R3-372) has one, and it has ONE call shape: the only read that
 can observe a restart is `get_consumer_lag` on the restarted group
 (`VERIFY_PROBE_FOR_ACTION`, enforced by the plan guard). What varies is the
 timing, measured on the $0 rehearsal `11b24360e455`: the poll taken the instant
-after the restart still reads the frozen value (`last_poll_age_seconds` 20),
-because the supervisor re-spawns the consumer on its 2 s tick and the next 5 s
-metrics pass publishes the poll time; the poll 20 s later reads 2. So the claim is
-`last_poll_age_seconds at_most 15` with `which: last` and `after_tools:
-[restart_consumer_group]` — the reading the run verified on, whichever poll that
-was — and no `any_of`, because a second member would have to be an invented shape,
-which is loosening. A run that resolves on the frozen reading fails it. What is NOT
+after the restart still reads the frozen value (`last_poll_age_seconds` 20,
+`polling: false` since v0.6.25), because the supervisor re-spawns the consumer on
+its 2 s tick and the next 5 s metrics pass publishes the poll time; the poll 20 s
+later reads 2 (`polling: true`). Since WO-R3-374 (ADR 0081) the claim is an
+`any_of` on that last post-restart reading (`which: last`, `after_tools:
+[restart_consumer_group]`): `polling equals true`, or `last_poll_age_seconds
+at_most 15`. Both members describe the one shape honestly — the precondition
+proves the frozen poll time at least 20 s old before the run, so an age of 15 or
+less after the restart can only be a new poll, and that member can only err by
+failing a correct run on a slow metrics pass, which the verdict member covers. A
+run that resolves on the frozen reading fails both. The pre-action claim is the
+verdict ALONE (`polling equals false`): the old `last_poll_age_seconds at_least
+20` is not kept beside it, because at a slower pass a living consumer reads ages
+that high with `polling: true`, so as an alternative it would loosen the claim. What is NOT
 claimed is the chain draining: the parent's `job.completed` was consumed before the
 chain was built, so the children move only when the sweep's pause expires.
 
@@ -423,10 +447,12 @@ rather than a weaker claim — see below.
 * **every world:** `list_dlq_messages()` unfiltered, which is the reading that
   proves the hook wrote the shape it was asked for rather than its default.
 * **world 2 only (since WO-R3-372):** `get_consumer_lag(consumer_group=
-  "dependency-resolver")`, six looks at 5s, asserting `source: live` and
-  `last_poll_age_seconds at_least 20` — the stopped resolver as a READING, which is
-  what makes the label observable (INC-008) — and `get_control_loops()` asserting
-  the `resume_unblocked_waiting` row reads `paused: true` (`where` on the loop's
+  "dependency-resolver")`, six looks at 5s, asserting `source: live`,
+  `polling: false` (since WO-R3-374) and `last_poll_age_seconds at_least 20` — the
+  stopped resolver as the platform's verdict and as a reading, which is what makes
+  the label observable (INC-008); the age is kept because it is what makes the
+  verify group's age member honest — and `get_control_loops()` asserting the
+  `resume_unblocked_waiting` row reads `paused: true` (`where` on the loop's
   name). The poll age climbs one second per second from the kill, so the first
   passes about 20 s after seeding.
 
@@ -464,6 +490,24 @@ Older recordings stay where they are; the newest is the one a replay and a drift
 | `workflow_stuck_resolver_stall` | `…20261010T155224Z.01a38eead451.json` | 15 recorded, 0 unanswered | none |
 | `workflow_stuck_paused_dag` | `…20261010T155558Z.35c7dada96b9.json` | 15 recorded, 0 unanswered | none |
 | `workflow_stuck_healthy_chain` | `…20261010T161338Z.3ea8323971b8.json` | 15 recorded, 0 unanswered | none |
+
+**Re-recorded on v0.6.25 for WO-R3-374** (`sha256:4aa155119b6d…`), the same way — one world
+at a time, a world audit after each recording and each drift check, about a minute between
+steps, no traffic — so each recording carries the resolver's `polling` verdict as the platform
+reported it: `false` in `resolver_stall` (with `last_poll_age_seconds` 20 against `age_seconds`
+2, the same reading the canned world transcribes), `true` in the other four, and
+`poll_interval_seconds` 2.0 in all five. The canned readings were already written by the
+platform's rule at the re-pin (cmd #364) and agree with every recording, so no canned value
+moved. Table `world_drift_table.20261010T190122Z.0f08672ecce9` (5 CLEAN, 12 NOT RUN, each NOT
+RUN naming the recording the WO-R3-372 table named).
+
+| scenario | v0.6.25 recording | calls | `make world-drift` |
+|---|---|---|---|
+| `workflow_stuck_dead_lettered_root` | `…20261010T184637Z.b9fe65835de7.json` | 16 recorded, 0 unanswered | none |
+| `workflow_stuck_downstream_child_failed` | `…20261010T185057Z.415e668be1d6.json` | 17 recorded, 0 unanswered | none |
+| `workflow_stuck_resolver_stall` | `…20261010T183856Z.6f030e848a9d.json` | 15 recorded, 0 unanswered | none |
+| `workflow_stuck_paused_dag` | `…20261010T184221Z.e5f484c3f34f.json` | 15 recorded, 0 unanswered | none |
+| `workflow_stuck_healthy_chain` | `…20261010T185517Z.ad5c84e2e49f.json` | 15 recorded, 0 unanswered | none |
 
 Two of world 1's canned elements are **not recordable, by construction**: the
 post-replay `get_dag_state` reading and the `replay_dlq_by_ids` reply.

@@ -124,8 +124,9 @@ FIX_MAP: Final[dict[HypothesisCategory, str]] = {
     # pausing leaves the chain stuck and blocks the replay. The root's own row picks the tool.
     HypothesisCategory.RUNAWAY_SAGA: "replay_dlq_by_ids",
     # The first category promoted out of WP-1.6's escalate-only set (O-49, ADR 0080): since
-    # platform v0.6.24 a stopped resolver is READABLE (`last_poll_age_seconds`), so restarting it
-    # is a Tier-1 fix a scenario grades, aimed at `CHAIN_RESOLVER_GROUP` and nothing else.
+    # platform v0.6.24 a stopped resolver is READABLE, and since v0.6.25 the platform states the
+    # verdict (`polling: false`, ADR 0081), so restarting it is a Tier-1 fix a scenario grades,
+    # aimed at `CHAIN_RESOLVER_GROUP` and nothing else.
     HypothesisCategory.RESOLVER_STALL: "restart_consumer_group",
 }
 

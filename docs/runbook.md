@@ -1634,9 +1634,16 @@ change, needed no new step — item 12 covers both):
    reporting any recorded result from them (`make world-drift` says so itself),
    and do not let the unit suite go quietly green over it: the waiver in
    `tests/unit/test_recorded_client.py`
-   (`_FIELDS_A_LATER_PIN_MADE_REQUIRED`) admits that field by name, keeps
-   every other parse failure a failure, and is asserted to be non-empty so
-   deleting the debt means deleting the line.
+   (`_FIELDS_A_LATER_PIN_MADE_REQUIRED`) admits such a field by name and keeps
+   every other parse failure a failure. Since WO-R3-294 re-recorded the
+   worlds on v0.6.23 the parse check runs on each scenario's newest recording
+   (the one a replay resolves), and the waiver applies only to the worlds
+   named in `_NOT_YET_RE_RECORDED` — the ones that run could not re-record.
+   A test holds that set to exactly the newest recordings still short of the
+   field, so re-recording the last of them forces the waiver empty. Older
+   recordings stay committed and short of the field, and are asserted to be
+   superseded. The next pin that makes a field required reds the parse check
+   until the worlds are re-recorded or the field is waived with the pin named.
 
    `make world-drift` on all twelve committed recordings after this pin is
    the cleanest possible reading of it: the eight whose premise a reset quiet

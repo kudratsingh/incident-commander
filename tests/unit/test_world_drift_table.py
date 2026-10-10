@@ -20,6 +20,12 @@ from evals.world_drift import DriftReport
 from evals.world_drift_table import CLEAN, DRIFT, NOT_RUN, REFUSED, DriftRow
 
 _REPO = world_drift_table.REPO_ROOT
+_TABLE_20261008 = (
+    _REPO / "evals/reports/world-drift/world_drift_table.20261008T160827Z.86b59809ce24.json"
+)
+_TABLE_20261010 = (
+    _REPO / "evals/reports/world-drift/world_drift_table.20261010T091619Z.72896d36b9ef.json"
+)
 
 _CMD = 'PLATFORM_COMPOSE="demo/compose.yml" uv run python -m evals.world_drift --world '
 _FILE = "dlq_backlog/dlq_backlog.20260917T182256Z"
@@ -220,17 +226,26 @@ def test_the_table_is_written_once_under_world_drift(tmp_path: Path) -> None:
 
 
 def test_the_committed_2026_10_08_table_has_no_clean_recording() -> None:
-    table = json.loads(artifacts.newest("world_drift_table").read_text())
+    table = json.loads(_TABLE_20261008.read_text())
     assert len(table["rows"]) == 17
     assert table["counts"][CLEAN] == 0
     assert table["platform_pin"] == "v0.6.23"
+
+
+def test_the_committed_2026_10_10_table_is_the_re_recorded_worlds() -> None:
+    """WO-R3-294: 16 worlds re-recorded on v0.6.23, read back from their own drift logs."""
+    table = json.loads(_TABLE_20261010.read_text())
+    assert len(table["rows"]) == 17
+    assert (table["counts"][CLEAN], table["counts"][DRIFT]) == (9, 8)
+    assert table["platform_pin"] == "v0.6.23"
+    assert artifacts.newest("world_drift_table") == _TABLE_20261010
 
 
 def test_the_newest_recording_of_each_scenario_is_what_the_loop_checks() -> None:
     worlds = world_drift_table.newest_recordings()
     assert len(worlds) == len({scenario for scenario, _ in worlds}) == 17
     assert all(re.fullmatch(r"[0-9a-f]{12}", recording) for _, recording in worlds)
-    assert ("api_latency_db_query", "f66df012ad79") in worlds
+    assert ("api_latency_db_query", "8c4a32a50d4b") in worlds
 
 
 def test_the_make_target_runs_every_recording_or_reads_logs() -> None:

@@ -1,0 +1,204 @@
+{
+  "scenario": "workflow_stuck_resolver_stall",
+  "incident_id": "40714d0c-9aa4-473f-901e-f22f7150ab84",
+  "checkpoints": [
+    {
+      "schema_version": 3,
+      "incident_id": "40714d0c-9aa4-473f-901e-f22f7150ab84",
+      "state": "triage",
+      "alert": {
+        "source": "platform.dag",
+        "severity": "critical",
+        "fingerprint": "workflow_not_advancing",
+        "group": null,
+        "remediation_hint": null,
+        "dlq_scope": null,
+        "job_id": "4a30546f-d3c5-549f-a772-633c0b26219d",
+        "summary": "a workflow is not advancing; the dependency chain rooted at this job has a descendant that has not run"
+      },
+      "budget": {
+        "max_tool_calls": 8,
+        "tool_calls_used": 0,
+        "max_tokens": 200000,
+        "tokens_used": 0,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.0,
+        "max_usd": "1.00",
+        "usd_used": "0"
+      },
+      "evidence": [],
+      "hypotheses": [],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-10-08T15:51:08.907041Z",
+      "updated_at": "2026-10-08T15:51:08.907041Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "40714d0c-9aa4-473f-901e-f22f7150ab84",
+      "state": "investigating",
+      "alert": {
+        "source": "platform.dag",
+        "severity": "critical",
+        "fingerprint": "workflow_not_advancing",
+        "group": null,
+        "remediation_hint": null,
+        "dlq_scope": null,
+        "job_id": "4a30546f-d3c5-549f-a772-633c0b26219d",
+        "summary": "a workflow is not advancing; the dependency chain rooted at this job has a descendant that has not run"
+      },
+      "budget": {
+        "max_tool_calls": 8,
+        "tool_calls_used": 0,
+        "max_tokens": 200000,
+        "tokens_used": 0,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 5.171854,
+        "max_usd": "1.00",
+        "usd_used": "0"
+      },
+      "evidence": [
+        {
+          "evidence_id": "7c16c5ab-ffd8-429f-934b-1fbccaa4312b",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "critical",
+            "dedup_key": "9c341d086ad7a8025a768d1dec53676b"
+          },
+          "result_summary": "severity=critical classified as investigating",
+          "timestamp": "2026-10-08T15:51:14.078895Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-10-08T15:51:08.907041Z",
+      "updated_at": "2026-10-08T15:51:14.078895Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "40714d0c-9aa4-473f-901e-f22f7150ab84",
+      "state": "escalated",
+      "alert": {
+        "source": "platform.dag",
+        "severity": "critical",
+        "fingerprint": "workflow_not_advancing",
+        "group": null,
+        "remediation_hint": null,
+        "dlq_scope": null,
+        "job_id": "4a30546f-d3c5-549f-a772-633c0b26219d",
+        "summary": "a workflow is not advancing; the dependency chain rooted at this job has a descendant that has not run"
+      },
+      "budget": {
+        "max_tool_calls": 8,
+        "tool_calls_used": 5,
+        "max_tokens": 200000,
+        "tokens_used": 80020,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 64.554183,
+        "max_usd": "1.00",
+        "usd_used": "0.174789"
+      },
+      "evidence": [
+        {
+          "evidence_id": "7c16c5ab-ffd8-429f-934b-1fbccaa4312b",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "critical",
+            "dedup_key": "9c341d086ad7a8025a768d1dec53676b"
+          },
+          "result_summary": "severity=critical classified as investigating",
+          "timestamp": "2026-10-08T15:51:14.078895Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "6d55490e-41f1-4537-9313-bd8d75533098",
+          "tool_name": "get_dag_state",
+          "arguments": {
+            "job_id": "4a30546f-d3c5-549f-a772-633c0b26219d"
+          },
+          "result_summary": "{\"seed_id\":\"4a30546f-d3c5-549f-a772-633c0b26219d\",\"nodes\":[{\"id\":\"4a30546f-d3c5-549f-a772-633c0b26219d\",\"type\":\"bulk_api_sync\",\"status\":\"completed\",\"retry_count\":0,\"created_at\":\"2026-10-08T15:04:08.954046Z\"},{\"id\":\"404c3151-cdc6-511e-8532-471693d5cfe1\",\"type\":\"bulk_api_sync\",\"status\":\"completed\",\"retry_count\":0,\"created_at\":\"2026-10-08T15:04:08.954046Z\"},{\"id\":\"7fb11dea-d182-5033-a4d0-2d2a645eb1df\",\"type\":\"bulk_api_sync\",\"status\":\"waiting\",\"retry_count\":0,\"created_at\":\"2026-10-08T15:04:08.954046Z\"}],\"edges\":[{\"from_id\":\"4a30546f-d3c5-549f-a772-633c0b26219d\",\"to_id\":\"404c3151-cdc6-511e-8532-471693d5cfe1\"},{\"from_id\":\"7fb11dea-d182-5033-a4d0-2d2a645eb1df\",\"to_id\":\"4a30546f-d3c5-549f-a772-633c0b26219d\"}],\"paused\":false,\"paused_expires_in_seconds\":null,\"paused_by\":null}",
+          "timestamp": "2026-10-08T15:51:14.078911Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "e88da0cd-ded8-4a6a-8fd6-5bfa494f839f",
+          "tool_name": "get_outbox_status",
+          "arguments": {},
+          "result_summary": "{\"measured_at\":\"2026-10-08T15:51:31.599059Z\",\"unpublished_count\":0,\"oldest_unpublished_at\":null,\"oldest_unpublished_age_s\":null,\"newest_unpublished_at\":null,\"newest_unpublished_age_s\":null,\"unpublished_past_attempt_limit\":0,\"last_publish_at\":\"2026-10-08T15:44:40.501651Z\",\"seconds_since_last_publish\":411.097,\"relay_last_tick_at\":\"2026-10-08T15:51:31.186024Z\",\"relay_heartbeat_age_s\":0.413,\"relay_heartbeat_known\":true,\"relay_heartbeat_unknown_reason\":null,\"relay_tick_interval_s\":1.0}",
+          "timestamp": "2026-10-08T15:51:14.078911Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "17647ffa-0be7-4945-a6af-47299f488b41",
+          "tool_name": "get_dag_state",
+          "arguments": {
+            "job_id": "7fb11dea-d182-5033-a4d0-2d2a645eb1df"
+          },
+          "result_summary": "{\"seed_id\":\"7fb11dea-d182-5033-a4d0-2d2a645eb1df\",\"nodes\":[{\"id\":\"7fb11dea-d182-5033-a4d0-2d2a645eb1df\",\"type\":\"bulk_api_sync\",\"status\":\"waiting\",\"retry_count\":0,\"created_at\":\"2026-10-08T15:04:08.954046Z\"},{\"id\":\"4a30546f-d3c5-549f-a772-633c0b26219d\",\"type\":\"bulk_api_sync\",\"status\":\"completed\",\"retry_count\":0,\"created_at\":\"2026-10-08T15:04:08.954046Z\"},{\"id\":\"2ebfbbf8-634c-5e26-93f8-6047c1e72064\",\"type\":\"bulk_api_sync\",\"status\":\"waiting\",\"retry_count\":0,\"created_at\":\"2026-10-08T15:04:08.954046Z\"}],\"edges\":[{\"from_id\":\"7fb11dea-d182-5033-a4d0-2d2a645eb1df\",\"to_id\":\"4a30546f-d3c5-549f-a772-633c0b26219d\"},{\"from_id\":\"2ebfbbf8-634c-5e26-93f8-6047c1e72064\",\"to_id\":\"7fb11dea-d182-5033-a4d0-2d2a645eb1df\"}],\"paused\":false,\"paused_expires_in_seconds\":null,\"paused_by\":null}",
+          "timestamp": "2026-10-08T15:51:14.078911Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "dcd96230-43de-473c-b649-4f68c475532c",
+          "tool_name": "get_dag_state",
+          "arguments": {
+            "job_id": "2ebfbbf8-634c-5e26-93f8-6047c1e72064"
+          },
+          "result_summary": "{\"seed_id\":\"2ebfbbf8-634c-5e26-93f8-6047c1e72064\",\"nodes\":[{\"id\":\"2ebfbbf8-634c-5e26-93f8-6047c1e72064\",\"type\":\"bulk_api_sync\",\"status\":\"waiting\",\"retry_count\":0,\"created_at\":\"2026-10-08T15:04:08.954046Z\"},{\"id\":\"7fb11dea-d182-5033-a4d0-2d2a645eb1df\",\"type\":\"bulk_api_sync\",\"status\":\"waiting\",\"retry_count\":0,\"created_at\":\"2026-10-08T15:04:08.954046Z\"}],\"edges\":[{\"from_id\":\"2ebfbbf8-634c-5e26-93f8-6047c1e72064\",\"to_id\":\"7fb11dea-d182-5033-a4d0-2d2a645eb1df\"}],\"paused\":false,\"paused_expires_in_seconds\":null,\"paused_by\":null}",
+          "timestamp": "2026-10-08T15:51:14.078911Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "4074d37e-0730-416f-89d1-d05db302e32a",
+          "tool_name": "get_consumer_lag",
+          "arguments": {
+            "consumer_group": "worker-dispatcher"
+          },
+          "result_summary": "{\"consumer_group\":\"worker-dispatcher\",\"lag\":0,\"lag_known\":true,\"source\":\"live\",\"cache_key\":\"kafka:consumer_lag:worker-dispatcher\",\"measured_at\":\"2026-10-08T15:52:13.178169Z\",\"age_seconds\":0,\"recent_samples\":[{\"lag\":0,\"measured_at\":\"2026-10-08T15:52:13.178169Z\"},{\"lag\":0,\"measured_at\":\"2026-10-08T15:52:07.951813Z\"},{\"lag\":0,\"measured_at\":\"2026-10-08T15:52:02.755955Z\"},{\"lag\":0,\"measured_at\":\"2026-10-08T15:51:57.545601Z\"},{\"lag\":0,\"measured_at\":\"2026-10-08T15:51:52.347676Z\"},{\"lag\":0,\"measured_at\":\"2026-10-08T15:51:47.174486Z\"},{\"lag\":0,\"measured_at\":\"2026-10-08T15:51:42.026552Z\"},{\"lag\":0,\"measured_at\":\"2026-10-08T15:51:36.870213Z\"},{\"lag\":0,\"measured_at\":\"2026-10-08T15:51:31.697400Z\"},{\"lag\":0,\"measured_at\":\"2026-10-08T15:51:26.535779Z\"},{\"lag\":0,\"measured_at\":\"2026-10-08T15:51:21.385436Z\"},{\"lag\":0,\"measured_at\":\"2026-10-08T15:51:16.224487Z\"},{\"lag\":0,\"measured_at\":\"2026-10-08T15:51:11.044904Z\"},{\"lag\":0,\"measured_at\":\"2026-10-08T15:51:05.910330Z\"},{\"lag\":0,\"measured_at\":\"2026-10-08T15:51:00.842836Z\"}]}",
+          "timestamp": "2026-10-08T15:51:14.078911Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "a58652bf-ff0a-4cc3-910e-e487130c494e",
+          "tool_name": "_planner_escalate",
+          "arguments": {
+            "reason": "max iterations (5) exceeded with no action taken: the top hypothesis was 'resolver_stall' / 'bulk-api-sync-chain-stalled-at-waiting-root-2ebfbbf8' at confidence 0.75, which is not an answer this run could have acted on autonomously, and the reads it took were get_consumer_lag, get_dag_state x3, get_outbox_status. That ranking is this run's own conclusion — no cause outside it was established by those reads."
+          },
+          "result_summary": "max iterations (5) exceeded with no action taken: the top hypothesis was 'resolver_stall' / 'bulk-api-sync-chain-stalled-at-waiting-root-2ebfbbf8' at confidence 0.75, which is not an answer this run could have acted on autonomously, and the reads it took were get_consumer_lag, get_dag_state x3, get_outbox_status. That ranking is this run's own conclusion — no cause outside it was established by those reads.",
+          "timestamp": "2026-10-08T15:52:13.461224Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [
+        {
+          "category": "resolver_stall",
+          "name": "bulk-api-sync-chain-stalled-at-waiting-root-2ebfbbf8",
+          "confidence": 0.75,
+          "reasoning": "The chain traces back to root node 2ebfbbf8 which has status 'waiting' with no parent to complete and no dead-letter entry visible, suggesting the resolver has stopped advancing it despite prerequisites being met."
+        },
+        {
+          "category": "consumer_saturation",
+          "name": "worker-dispatcher-lag-blocking-bulk-api-sync-jobs",
+          "confidence": 0.35,
+          "reasoning": "If the worker-dispatcher consumer is behind, bulk_api_sync jobs sitting in 'waiting' would not be picked up, explaining the stall without any dead-letter rows."
+        },
+        {
+          "category": "outbox_stall",
+          "name": "outbox-not-delivering-state-transitions",
+          "confidence": 0.15,
+          "reasoning": "Outbox showed 0 unpublished rows and a healthy relay heartbeat, making this unlikely but not fully ruled out for missed state transitions on the waiting nodes."
+        }
+      ],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-10-08T15:51:08.907041Z",
+      "updated_at": "2026-10-08T15:52:13.461224Z"
+    }
+  ],
+  "invocation_id": "4e729b6803a2"
+}

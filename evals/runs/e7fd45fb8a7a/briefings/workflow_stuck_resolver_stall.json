@@ -1,0 +1,68 @@
+{
+  "incident_id": "03a3d078-9ece-4179-87bc-59d35d621701",
+  "final_state": "escalated",
+  "alert_summary": "source=platform.dag severity=critical fingerprint=workflow_not_advancing",
+  "escalation_reason": "max iterations (5) exceeded with no action taken: the top hypothesis was 'saga_coordinator_stall' / 'bulk-api-sync-chain-waiting-no-dead-letter-ancestor' at confidence 0.72, which is not an answer this run could have acted on autonomously, and the reads it took were get_consumer_lag, get_dag_state x3, get_outbox_status. That ranking is this run's own conclusion — no cause outside it was established by those reads.",
+  "attempted_action": null,
+  "incidents": {
+    "primary": {
+      "category": "saga_coordinator_stall",
+      "name": "bulk-api-sync-chain-waiting-no-dead-letter-ancestor",
+      "confidence": 0.72,
+      "addressed": false
+    },
+    "secondary": [],
+    "unresolved_extra": [
+      {
+        "category": "saga_coordinator_stall",
+        "name": "bulk-api-sync-chain-waiting-no-dead-letter-ancestor",
+        "confidence": 0.72,
+        "addressed": false
+      }
+    ]
+  },
+  "attribution": null,
+  "investigation_trail": [
+    {
+      "tool": "get_dag_state",
+      "summary": "{\"seed_id\":\"4a30546f-d3c5-549f-a772-633c0b26219d\",\"nodes\":[{\"id\":\"4a30546f-d3c5-549f-a772-633c0b26219d\",\"type\":\"bulk_api_sync\",\"status\":\"completed\",\"retry_count\":0,\"created_at\":\"2026-10-08T15:00:33.145600Z\"},{\"id\":\"404c3151-cdc6-511e-8532-471693d5cfe1\",\"type\":\"bulk_api_sync\",\"status\":\"completed\",\"retry_count\":0,\"created_at\":\"2026-10-08T15:00:33.145600Z\"},{\"id\":\"7fb11dea-d182-5033-a4d0-2d2a645eb1df\",\"type\":\"bulk_api_sync\",\"status\":\"waiting\",\"retry_count\":0,\"created_at\":\"2026-10-08T15:00:33.145600Z\"}],\"edges\":[{\"from_id\":\"4a30546f-d3c5-549f-a772-633c0b26219d\",\"to_id\":\"404c3151-cdc6-511e-8532-471693d5cfe1\"},{\"from_id\":\"7fb11dea-d182-5033-a4d0-2d2a645eb1df\",\"to_id\":\"4a30546f-d3c5-549f-a772-633c0b26219d\"}],\"paused\":false,\"paused_expires_in_seconds\":null,\"paused_by\":null}",
+      "arguments": {
+        "job_id": "4a30546f-d3c5-549f-a772-633c0b26219d"
+      }
+    },
+    {
+      "tool": "get_dag_state",
+      "summary": "{\"seed_id\":\"7fb11dea-d182-5033-a4d0-2d2a645eb1df\",\"nodes\":[{\"id\":\"7fb11dea-d182-5033-a4d0-2d2a645eb1df\",\"type\":\"bulk_api_sync\",\"status\":\"waiting\",\"retry_count\":0,\"created_at\":\"2026-10-08T15:00:33.145600Z\"},{\"id\":\"4a30546f-d3c5-549f-a772-633c0b26219d\",\"type\":\"bulk_api_sync\",\"status\":\"completed\",\"retry_count\":0,\"created_at\":\"2026-10-08T15:00:33.145600Z\"},{\"id\":\"2ebfbbf8-634c-5e26-93f8-6047c1e72064\",\"type\":\"bulk_api_sync\",\"status\":\"waiting\",\"retry_count\":0,\"created_at\":\"2026-10-08T15:00:33.145600Z\"}],\"edges\":[{\"from_id\":\"7fb11dea-d182-5033-a4d0-2d2a645eb1df\",\"to_id\":\"4a30546f-d3c5-549f-a772-633c0b26219d\"},{\"from_id\":\"2ebfbbf8-634c-5e26-93f8-6047c1e72064\",\"to_id\":\"7fb11dea-d182-5033-a4d0-2d2a645eb1df\"}],\"paused\":false,\"paused_expires_in_seconds\":null,\"paused_by\":null}",
+      "arguments": {
+        "job_id": "7fb11dea-d182-5033-a4d0-2d2a645eb1df"
+      }
+    },
+    {
+      "tool": "get_dag_state",
+      "summary": "{\"seed_id\":\"2ebfbbf8-634c-5e26-93f8-6047c1e72064\",\"nodes\":[{\"id\":\"2ebfbbf8-634c-5e26-93f8-6047c1e72064\",\"type\":\"bulk_api_sync\",\"status\":\"waiting\",\"retry_count\":0,\"created_at\":\"2026-10-08T15:00:33.145600Z\"},{\"id\":\"7fb11dea-d182-5033-a4d0-2d2a645eb1df\",\"type\":\"bulk_api_sync\",\"status\":\"waiting\",\"retry_count\":0,\"created_at\":\"2026-10-08T15:00:33.145600Z\"}],\"edges\":[{\"from_id\":\"2ebfbbf8-634c-5e26-93f8-6047c1e72064\",\"to_id\":\"7fb11dea-d182-5033-a4d0-2d2a645eb1df\"}],\"paused\":false,\"paused_expires_in_seconds\":null,\"paused_by\":null}",
+      "arguments": {
+        "job_id": "2ebfbbf8-634c-5e26-93f8-6047c1e72064"
+      }
+    },
+    {
+      "tool": "get_consumer_lag",
+      "summary": "{\"consumer_group\":\"worker-dispatcher\",\"lag\":0,\"lag_known\":true,\"source\":\"live\",\"cache_key\":\"kafka:consumer_lag:worker-dispatcher\",\"measured_at\":\"2026-10-08T15:48:16.030219Z\",\"age_seconds\":1,\"recent_samples\":[{\"lag\":0,\"measured_at\":\"2026-10-08T15:48:16.030219Z\"},{\"lag\":0,\"measured_at\":\"2026-10-08T15:48:10.853816Z\"},{\"lag\":0,\"measured_at\":\"2026-10-08T15:48:05.726376Z\"},{\"lag\":0,\"measured_at\":\"2026-10-08T15:48:00.591657Z\"},{\"lag\":0,\"measured_at\":\"2026-10-08T15:47:55.440884Z\"},{\"lag\":0,\"measured_at\":\"2026-10-08T15:47:50.361318Z\"},{\"lag\":0,\"measured_at\":\"2026-10-08T15:47:45.285465Z\"},{\"lag\":0,\"measured_at\":\"2026-10-08T15:47:40.149279Z\"},{\"lag\":0,\"measured_at\":\"2026-10-08T15:47:35.001928Z\"},{\"lag\":0,\"measured_at\":\"2026-10-08T15:47:29.867146Z\"},{\"lag\":0,\"measured_at\":\"2026-10-08T15:47:24.772874Z\"},{\"lag\":0,\"measured_at\":\"2026-10-08T15:47:19.700677Z\"},{\"lag\":0,\"measured_at\":\"2026-10-08T15:47:14.625255Z\"},{\"lag\":0,\"measured_at\":\"2026-10-08T15:47:09.541240Z\"},{\"lag\":0,\"measured_at\":\"2026-10-08T15:47:04.242628Z\"}]}",
+      "arguments": {
+        "consumer_group": "worker-dispatcher"
+      }
+    },
+    {
+      "tool": "get_outbox_status",
+      "summary": "{\"measured_at\":\"2026-10-08T15:48:27.458716Z\",\"unpublished_count\":0,\"oldest_unpublished_at\":null,\"oldest_unpublished_age_s\":null,\"newest_unpublished_at\":null,\"newest_unpublished_age_s\":null,\"unpublished_past_attempt_limit\":0,\"last_publish_at\":\"2026-10-08T15:44:40.501651Z\",\"seconds_since_last_publish\":226.957,\"relay_last_tick_at\":\"2026-10-08T15:48:27.389228Z\",\"relay_heartbeat_age_s\":0.069,\"relay_heartbeat_known\":true,\"relay_heartbeat_unknown_reason\":null,\"relay_tick_interval_s\":1.0}",
+      "arguments": {}
+    }
+  ],
+  "findings": "Three bulk_api_sync nodes (7fb11dea, 2ebfbbf8, and their chain) are stuck in \"waiting\" with no dead-letter ancestor and zero retry attempts, while the worker-dispatcher consumer lag is 0 and the outbox has no unpublished events — pointing to a saga coordinator stall where the DAG chain is not being signalled to advance despite upstream nodes completing; no action was taken by this run against this cause, which remains fully open.",
+  "recommendation": "Inspect the saga coordinator's state for the stalled chain starting at node 2ebfbbf8-634c-5e26-93f8-6047c1e72064 to confirm whether a completion signal was ever emitted for the upstream completed node (4a30546f), and check coordinator logs around 2026-10-08T15:00Z for any missed or dropped transition events.",
+  "budget_used": {
+    "tool_calls": 5,
+    "tokens": 80451,
+    "wall_seconds": 54.379215,
+    "usd": "0.174858"
+  }
+}

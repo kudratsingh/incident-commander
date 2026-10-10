@@ -1152,8 +1152,9 @@ is spent. `YES_SPEND` must be exactly `1`. A paid batch runs the runner once wit
 its reason (a crash, a replay miss, a label that does not apply, another arm or recording, no step
 records); selector numbers stay withheld until the arm's calibration report id is registered in
 `evals/research_report.py`'s calibration register (plan 02:243) AND that report was made on the
-model the selector runs on — the calibration harness asks the judge model, a run's selector is
-called on the agent's model, and the report says which in its `model` field. Run `make world-drift-all` first and read it CLEAN for every pinned recording, as for any
+model the selector runs on — the calibration harness asks the judge model unless the selector leg is
+given a run role (§ "Judge calibration: the selector leg on the arm's model" below), a run's selector
+is called on the agent's model, and the report says which in its `model` field. Run `make world-drift-all` first and read it CLEAN for every pinned recording, as for any
 recorded number. The archive is committed like any paid run's (PROTOCOL step 9).
 
 `--mode recorded` cannot be combined with `--live` or `--smoke`, and it refuses to start if `ANTHROPIC_API_KEY` is a placeholder: a canned planner under a recorded label would be a fabricated row. A selected scenario with no recording is refused by name — it never falls back to canned fixtures.
@@ -1239,6 +1240,29 @@ The `briefing_judge` leg against the owner's labels runs in three steps:
    `JUDGE_MODEL` every labelled briefing 5 times plus the six traps 5 times (110 calls) and writes the
    versioned report with its `label_agreement` leg. Without labels it refuses (exit 2) before any call.
    Try it free first: `make judge-calibration JUDGE=briefing_judge LABELS=1`.
+
+## Judge calibration: the selector leg on the arm's model (WO-R3-364)
+
+A run calls its `candidate_selector` on the run's own model (`BENCHMARK_MODEL` on a benchmark run),
+while every leg of `make judge-calibration` asks `JUDGE_MODEL` unless told otherwise. A selector
+calibration counts only for an arm that ran on the model it measured: `research_report` and
+`oracle_gap` read the register through one gate, `research_report.calibration_gate`, which refuses a
+report whose `model` is not the arm's model and names the report and both models. So the selector
+leg takes the switch the runner takes:
+
+```bash
+make judge-calibration JUDGE=candidate_selector MODEL_ROLE=benchmark      # FREE: the fake; prints the setting a live run reads
+make judge-calibration JUDGE=candidate_selector MODEL_ROLE=benchmark LIVE=1 YES_SPEND=1 WRITE=1   # PAID ≈ $0.30, the owner's yes
+```
+
+`MODEL_ROLE` reaches this target only when it is given (command line, environment or `.env`); the
+`development` fallback of the eval targets does not apply, so without it the selector leg asks
+`JUDGE_MODEL` as before and its summary says so. `action_verifier` and `briefing_judge` ask
+`JUDGE_MODEL` whatever role is given. The paid run asks the selector's six traps five times each
+(30 calls). The report records `model` (the id that answered), `model_role` and `model_setting`.
+Before registering it: check `model` is the model the arm's selector runs on (`claude-sonnet-4-6`
+for the oracle-gap arm today), then add the id to the calibration register in
+`evals/research_report.py` under `candidate_selector/best_of_n_enumerated/n=8`, in its own PR.
 
 ## Debugging one scenario
 

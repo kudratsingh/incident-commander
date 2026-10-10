@@ -2386,6 +2386,19 @@ discovered on disk, so adding an id is a reviewable act; a fake-judge report can
 about the arm. This is plan 02:243's rule and plan 04:169's acceptance, applied one role out from the
 selector gate beside it.
 
+**Which model answers each leg.** A judge grades a run from outside it, so the `action_verifier` and
+`briefing_judge` legs ask the pinned `JUDGE_MODEL`, whatever else is asked for. The `candidate_selector`
+is not outside the run: a run calls it on the run's own model (`BENCHMARK_MODEL` on a benchmark run), so
+a selector calibration made on the judge model measures a model the arm never calls — and the first one
+was exactly that (`4fc2722d286e`, 2026-10-08, claude-haiku-4-5, for an arm whose selector runs on
+claude-sonnet-4-6). `make judge-calibration JUDGE=candidate_selector MODEL_ROLE=benchmark` asks the
+selector leg on the model that role resolves to, through the same `Settings.model_for_role` lookup the
+runner makes for `--model-role` (WO-R3-364); every report records `model`, `model_role` and
+`model_setting`. Both readers of the selector register, `research_report` and `oracle_gap`, ask one
+gate, `research_report.calibration_gate`: a registered report releases a selector number only if its
+`model` is the model that run's selector was called on, and otherwise the withheld sentence names the
+report and both models.
+
 **A rubric edit lands one line at a time, with a rerun.** This is a review convention, not something a
 test can decide: one rubric line per commit, and a diff that moves two lines is split before it is
 reviewed. What makes it checkable after the fact is that every calibration report carries the sha256

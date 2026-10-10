@@ -44,6 +44,7 @@ from evals.runner import RunReport, ScenarioOutcome
 from evals.scenarios.loader import load_scenarios
 from evals.tracing import TraceKind
 from incident_commander.agent.hypothesis import HypothesisCategory
+from incident_commander.agent.selection import SELECTOR_ROLE
 
 REPO_ROOT: Final[Path] = Path(__file__).resolve().parents[1]
 
@@ -996,6 +997,32 @@ def calibration_report_for(arm: str) -> str | None:
     return CALIBRATION_REPORTS.get(arm)
 
 
+def calibration_gate(arm: str, agent_model: str, *, root: Path = REPO_ROOT) -> dict[str, Any]:
+    """Whether the arm's registered calibration report may release its selector numbers.
+
+    It must exist and must have measured the model the selector ran on: ``make
+    judge-calibration`` asks ``JUDGE_MODEL`` unless ``MODEL_ROLE`` is given, while a run's
+    selector is called on the run's own model (ADR 0079, WO-R3-364). The one rule this report
+    and ``oracle_gap`` both apply; ``why_not`` names the report and both models.
+    """
+    report_id = calibration_report_for(arm)
+    gate: dict[str, Any] = {"report_id": report_id, "model": None, "opens": False, "why_not": ""}
+    if report_id is None:
+        gate["why_not"] = f"no calibration report is registered for {arm} (plan 02:243)"
+        return gate
+    for path in artifacts.versions("judge_calibration", SELECTOR_ROLE, root=root):
+        if path.name.endswith(f".{report_id}.json"):
+            gate["model"] = json.loads(path.read_text(encoding="utf-8")).get("model")
+    if gate["model"] != agent_model:
+        gate["why_not"] = (
+            f"calibration report {report_id} measured {gate['model'] or 'no model it names'}, "
+            f"and this arm's selector ran on {agent_model}"
+        )
+        return gate
+    gate["opens"] = True
+    return gate
+
+
 def selector_arm_key(strategy: str, config: Mapping[str, Any]) -> str:
     """The arm a selector number belongs to: strategy, generator and N.
 
@@ -1078,6 +1105,7 @@ def _candidate_rows(root: Path, sources: Sequence[Source]) -> list[dict[str, Any
             )
             selection = measure_selection(records, expected, world=world)
             arm = selector_arm_key(metrics.strategy, dict(provenance.strategy_config))
+            gate = calibration_gate(arm, provenance.agent_model, root=root)
             rows.append(
                 {
                     "archive": source.archive,
@@ -1124,7 +1152,13 @@ def _candidate_rows(root: Path, sources: Sequence[Source]) -> list[dict[str, Any
                     ],
                     "selector_uncertainty": selection.uncertainty,
                     "selector_was_right": selection.uncertainty_was_right,
-                    "calibration_report_id": calibration_report_for(arm),
+                    # The report that vouches for these numbers: registered for the arm AND
+                    # made on the model this run's selector ran on. A registered report on
+                    # another model vouches for nothing and is named in ``calibration_refused``.
+                    "calibration_report_id": gate["report_id"] if gate["opens"] else None,
+                    "calibration_refused": (
+                        "" if gate["opens"] or gate["report_id"] is None else gate["why_not"]
+                    ),
                 }
             )
     return rows
@@ -1237,8 +1271,9 @@ def _pass_at_k(root: Path, sources: Sequence[Source]) -> dict[str, Any]:
 SELECTOR_GATE_RULE: Final[str] = (
     "plan 02:243 — NO SELECTOR NUMBER IS REPORTED BEFORE ITS CALIBRATION REPORT "
     "EXISTS. Every selected@k, oracle gap and selector-uncertainty value below is "
-    "withheld unless its arm has an id in research_report.CALIBRATION_REPORTS, and "
-    "each row says which case it is in. An uncalibrated selector's confidence is a "
+    "withheld unless its arm has an id in research_report.CALIBRATION_REPORTS whose "
+    "report measured the model that run's selector was called on, and each row says "
+    "which case it is in. An uncalibrated selector's confidence is a "
     "number whose scale nobody has checked, and an oracle gap read beside it would "
     "attribute to selection whatever the miscalibration did."
 )
@@ -1271,17 +1306,19 @@ def _selector_number(row: dict[str, Any]) -> dict[str, Any]:
 
     The generation half (``pass@k``, the duplicate rates) is NOT gated — it measures
     the generator. Only statements about the SELECTOR are withheld, each replaced by a
-    sentence rather than by ``null``.
+    sentence rather than by ``null``; a report refused for its model is named in it.
     """
     if row["calibration_report_id"] is not None or row["selector_calls"] == 0:
         return row
+    refused = row.get("calibration_refused") or ""
+    withheld = f"withheld: {refused} (plan 02:243)" if refused else WITHHELD
     return {
         **row,
-        "selected_at_k": WITHHELD,
-        "oracle_gap_at_k": WITHHELD,
-        "selector_uncertainty": WITHHELD,
-        "selector_was_right": WITHHELD,
-        "selector_decision": WITHHELD,
+        "selected_at_k": withheld,
+        "oracle_gap_at_k": withheld,
+        "selector_uncertainty": withheld,
+        "selector_was_right": withheld,
+        "selector_decision": withheld,
     }
 
 
@@ -1317,14 +1354,41 @@ def _oracle_gap(root: Path, sources: Sequence[Source]) -> dict[str, Any]:
             "(plan 03 § 8) has not run",
             ("pass@k", "a candidate_selector arm"),
         )
-    uncalibrated = sorted({row["arm"] for row in rows if row["calibration_report_id"] is None})
-    if uncalibrated:
+    refused = sorted(
+        {(row["arm"], row["calibration_refused"]) for row in rows if row.get("calibration_refused")}
+    )
+    uncalibrated = sorted(
+        {
+            row["arm"]
+            for row in rows
+            if row["calibration_report_id"] is None and not row.get("calibration_refused")
+        }
+    )
+    if uncalibrated or refused:
+        why: list[str] = []
+        requires: list[str] = []
+        if uncalibrated:
+            why.append(
+                f"{len(uncalibrated)} arm(s) have no calibration report: {', '.join(uncalibrated)}"
+            )
+            requires.append("a calibration report id in research_report.CALIBRATION_REPORTS")
+        if refused:
+            why.append(
+                f"{len(refused)} registered report(s) are refused for their model — "
+                + "; ".join(f"{arm}: {reason}" for arm, reason in refused)
+            )
+            requires.append(
+                "a calibration report made on the model the arm's selector ran on "
+                "(make judge-calibration JUDGE=candidate_selector MODEL_ROLE=benchmark)"
+            )
         return _with_exclusions(
             _not_measurable(
                 "oracle_gap@k = pass@k − selected@k (plan 03 § 7.3)",
-                f"{len(rows)} selector row(s) are in scope and {len(uncalibrated)} arm(s) "
-                f"have no calibration report: {', '.join(uncalibrated)}. " + SELECTOR_GATE_RULE,
-                ("a calibration report id in research_report.CALIBRATION_REPORTS",),
+                f"{len(rows)} selector row(s) are in scope and "
+                + " and ".join(why)
+                + ". "
+                + SELECTOR_GATE_RULE,
+                tuple(requires),
             ),
             excluded,
         )

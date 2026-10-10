@@ -34,9 +34,10 @@ from incident_commander.llm.client import LLMError, LLMResult
 class FakeJudgeClient:
     """Structural ``LLMClientProtocol`` fake, scripted per rendered question.
 
-    ``answers`` maps a user message to its payloads, in order. ``calls`` and
-    ``temperatures`` record what was asked, so a test can ASSERT that the calibration
-    went through the real prompt and sent no sampling parameter (ADR 0048, O-24).
+    ``answers`` maps a user message to its payloads, in order. ``calls``, ``temperatures``
+    and ``models`` record what was asked, so a test can ASSERT that the calibration went
+    through the real prompt, sent no sampling parameter (ADR 0048, O-24) and asked each
+    leg on the model it should have (WO-R3-364).
     """
 
     def __init__(self, answers: Mapping[str, Sequence[Mapping[str, Any]]]) -> None:
@@ -52,6 +53,7 @@ class FakeJudgeClient:
         self._served: dict[str, int] = dict.fromkeys(self._answers, 0)
         self.calls: list[tuple[str, str]] = []
         self.temperatures: list[float | None] = []
+        self.models: list[str] = []
 
     def call[T: BaseModel](
         self,
@@ -66,6 +68,7 @@ class FakeJudgeClient:
     ) -> LLMResult[T]:
         self.calls.append((system_prompt, user_message))
         self.temperatures.append(temperature)
+        self.models.append(model)
         question = self._question(user_message)
         queue = self._answers.get(question) if question is not None else None
         if question is None or queue is None:

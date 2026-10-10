@@ -47,14 +47,9 @@ _RECORDED_AT: Final[datetime] = datetime(2026, 9, 17, 12, 0, 0, tzinfo=UTC)
 _REPLAY_AT: Final[datetime] = datetime(2026, 9, 28, 9, 30, 0, tzinfo=UTC)
 
 #: Output fields a platform pin made REQUIRED that a scenario's NEWEST recording still lacks, per
-#: tool, each naming the pin; superseded older recordings stay committed and may lack them too.
-#: `slow_query_threshold_ms`: v0.6.11 (plat #218), waived only for `_NOT_YET_RE_RECORDED`.
-_FIELDS_A_LATER_PIN_MADE_REQUIRED: Final[Mapping[str, frozenset[str]]] = {
-    "get_postgres_health": frozenset({"slow_query_threshold_ms"}),
-}
-#: Worlds whose newest recording predates that pin: WO-R3-294 re-recorded the rest on v0.6.23 and
-#: skipped these after two refused attempts. Re-record them, then empty both (the guard demands it).
-_NOT_YET_RE_RECORDED: Final[frozenset[str]] = frozenset({"jobs_not_progressing_outbox_stall"})
+#: tool, each naming the pin. Empty since WO-R3-294 re-recorded all 17 worlds on v0.6.23; older
+#: recordings stay committed and short of v0.6.11's `slow_query_threshold_ms`, superseded.
+_FIELDS_A_LATER_PIN_MADE_REQUIRED: Final[Mapping[str, frozenset[str]]] = {}
 
 
 # --------------------------------------------------------------------------
@@ -708,30 +703,18 @@ class TestTheCommittedRecordingsAllReplay:
         """A re-base that produced an unparseable payload would escalate every run.
 
         Checked on each scenario's NEWEST recording, the one a replay resolves; a field a later
-        pin made required is waived only for a world in ``_NOT_YET_RE_RECORDED``.
+        pin made required is waived only through ``_FIELDS_A_LATER_PIN_MADE_REQUIRED``.
         """
         newest = _newest_per_scenario()
         assert newest, "no committed recording to check"
         for path in newest:
             for tool, names in _missing_required_fields(path).items():
-                waived: frozenset[str] = frozenset()
-                if path.parent.name in _NOT_YET_RE_RECORDED:
-                    waived = _FIELDS_A_LATER_PIN_MADE_REQUIRED.get(tool, frozenset())
+                waived = _FIELDS_A_LATER_PIN_MADE_REQUIRED.get(tool, frozenset())
                 assert names <= waived, f"{path.name}: {tool} lacks required {sorted(names)}"
 
-    def test_the_waiver_names_exactly_the_worlds_not_yet_re_recorded(self) -> None:
-        """WO-R3-294's exit condition is an empty waiver; until then it is exactly this debt.
-
-        Re-recording the last world reds this test until both sets are emptied.
-        """
-        short = {
-            path.parent.name for path in _newest_per_scenario() if _missing_required_fields(path)
-        }
-        assert short == _NOT_YET_RE_RECORDED
-        assert bool(_FIELDS_A_LATER_PIN_MADE_REQUIRED) == bool(_NOT_YET_RE_RECORDED)
-        for tool, fields in _FIELDS_A_LATER_PIN_MADE_REQUIRED.items():
-            required = set(TOOL_REGISTRY[tool].output_model.model_json_schema()["required"])
-            assert fields <= required, f"{tool}: {fields - required} are not required any more"
+    def test_the_waiver_is_empty(self) -> None:
+        """WO-R3-294's exit condition: every newest recording carries every required field."""
+        assert _FIELDS_A_LATER_PIN_MADE_REQUIRED == {}
 
     def test_a_recording_short_of_a_required_field_is_superseded(self) -> None:
         """Older recordings stay committed (invariant 9); one that no longer parses is history.
@@ -743,8 +726,7 @@ class TestTheCommittedRecordingsAllReplay:
         short = [path for path in _committed() if _missing_required_fields(path)]
         assert short, "no committed recording is short of a required field"
         for path in short:
-            if path.parent.name not in _NOT_YET_RE_RECORDED:
-                assert path not in newest, f"{path.name} is its scenario's newest recording"
+            assert path not in newest, f"{path.name} is its scenario's newest recording"
 
     def test_the_rebase_moved_something_somewhere(self) -> None:
         """Otherwise every assertion above would hold against a no-op re-base."""

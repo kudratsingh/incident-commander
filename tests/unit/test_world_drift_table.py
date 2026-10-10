@@ -24,7 +24,7 @@ _TABLE_20261008 = (
     _REPO / "evals/reports/world-drift/world_drift_table.20261008T160827Z.86b59809ce24.json"
 )
 _TABLE_20261010 = (
-    _REPO / "evals/reports/world-drift/world_drift_table.20261010T091619Z.72896d36b9ef.json"
+    _REPO / "evals/reports/world-drift/world_drift_table.20261010T094237Z.899a671c44d0.json"
 )
 
 _CMD = 'PLATFORM_COMPOSE="demo/compose.yml" uv run python -m evals.world_drift --world '
@@ -233,7 +233,7 @@ def test_the_committed_2026_10_08_table_has_no_clean_recording() -> None:
 
 
 def test_the_committed_2026_10_10_table_is_the_re_recorded_worlds() -> None:
-    """WO-R3-294: 16 worlds re-recorded on v0.6.23, read back from their own drift logs."""
+    """WO-R3-294: all 17 worlds re-recorded on v0.6.23, read back from their own drift logs."""
     table = json.loads(_TABLE_20261010.read_text())
     assert len(table["rows"]) == 17
     assert (table["counts"][CLEAN], table["counts"][DRIFT]) == (9, 8)

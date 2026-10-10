@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from datetime import datetime
+from enum import StrEnum
 from pathlib import Path
 from typing import Any, Final, Literal
 from uuid import UUID
@@ -57,6 +58,10 @@ class GetConsumerLagOutput(BaseModel):
     measured_at: datetime | None = None
     age_seconds: int | None = None
     recent_samples: list[LagSample] = Field(default_factory=list)
+    # v0.6.24 (plat #243, platform ADR 0041): when the group's consumer last asked Kafka for work.
+    # Null on the static groups and when no poll time is on record, which is unknown, not evidence.
+    last_poll_at: datetime | None = None
+    last_poll_age_seconds: int | None = None
 
 
 # --- get_dag_state -------------------------------------------------------
@@ -279,6 +284,46 @@ class GetOutboxStatusOutput(BaseModel):
     relay_heartbeat_known: bool
     relay_heartbeat_unknown_reason: str | None = None
     relay_tick_interval_s: float
+
+
+# --- get_control_loops (read) --------------------------------------------
+#
+# A read-only tool, no arguments (v0.6.24, plat #243, platform ADR 0041): every background loop
+# of the worker, in a fixed order. `paused` null and `unknown_reason` set mean nothing was read.
+# No class docstrings below: they would land in the schema compared against the snapshot.
+
+
+class ControlLoopName(StrEnum):
+    OUTBOX_RELAY = "outbox_relay"
+    DELAYED_RETRY_PROMOTE = "delayed_retry_promote"
+    DLQ_REPLAY_PROMOTE = "dlq_replay_promote"
+    RESUME_UNBLOCKED_WAITING = "resume_unblocked_waiting"
+    STALE_PENDING_BACKSTOP = "stale_pending_backstop"
+    STALE_RUNNING_SWEEP = "stale_running_sweep"
+    LEASE_RENEWAL = "lease_renewal"
+    SLO_EVALUATION = "slo_evaluation"
+    METRICS = "metrics"
+    DIGEST = "digest"
+    IDEMPOTENCY_REAPER = "idempotency_reaper"
+
+
+class ControlLoopState(BaseModel):
+    model_config = ConfigDict(extra="ignore", frozen=True)
+    # Field ORDER matters: `test_registry_matches_snapshot.py` compares it to the snapshot's.
+    name: ControlLoopName
+    paused: bool | None
+    paused_expires_in_seconds: int | None = None
+    tick_interval_seconds: float | None = None
+    last_run_at: datetime | None = None
+    last_run_age_seconds: float | None = None
+
+
+class GetControlLoopsOutput(BaseModel):
+    model_config = ConfigDict(extra="ignore", frozen=True)
+    measured_at: datetime
+    loops: list[ControlLoopState]
+    total: int
+    unknown_reason: str | None = None
 
 
 # --- get_slo_status (read) -----------------------------------------------
@@ -826,6 +871,7 @@ TOOL_REGISTRY: Final[dict[str, ToolSpec]] = {
     "get_incident": ToolSpec("get_incident", GetIncidentInput, GetIncidentOutput),
     "get_outbox_status": ToolSpec("get_outbox_status", _EmptyInput, GetOutboxStatusOutput),
     "get_circuit_breakers": ToolSpec("get_circuit_breakers", _EmptyInput, GetCircuitBreakersOutput),
+    "get_control_loops": ToolSpec("get_control_loops", _EmptyInput, GetControlLoopsOutput),
     "get_slo_status": ToolSpec("get_slo_status", _EmptyInput, GetSloStatusOutput),
     "get_postgres_health": ToolSpec("get_postgres_health", _EmptyInput, PostgresHealthOutput),
     "get_redis_health": ToolSpec("get_redis_health", _EmptyInput, RedisHealthOutput),

@@ -33,8 +33,11 @@ NOT_RECORDED: Final[str] = "not_recorded"
 #: the question is "is this a clock of the world the agent sees". ONE rigid offset for the
 #: whole document, so a recording cannot contradict itself (plan 02 § 187).
 SHIFTED_CLOCK_FIELDS: Final[Mapping[str, frozenset[str]]] = {
-    # v0.6.7 (plat #204): when the metrics loop took THIS number, and the previous few.
-    "get_consumer_lag": frozenset({"measured_at", "recent_samples.measured_at"}),
+    # v0.6.7 (plat #204): when the metrics loop took THIS number, and the previous few. v0.6.24
+    # (plat #243): `last_poll_at` is the worker's clock, shifted by the same offset.
+    "get_consumer_lag": frozenset({"measured_at", "recent_samples.measured_at", "last_poll_at"}),
+    # v0.6.24 (plat #243): the answering process's clock and each loop's own pass record.
+    "get_control_loops": frozenset({"measured_at", "loops.last_run_at"}),
     "get_dag_state": frozenset({"nodes.created_at"}),
     "get_deploy_history": frozenset({"entries.deployed_at"}),
     "get_incident": frozenset({"fired_at", "resolved_at"}),
@@ -88,7 +91,16 @@ SHIFTED_CLOCK_FIELDS: Final[Mapping[str, frozenset[str]]] = {
 #: recording session to an instant, so a held duration can be out by the session's length.
 HELD_DURATION_FIELDS: Final[Mapping[str, frozenset[str]]] = {
     "get_cache_key_info": frozenset({"ttl_seconds"}),
-    "get_consumer_lag": frozenset({"age_seconds"}),
+    "get_consumer_lag": frozenset({"age_seconds", "last_poll_age_seconds"}),
+    # v0.6.24 (plat #243). `tick_interval_seconds` is configuration, held like
+    # `relay_tick_interval_s`; a held pause expiry is the `get_dag_state` rule.
+    "get_control_loops": frozenset(
+        {
+            "loops.paused_expires_in_seconds",
+            "loops.tick_interval_seconds",
+            "loops.last_run_age_seconds",
+        }
+    ),
     "get_dag_state": frozenset({"paused_expires_in_seconds"}),
     # v0.6.9 spells durations `_age_s`, `_s` and `seconds_since_…`; five were invisible to the
     # coverage walk on `_seconds` alone. `relay_tick_interval_s` is configuration, listed

@@ -22,6 +22,9 @@ _EXPECTED_READ_TOOLS: Final[frozenset[str]] = frozenset(
     {
         "get_cache_key_info",
         "get_consumer_lag",
+        # The 17th, on the v0.6.24 re-pin (WO-R3-371, platform ADR 0041): whether each of
+        # the worker's background loops is paused, and when it last ran.
+        "get_control_loops",
         "get_dag_state",
         "get_deploy_history",
         "get_incident",
@@ -75,8 +78,14 @@ _EXPECTED_READ_TOOLS: Final[frozenset[str]] = frozenset(
 #: runs it at 5 s), so the old text's `every ~60s` / `90s TTL` / `up to a minute stale`
 #: would have been three false promises, and the new text points at `age_seconds` and the
 #: gaps between `recent_samples` instead of naming a number (platform ADR 0039).
+#: v0.6.24 (WO-R3-371, platform ADR 0041) moves it for TWO causes, and they add up exactly:
+#: 29,452 → 34,267, +4,815 characters. `get_control_loops` joins the read surface (16 → 17)
+#: and its entry is 3,687 characters (description 3,394 plus its input schema line); and
+#: `get_consumer_lag` was re-described, 3,728 → 4,852 (+1,124), plus 4 characters of
+#: indentation for the one paragraph it gained. 3,687 + 1,124 + 4 = 4,815. Its two new
+#: output fields (`last_poll_at`, `last_poll_age_seconds`) are not here, by the v0.6.18 rule.
 _EXPECTED_TOOL_BLOCK_HASH: Final[str] = (
-    "217d6dbb9a57ae88a335c9742bb49ad08b5278fbf231edd85dfd08130bb0027a"
+    "df460a8dcfff014bef4f1b7706387e8669db8c8b43ed32198a7eaa6b0096b28f"
 )
 
 

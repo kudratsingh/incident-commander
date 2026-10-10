@@ -9,8 +9,10 @@ and resets afterwards, or the whole fault would read as drift. Zero model tokens
 but it touches the shared world, so it needs the owner's go and must not follow a
 mutating check. Drift means "the world moved", not "the recording is wrong": three
 readings (a release, a fixture-pack change, a dirty world) and a fourth that no
-reset undoes — see ``_HISTORY`` (WO-R3-271, ADR 0050). Exit codes are the
-recorder's, plus 1 for drift.
+reset undoes — see ``_HISTORY`` (WO-R3-271, ADR 0050). Movement that two truthful
+readings of one world always show is compared by the rule ``fixture_drift.HONEST_MOVEMENT``
+names for it (WO-R3-366). Exit codes are the recorder's, plus 1 for drift and 8 when a
+breaker record the recording read has expired on an idle stack (no verdict).
 """
 
 from __future__ import annotations
@@ -37,7 +39,18 @@ from evals.dossier import (
     run_reset,
     seed_chaos,
 )
-from evals.fixture_drift import CannedCall, Drift, compare
+from evals.fixture_drift import (
+    HONEST_MOVEMENT,
+    RULE_MEANING,
+    RULE_MINTED_ID,
+    CannedCall,
+    Drift,
+    Movement,
+    ObservedPair,
+    breaker_record_expired,
+    compare,
+    observed_pair,
+)
 from evals.fixture_drift import _policy_path as _fixture_policy_path
 from evals.graders.deterministic import (
     EvidenceFieldExpectation,
@@ -73,6 +86,11 @@ KIND_UNANSWERED: Final[str] = "live_call_unanswered"
 KIND_MISSING_KEY: Final[str] = "recorded_call_missing_live"
 KIND_UNREADABLE: Final[str] = "payload_unreadable"
 KIND_HISTORY_CLAIM: Final[str] = "history_claim_broken"
+
+#: A recorded breaker record the live platform no longer keeps (``fixture_drift.
+#: breaker_record_expired``): neither drift nor a match, so the check refuses its verdict.
+EXIT_RECORD_EXPIRED: Final[int] = 8
+RECORD_EXPIRED_MESSAGE: Final[str] = "breaker record expired — send warm-up traffic and re-check"
 
 
 # --------------------------------------------------------------------------
@@ -214,13 +232,15 @@ def _claim_paths(claim: EvidenceFieldExpectation) -> set[str]:
 
 
 def rechecked_claims(scenario: Scenario | None) -> tuple[HistoryClaim, ...]:
-    """Every claim this scenario makes about a path ``_HISTORY`` forgives.
+    """Every claim this scenario makes about a path this check compares by less than value.
 
-    Derived, never listed, so a new claim is covered the moment it lands
-    (``dossier.derive_probes``' reason). ``which: sum`` claims are absent because
-    ``sum`` is a total across a RUN and one reading is not a run; ``shape_only_paths``
-    un-forgives their paths instead, which is the fail-safe direction. Preconditions
-    are absent because ``main`` already establishes them live and exits 7.
+    ``_HISTORY``'s paths, and ``fixture_drift.HONEST_MOVEMENT``'s except minted ids (that
+    rule still pins every id that is not random, and the claims that select a row by id
+    name the seeder's ids). Derived, never listed, so a new claim is covered the moment it
+    lands (``dossier.derive_probes``' reason). ``which: sum`` claims are absent because
+    ``sum`` is a total across a RUN and one reading is not a run; ``shape_only_paths`` and
+    ``honest_paths`` un-forgive their paths instead, which is the fail-safe direction.
+    Preconditions are absent because ``main`` already establishes them live and exits 7.
     """
     if scenario is None:
         return ()
@@ -229,8 +249,12 @@ def rechecked_claims(scenario: Scenario | None) -> tuple[HistoryClaim, ...]:
         if claim.which == "sum":
             continue
         for tool in claim.tools:
-            forgiven = _HISTORY.get(tool, {})
-            for path in sorted(_claim_paths(claim) & set(forgiven)):
+            forgiven = set(_HISTORY.get(tool, {})) | {
+                path
+                for path, move in honest_paths(tool, scenario).items()
+                if move.rule != RULE_MINTED_ID
+            }
+            for path in sorted(_claim_paths(claim) & forgiven):
                 found.append(HistoryClaim(tool=tool, path=path, claim=claim))
     return tuple(found)
 
@@ -243,14 +267,31 @@ def shape_only_paths(tool: str, scenario: Scenario | None) -> frozenset[str]:
     claim on an audit path makes the check stricter rather than hollow.
     """
     declared = frozenset(_HISTORY.get(tool, {}))
+    return declared - _unrecheckable(tool, scenario)
+
+
+def honest_paths(tool: str, scenario: Scenario | None) -> dict[str, Movement]:
+    """``fixture_drift.HONEST_MOVEMENT`` for this tool, as this scenario may use it.
+
+    Minus the scenario's own ``volatile:`` paths (its declaration is the weaker claim, and
+    it is the owner's) and minus every path a ``which: sum`` claim reads, as for history.
+    """
+    declared = HONEST_MOVEMENT.get(tool, {})
     if scenario is None:
-        return declared
-    unrecheckable: set[str] = set()
+        return dict(declared)
+    left_out = scenario.volatile_paths(tool) | _unrecheckable(tool, scenario)
+    return {path: move for path, move in declared.items() if path not in left_out}
+
+
+def _unrecheckable(tool: str, scenario: Scenario | None) -> set[str]:
+    """Paths a ``which: sum`` claim reads: one reading cannot answer it, so keep them strict."""
+    found: set[str] = set()
+    if scenario is None:
+        return found
     for claim in leaf_claims(scenario.expectation.expected_evidence_fields):
-        if claim.which != "sum" or tool not in claim.tools:
-            continue
-        unrecheckable |= _claim_paths(claim)
-    return declared - unrecheckable
+        if claim.which == "sum" and tool in claim.tools:
+            found |= _claim_paths(claim)
+    return found
 
 
 @dataclass(frozen=True)
@@ -275,6 +316,10 @@ class DriftReport:
     #: was compared" — ADR 0047 § 2's argument, applied to a check.
     shape_only: tuple[str, ...] = ()
     rechecked: tuple[str, ...] = ()
+    #: ``<tool>.<path> [rule]`` for every value compared by a ``HONEST_MOVEMENT`` rule, and
+    #: every row ``fixture_drift.observed_pair`` set aside. Printed for the same reason.
+    honest: tuple[str, ...] = ()
+    set_aside: tuple[str, ...] = ()
 
     @property
     def clean(self) -> bool:
@@ -311,6 +356,64 @@ def _payload(result: Mapping[str, Any]) -> dict[str, Any] | None:
     return payload
 
 
+def _relaxed(tool: str, scenario: Scenario | None) -> frozenset[str]:
+    """What a row's identity leaves out besides the module tables: history, own volatile."""
+    own = frozenset() if scenario is None else scenario.volatile_paths(tool)
+    return shape_only_paths(tool, scenario) | own
+
+
+def observed_pairs(
+    recording: RecordedWorld, live: Sequence[RecordedCall], *, scenario: Scenario | None = None
+) -> list[tuple[RecordedCall, ObservedPair]]:
+    """Each recorded call with a readable live answer, rows only one reading holds set aside."""
+    live_by_key = {call.key: call for call in live}
+    pairs: list[tuple[RecordedCall, ObservedPair]] = []
+    for recorded in recording.calls:
+        found = live_by_key.get(recorded.key)
+        recorded_payload = _payload(recorded.result)
+        live_payload = None if found is None else _payload(found.result)
+        if recorded_payload is None or live_payload is None:
+            continue
+        pair = observed_pair(
+            recorded.tool,
+            recorded.arguments,
+            recorded_payload,
+            live_payload,
+            relaxed=_relaxed(recorded.tool, scenario),
+        )
+        pairs.append((recorded, pair))
+    return pairs
+
+
+def set_aside_notes(
+    recording: RecordedWorld, live: Sequence[RecordedCall], *, scenario: Scenario | None = None
+) -> tuple[str, ...]:
+    """Every row ``observed_pair`` set aside, said once per call."""
+    return tuple(
+        note
+        for _call, pair in observed_pairs(recording, live, scenario=scenario)
+        for note in pair.notes
+    )
+
+
+def expired_records(recording: RecordedWorld, live: Sequence[RecordedCall]) -> tuple[str, ...]:
+    """One line per breaker reading whose record the platform no longer keeps (24 h idle).
+
+    ``fixture_drift.breaker_record_expired`` decides; this names what was read.
+    """
+    found: list[str] = []
+    for recorded, pair in observed_pairs(recording, live):
+        if recorded.tool != "get_circuit_breakers":
+            continue
+        if breaker_record_expired(pair.recorded, pair.live):
+            rows = pair.recorded.get("breakers") or []
+            found.append(
+                f"{recorded.tool}: the recording read {len(rows)} breaker(s); the live "
+                f"reading has none, and says why: {pair.live.get('unknown_reason')}"
+            )
+    return tuple(found)
+
+
 def drift_between(
     recording: RecordedWorld, live: Sequence[RecordedCall], *, scenario: Scenario | None = None
 ) -> list[Drift]:
@@ -320,8 +423,9 @@ def drift_between(
     call. Four findings the payload walk cannot make: ``live_call_unanswered``,
     ``recorded_call_missing_live``, ``payload_unreadable`` (skipping it would make an
     unparseable answer look identical) and ``history_claim_broken`` — a scenario claim
-    on a forgiven path that the live reading no longer satisfies. Pure; ``main`` is
-    the live half.
+    on a forgiven path that the live reading no longer satisfies. The walk runs with this
+    tool's ``HONEST_MOVEMENT`` rules on, over the pair ``observed_pair`` returns. Pure;
+    ``main`` is the live half.
     """
     live_by_key = {call.key: call for call in live}
     claims_by_tool: dict[str, list[HistoryClaim]] = {}
@@ -356,13 +460,20 @@ def drift_between(
                 )
             )
             continue
+        pair = observed_pair(
+            recorded.tool,
+            recorded.arguments,
+            recorded_payload,
+            live_payload,
+            relaxed=_relaxed(recorded.tool, scenario),
+        )
         drifts.extend(
             compare(
                 CannedCall(
                     scenario=recording.scenario,
                     tool=recorded.tool,
                     arguments=recorded.arguments,
-                    payload=recorded_payload,
+                    payload=pair.recorded,
                     chaos_seeded=(
                         recording.world.chaos_seeded
                         if scenario is None
@@ -372,8 +483,9 @@ def drift_between(
                         frozenset() if scenario is None else scenario.volatile_paths(recorded.tool)
                     ),
                 ),
-                live_payload,
+                pair.live,
                 shape_only=shape_only_paths(recorded.tool, scenario),
+                honest=honest_paths(recorded.tool, scenario),
             )
         )
         # What the scenario grades on a forgiven path, asked of the LIVE reading.
@@ -426,6 +538,11 @@ def build_report(
         for call in recording.calls
         for path in shape_only_paths(call.tool, scenario)
     )
+    honest = sorted(
+        f"{call.tool}.{path} [{move.rule}: {RULE_MEANING[move.rule]}]"
+        for call in recording.calls
+        for path, move in honest_paths(call.tool, scenario).items()
+    )
     return DriftReport(
         world=world,
         scenario=recording.scenario,
@@ -436,6 +553,8 @@ def build_report(
         live_findings=tuple(live_findings),
         shape_only=tuple(dict.fromkeys(forgiven)),
         rechecked=tuple(entry.describe() for entry in rechecked_claims(scenario)),
+        honest=tuple(dict.fromkeys(honest)),
+        set_aside=set_aside_notes(recording, live_world.calls, scenario=scenario),
     )
 
 
@@ -452,8 +571,8 @@ def render(report: DriftReport) -> str:
     if report.clean:
         lines.append(
             "DRIFT: none — every recorded call still answers the same, allowing for the "
-            "fields `fixture_drift._VOLATILE` declares volatile and the history paths "
-            "below. A recorded result from this world may be reported."
+            "fields `fixture_drift._VOLATILE` declares volatile and the history and "
+            "honest-movement paths below. A recorded result from this world may be reported."
         )
     else:
         lines.append(f"DRIFT: {len(report.drifts)} disagreement(s):")
@@ -477,9 +596,22 @@ def render(report: DriftReport) -> str:
         lines.extend(f"  ~ {path}" for path in report.shape_only)
     else:
         lines.append("DRIFT: history — no path in this recording is compared by shape only.")
+    if report.honest:
+        lines.append(
+            f"DRIFT: honest movement — {len(report.honest)} path(s) compared by the rule each "
+            "names, not by value: two truthful readings of one world always differ there "
+            "(WO-R3-366). `fixture_drift.HONEST_MOVEMENT` says why, per path."
+        )
+        lines.extend(f"  ≈ {path}" for path in report.honest)
+    if report.set_aside:
+        lines.append(
+            f"DRIFT: set aside — {len(report.set_aside)} group(s) of rows only one of the two "
+            "readings can hold (`fixture_drift.observed_pair`), not compared:"
+        )
+        lines.extend(f"  > {note}" for note in report.set_aside)
     if report.rechecked:
         lines.append(
-            f"DRIFT: history — {len(report.rechecked)} of this scenario's own claim(s) read a "
+            f"DRIFT: re-checked — {len(report.rechecked)} of this scenario's own claim(s) read a "
             "path above, so they were re-checked against the live reading instead:"
         )
         lines.extend(f"  ? {claim}" for claim in report.rechecked)
@@ -645,6 +777,26 @@ def check_world(world: str | None) -> tuple[int, DriftReport | None]:
         calls, readings, failures = record_calls(read_client, probes)
         for failure in failures:
             print(f"DRIFT: unanswered — {failure.tool}: {failure.detail}")
+
+        expired = expired_records(recording, calls)
+        if expired:
+            # Not drift and not a match: the platform keeps a breaker's record for 24 h after
+            # the breaker last reported, so an idle stack reads no breaker at all. Nothing is
+            # compared until traffic through the breaker re-publishes it.
+            print(f"DRIFT FAIL (record expired): {RECORD_EXPIRED_MESSAGE}")
+            for line in expired:
+                print(f"  - {line}")
+            print(
+                "No verdict: a stack with no traffic through a breaker for 24 hours reads no "
+                "record for it, which is the stack's idle clock, not this world. Send a "
+                "warm-up (`make traffic COUNT=5`, endpoint calls on, then stop it), "
+                "`make eval-reset`, and run this check again."
+            )
+            if seeding_needed:
+                _reset_and_audit(read_client)
+            else:
+                print("DRIFT: nothing was seeded, so nothing was reset.")
+            return EXIT_RECORD_EXPIRED, None
 
         # The world document the recorder would have written; ``world_fingerprint``
         # ignores the session provenance, so the two compare without a file.

@@ -33,7 +33,13 @@ from evals.dossier import (
     EXIT_SELECTION,
 )
 from evals.recorder import EXIT_PRECONDITION
-from evals.world_drift import DriftReport, _reset_and_audit, check_world
+from evals.world_drift import (
+    EXIT_RECORD_EXPIRED,
+    RECORD_EXPIRED_MESSAGE,
+    DriftReport,
+    _reset_and_audit,
+    check_world,
+)
 from incident_commander.config import Settings
 from incident_commander.tools.mcp_client import make_client
 
@@ -53,6 +59,7 @@ EXIT_REASONS: Final[dict[int, str]] = {
     EXIT_SEEDING: "seeding: a fault hook was refused",
     EXIT_RESET: "the reset after the check failed",
     EXIT_PRECONDITION: "precondition: the live world never reached the recording's premise",
+    EXIT_RECORD_EXPIRED: f"record expired: {RECORD_EXPIRED_MESSAGE}",
 }
 
 _PIN_RE: Final[re.Pattern[str]] = re.compile(r"incident-platform:(v[0-9][0-9.]*)@")
@@ -69,6 +76,11 @@ _CHECKOUT_RE: Final[re.Pattern[str]] = re.compile(r"/\S*/(?:incident-commander|w
 _MAKE_EXIT_RE: Final[re.Pattern[str]] = re.compile(
     r"^make: \*\*\* \[world-drift\] Error (\d+)$", re.M
 )
+#: A check deliberately not run, written by the person building the table from logs:
+#: ``DRIFT NOT RUN (<scenario>): <why>``, optionally with the ``DRIFT: recording`` line of the
+#: recording it would have checked. Read as a NOT RUN row, so a table can carry every world
+#: while saying which ones were not checked and why (WO-R3-366: the INC-007 window).
+_NOT_RUN_RE: Final[re.Pattern[str]] = re.compile(r"^DRIFT NOT RUN \((\S+)\): (.*)$", re.M)
 
 
 @dataclass(frozen=True)
@@ -166,15 +178,21 @@ def run_all(
 
 def row_from_log(text: str, *, checked_at: str) -> DriftRow:
     """One ``make world-drift`` log, read back into a row. Refuses a log that holds no verdict."""
-    world = _WORLD_RE.search(text)
-    if world is None:
-        raise ValueError("not a `make world-drift` log: no `evals.world_drift --world` line")
     recording_line = _RECORDING_RE.search(text)
     recording = (
         None
         if recording_line is None
         else Path(recording_line.group(1)).name.removesuffix(".json").rsplit(".", 1)[-1]
     )
+    not_run = _NOT_RUN_RE.search(text)
+    if not_run is not None:
+        # Nothing ran, so no process exited: 0, and the verdict says the rest.
+        scenario, why = not_run.group(1), not_run.group(2)
+        output = _strip_checkout(text)
+        return DriftRow(scenario, recording, NOT_RUN, EXIT_OK, None, why, checked_at, output)
+    world = _WORLD_RE.search(text)
+    if world is None:
+        raise ValueError("not a `make world-drift` log: no `evals.world_drift --world` line")
     make_exit = _MAKE_EXIT_RE.search(text)
     count = _COUNT_RE.search(text)
     refusal = _REFUSAL_RE.search(text)
@@ -328,7 +346,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.write:
         for path in write(doc):
             print(f"wrote {path.relative_to(REPO_ROOT)}")
-    if any(row.verdict == NOT_RUN for row in rows):
+    if any(row.verdict == NOT_RUN and row.exit_code == EXIT_RESET for row in rows):
         return EXIT_RESET
     return EXIT_OK if all(row.verdict == CLEAN for row in rows) else 1
 

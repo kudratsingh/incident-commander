@@ -53,6 +53,11 @@ _NON_SETTINGS_TOKENS: Final[frozenset[str]] = frozenset(
         "EXCLUDED_DESCRIPTION_PREFIXES",
         # The agent principal's scope table, scripts/bootstrap_agent_token.py
         "SERVICE_ACCOUNT_SCOPES",
+        # The world-drift check's honest-movement rules, evals/fixture_drift.py (WO-R3-366)
+        "HONEST_MOVEMENT",
+        # A platform-side constant, not an env var: how long a breaker's state record lives
+        # (backend/app/core/breaker_state.py), named in the runbook's drift-check section
+        "BREAKER_STATE_TTL_SECONDS",
         # Environment variables / make flags consumed outside Settings.
         "CHAOS_ENABLED",  # platform-side chaos gate (demo/compose.yml)
         # Platform-side SLO evaluator interval. v0.6.4 made the evaluator skip the seeded

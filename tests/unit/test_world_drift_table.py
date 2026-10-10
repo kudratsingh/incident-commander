@@ -26,6 +26,9 @@ _TABLE_20261008 = (
 _TABLE_20261010 = (
     _REPO / "evals/reports/world-drift/world_drift_table.20261010T094237Z.899a671c44d0.json"
 )
+_TABLE_WO_R3_366 = (
+    _REPO / "evals/reports/world-drift/world_drift_table.20261010T110003Z.aa740648de40.json"
+)
 
 _CMD = 'PLATFORM_COMPOSE="demo/compose.yml" uv run python -m evals.world_drift --world '
 _FILE = "dlq_backlog/dlq_backlog.20260917T182256Z"
@@ -200,6 +203,47 @@ def test_main_from_logs_exits_1_on_drift_and_0_when_all_clean(
     assert "| `dlq_backlog` |" in capsys.readouterr().out
 
 
+_NOT_RUN_LOG = "\n".join(
+    (
+        "DRIFT NOT RUN (api_latency_db_query): INC-007 window — every api_latency precondition "
+        "refuses until ~09:02 UTC 2026-10-11",
+        "DRIFT: recording  evals/recorded_worlds/api_latency_db_query/"
+        "api_latency_db_query.20261010T082148Z.8c4a32a50d4b.json",
+        "",
+    )
+)
+
+
+def test_a_check_deliberately_not_run_reads_back_as_not_run_with_its_reason() -> None:
+    """WO-R3-366: a table can carry every world while saying which were not checked."""
+    row = world_drift_table.row_from_log(_NOT_RUN_LOG, checked_at="t")
+    assert (row.scenario, row.recording, row.verdict, row.disagreements) == (
+        "api_latency_db_query",
+        "8c4a32a50d4b",
+        NOT_RUN,
+        None,
+    )
+    assert row.detail.startswith("INC-007 window")
+
+
+def test_a_not_run_marker_is_not_a_failed_reset(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Exit 6 means a reset failed mid-loop; a marked world is just not all-clean (1)."""
+    (tmp_path / "a.log").write_text(_CLEAN_LOG)
+    (tmp_path / "b.log").write_text(_NOT_RUN_LOG)
+    assert world_drift_table.main(["--from-logs", str(tmp_path)]) == 1
+    assert "| `api_latency_db_query` | `8c4a32a50d4b` | NOT RUN |" in capsys.readouterr().out
+
+
+def test_an_expired_breaker_record_has_its_own_reason() -> None:
+    from evals.world_drift import EXIT_RECORD_EXPIRED, RECORD_EXPIRED_MESSAGE
+
+    row = world_drift_table.row_of("s", "aaa", EXIT_RECORD_EXPIRED, None, "")
+    assert row.verdict == REFUSED
+    assert row.detail == f"record expired: {RECORD_EXPIRED_MESSAGE}"
+
+
 # --------------------------------------------------------------------------
 # The table as evidence
 # --------------------------------------------------------------------------
@@ -238,7 +282,31 @@ def test_the_committed_2026_10_10_table_is_the_re_recorded_worlds() -> None:
     assert len(table["rows"]) == 17
     assert (table["counts"][CLEAN], table["counts"][DRIFT]) == (9, 8)
     assert table["platform_pin"] == "v0.6.23"
-    assert artifacts.newest("world_drift_table") == _TABLE_20261010
+
+
+def test_the_wo_r3_366_table_is_clean_where_it_was_checked() -> None:
+    """WO-R3-366: 10 worlds checked live with the honest-movement rules, all CLEAN; 7 not run.
+
+    Four api_latency worlds wait for the INC-007 window; three traffic worlds were stopped after
+    the dispatcher_stall check's burst left late dispatches. Every NOT RUN row says why.
+    """
+    table = json.loads(_TABLE_WO_R3_366.read_text())
+    assert len(table["rows"]) == 17
+    assert table["counts"] == {CLEAN: 10, DRIFT: 0, REFUSED: 0, NOT_RUN: 7}
+    assert table["platform_pin"] == "v0.6.23"
+    assert artifacts.newest("world_drift_table") == _TABLE_WO_R3_366
+    not_run = [row for row in table["rows"] if row["verdict"] == NOT_RUN]
+    assert {row["scenario"] for row in not_run} >= {
+        "api_latency_db_query",
+        "api_latency_downstream",
+        "api_latency_healthy_control",
+        "api_latency_redis",
+    }
+    assert all(row["detail"] and row["recording"] for row in not_run)
+    previous = {
+        row["scenario"]: row["recording"] for row in json.loads(_TABLE_20261010.read_text())["rows"]
+    }
+    assert {row["scenario"]: row["recording"] for row in table["rows"]} == previous
 
 
 def test_the_newest_recording_of_each_scenario_is_what_the_loop_checks() -> None:

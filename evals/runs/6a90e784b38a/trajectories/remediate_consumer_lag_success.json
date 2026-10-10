@@ -1,0 +1,521 @@
+{
+  "scenario": "remediate_consumer_lag_success",
+  "incident_id": "9d74e214-1fd4-4c55-a991-e1f753b02647",
+  "checkpoints": [
+    {
+      "schema_version": 3,
+      "incident_id": "9d74e214-1fd4-4c55-a991-e1f753b02647",
+      "state": "triage",
+      "alert": {
+        "lag": 23,
+        "group": "worker-dispatcher",
+        "source": "kafka:consumer_lag",
+        "summary": "worker-dispatcher is 23 messages behind (threshold 20); the group holds its assignment and keeps reporting, so the backlog is real. Measured at 2026-10-10T07:31:28.646377+00:00.",
+        "severity": "critical",
+        "threshold": 20,
+        "fingerprint": "consumer_stalled",
+        "measured_at": "2026-10-10T07:31:28.646377+00:00",
+        "consumer_group": "worker-dispatcher"
+      },
+      "budget": {
+        "max_tool_calls": 13,
+        "tool_calls_used": 0,
+        "max_tokens": 200000,
+        "tokens_used": 0,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.0,
+        "max_usd": "1.00",
+        "usd_used": "0"
+      },
+      "evidence": [],
+      "hypotheses": [],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-10-10T07:31:31.604739Z",
+      "updated_at": "2026-10-10T07:31:31.604739Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "9d74e214-1fd4-4c55-a991-e1f753b02647",
+      "state": "investigating",
+      "alert": {
+        "lag": 23,
+        "group": "worker-dispatcher",
+        "source": "kafka:consumer_lag",
+        "summary": "worker-dispatcher is 23 messages behind (threshold 20); the group holds its assignment and keeps reporting, so the backlog is real. Measured at 2026-10-10T07:31:28.646377+00:00.",
+        "severity": "critical",
+        "threshold": 20,
+        "fingerprint": "consumer_stalled",
+        "measured_at": "2026-10-10T07:31:28.646377+00:00",
+        "consumer_group": "worker-dispatcher"
+      },
+      "budget": {
+        "max_tool_calls": 13,
+        "tool_calls_used": 0,
+        "max_tokens": 200000,
+        "tokens_used": 0,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.046117,
+        "max_usd": "1.00",
+        "usd_used": "0"
+      },
+      "evidence": [
+        {
+          "evidence_id": "e2a4b0be-ecde-4772-96e0-c53f295d4f53",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "critical",
+            "dedup_key": "f3901e9d3ba426f59af19bae843d78a6"
+          },
+          "result_summary": "severity=critical classified as investigating",
+          "timestamp": "2026-10-10T07:31:31.650856Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-10-10T07:31:31.604739Z",
+      "updated_at": "2026-10-10T07:31:31.650856Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "9d74e214-1fd4-4c55-a991-e1f753b02647",
+      "state": "planning",
+      "alert": {
+        "lag": 23,
+        "group": "worker-dispatcher",
+        "source": "kafka:consumer_lag",
+        "summary": "worker-dispatcher is 23 messages behind (threshold 20); the group holds its assignment and keeps reporting, so the backlog is real. Measured at 2026-10-10T07:31:28.646377+00:00.",
+        "severity": "critical",
+        "threshold": 20,
+        "fingerprint": "consumer_stalled",
+        "measured_at": "2026-10-10T07:31:28.646377+00:00",
+        "consumer_group": "worker-dispatcher"
+      },
+      "budget": {
+        "max_tool_calls": 13,
+        "tool_calls_used": 1,
+        "max_tokens": 200000,
+        "tokens_used": 0,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.095913,
+        "max_usd": "1.00",
+        "usd_used": "0.000000"
+      },
+      "evidence": [
+        {
+          "evidence_id": "e2a4b0be-ecde-4772-96e0-c53f295d4f53",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "critical",
+            "dedup_key": "f3901e9d3ba426f59af19bae843d78a6"
+          },
+          "result_summary": "severity=critical classified as investigating",
+          "timestamp": "2026-10-10T07:31:31.650856Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "ebfefc46-dfe2-4c7d-afdd-36131278348e",
+          "tool_name": "get_consumer_lag",
+          "arguments": {
+            "consumer_group": "worker-dispatcher"
+          },
+          "result_summary": "{\"consumer_group\":\"worker-dispatcher\",\"lag\":23,\"lag_known\":true,\"source\":\"live\",\"cache_key\":\"kafka:consumer_lag:worker-dispatcher\",\"measured_at\":\"2026-10-10T07:31:28.646377Z\",\"age_seconds\":3,\"recent_samples\":[{\"lag\":23,\"measured_at\":\"2026-10-10T07:31:28.646377Z\"},{\"lag\":16,\"measured_at\":\"2026-10-10T07:31:23.481674Z\"},{\"lag\":10,\"measured_at\":\"2026-10-10T07:31:18.382287Z\"},{\"lag\":3,\"measured_at\":\"2026-10-10T07:31:12.832638Z\"},{\"lag\":0,\"measured_at\":\"2026-10-10T07:31:07.539124Z\"},{\"lag\":0,\"measured_at\":\"2026-10-10T07:31:02.327984Z\"},{\"lag\":0,\"measured_at\":\"2026-10-10T07:30:57.189060Z\"},{\"lag\":0,\"measured_at\":\"2026-10-10T07:30:52.058606Z\"},{\"lag\":0,\"measured_at\":\"2026-10-10T07:30:46.900142Z\"},{\"lag\":0,\"measured_at\":\"2026-10-10T07:30:41.783300Z\"},{\"lag\":0,\"measured_at\":\"2026-10-10T07:30:36.633533Z\"},{\"lag\":0,\"measured_at\":\"2026-10-10T07:30:31.469731Z\"},{\"lag\":0,\"measured_at\":\"2026-10-10T07:30:26.322216Z\"},{\"lag\":0,\"measured_at\":\"2026-10-10T07:30:21.201318Z\"},{\"lag\":0,\"measured_at\":\"2026-10-10T07:30:16.063423Z\"}]}",
+          "timestamp": "2026-10-10T07:31:31.662207Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "918663bc-c30e-4b27-b670-eeb4358861ce",
+          "tool_name": "_planner_remediate",
+          "arguments": {
+            "reason": "consumer_saturation confirmed; restart_consumer_group applies"
+          },
+          "result_summary": "planner handoff to PLANNING: consumer_saturation confirmed; restart_consumer_group applies",
+          "timestamp": "2026-10-10T07:31:31.700652Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [
+        {
+          "category": "consumer_saturation",
+          "name": "consumer_saturation",
+          "confidence": 0.85,
+          "reasoning": "Lag of 15000 and climbing with the group assignment retained is the stalled-consumer signature. Restart clears the kill state and lets the supervisor re-spawn it.\n"
+        }
+      ],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-10-10T07:31:31.604739Z",
+      "updated_at": "2026-10-10T07:31:31.700652Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "9d74e214-1fd4-4c55-a991-e1f753b02647",
+      "state": "remediating",
+      "alert": {
+        "lag": 23,
+        "group": "worker-dispatcher",
+        "source": "kafka:consumer_lag",
+        "summary": "worker-dispatcher is 23 messages behind (threshold 20); the group holds its assignment and keeps reporting, so the backlog is real. Measured at 2026-10-10T07:31:28.646377+00:00.",
+        "severity": "critical",
+        "threshold": 20,
+        "fingerprint": "consumer_stalled",
+        "measured_at": "2026-10-10T07:31:28.646377+00:00",
+        "consumer_group": "worker-dispatcher"
+      },
+      "budget": {
+        "max_tool_calls": 13,
+        "tool_calls_used": 1,
+        "max_tokens": 200000,
+        "tokens_used": 0,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.107061,
+        "max_usd": "1.00",
+        "usd_used": "0.000000"
+      },
+      "evidence": [
+        {
+          "evidence_id": "e2a4b0be-ecde-4772-96e0-c53f295d4f53",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "critical",
+            "dedup_key": "f3901e9d3ba426f59af19bae843d78a6"
+          },
+          "result_summary": "severity=critical classified as investigating",
+          "timestamp": "2026-10-10T07:31:31.650856Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "ebfefc46-dfe2-4c7d-afdd-36131278348e",
+          "tool_name": "get_consumer_lag",
+          "arguments": {
+            "consumer_group": "worker-dispatcher"
+          },
+          "result_summary": "{\"consumer_group\":\"worker-dispatcher\",\"lag\":23,\"lag_known\":true,\"source\":\"live\",\"cache_key\":\"kafka:consumer_lag:worker-dispatcher\",\"measured_at\":\"2026-10-10T07:31:28.646377Z\",\"age_seconds\":3,\"recent_samples\":[{\"lag\":23,\"measured_at\":\"2026-10-10T07:31:28.646377Z\"},{\"lag\":16,\"measured_at\":\"2026-10-10T07:31:23.481674Z\"},{\"lag\":10,\"measured_at\":\"2026-10-10T07:31:18.382287Z\"},{\"lag\":3,\"measured_at\":\"2026-10-10T07:31:12.832638Z\"},{\"lag\":0,\"measured_at\":\"2026-10-10T07:31:07.539124Z\"},{\"lag\":0,\"measured_at\":\"2026-10-10T07:31:02.327984Z\"},{\"lag\":0,\"measured_at\":\"2026-10-10T07:30:57.189060Z\"},{\"lag\":0,\"measured_at\":\"2026-10-10T07:30:52.058606Z\"},{\"lag\":0,\"measured_at\":\"2026-10-10T07:30:46.900142Z\"},{\"lag\":0,\"measured_at\":\"2026-10-10T07:30:41.783300Z\"},{\"lag\":0,\"measured_at\":\"2026-10-10T07:30:36.633533Z\"},{\"lag\":0,\"measured_at\":\"2026-10-10T07:30:31.469731Z\"},{\"lag\":0,\"measured_at\":\"2026-10-10T07:30:26.322216Z\"},{\"lag\":0,\"measured_at\":\"2026-10-10T07:30:21.201318Z\"},{\"lag\":0,\"measured_at\":\"2026-10-10T07:30:16.063423Z\"}]}",
+          "timestamp": "2026-10-10T07:31:31.662207Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "918663bc-c30e-4b27-b670-eeb4358861ce",
+          "tool_name": "_planner_remediate",
+          "arguments": {
+            "reason": "consumer_saturation confirmed; restart_consumer_group applies"
+          },
+          "result_summary": "planner handoff to PLANNING: consumer_saturation confirmed; restart_consumer_group applies",
+          "timestamp": "2026-10-10T07:31:31.700652Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "fbf8de48-c40d-4e92-b592-26ab6b9e6c75",
+          "tool_name": "_planner_plan",
+          "arguments": {
+            "target_hypothesis": "consumer_saturation"
+          },
+          "result_summary": "plan: restart_consumer_group({\"consumer_group\": \"worker-dispatcher\"}) then verify via get_consumer_lag",
+          "timestamp": "2026-10-10T07:31:31.711800Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [
+        {
+          "category": "consumer_saturation",
+          "name": "consumer_saturation",
+          "confidence": 0.85,
+          "reasoning": "Lag of 15000 and climbing with the group assignment retained is the stalled-consumer signature. Restart clears the kill state and lets the supervisor re-spawn it.\n"
+        }
+      ],
+      "pending_approval_id": null,
+      "remediation_plan": {
+        "target_hypothesis": "consumer_saturation",
+        "action_tool": "restart_consumer_group",
+        "action_arguments": {
+          "consumer_group": "worker-dispatcher"
+        },
+        "verify_tool": "get_consumer_lag",
+        "verify_arguments": {
+          "consumer_group": "worker-dispatcher"
+        },
+        "verify_expectation": "After the restart clears the kill flag the supervisor re-spawns the consumer within seconds and the backlog drains: get_consumer_lag drops toward 0. The cached metric may trail the recovery by ~30s, so an early read can still show the old high value.\n",
+        "action_rationale": null
+      },
+      "remediation_attempts": 0,
+      "created_at": "2026-10-10T07:31:31.604739Z",
+      "updated_at": "2026-10-10T07:31:31.711800Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "9d74e214-1fd4-4c55-a991-e1f753b02647",
+      "state": "verifying",
+      "alert": {
+        "lag": 23,
+        "group": "worker-dispatcher",
+        "source": "kafka:consumer_lag",
+        "summary": "worker-dispatcher is 23 messages behind (threshold 20); the group holds its assignment and keeps reporting, so the backlog is real. Measured at 2026-10-10T07:31:28.646377+00:00.",
+        "severity": "critical",
+        "threshold": 20,
+        "fingerprint": "consumer_stalled",
+        "measured_at": "2026-10-10T07:31:28.646377+00:00",
+        "consumer_group": "worker-dispatcher"
+      },
+      "budget": {
+        "max_tool_calls": 13,
+        "tool_calls_used": 2,
+        "max_tokens": 200000,
+        "tokens_used": 0,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.140028,
+        "max_usd": "1.00",
+        "usd_used": "0.000000"
+      },
+      "evidence": [
+        {
+          "evidence_id": "e2a4b0be-ecde-4772-96e0-c53f295d4f53",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "critical",
+            "dedup_key": "f3901e9d3ba426f59af19bae843d78a6"
+          },
+          "result_summary": "severity=critical classified as investigating",
+          "timestamp": "2026-10-10T07:31:31.650856Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "ebfefc46-dfe2-4c7d-afdd-36131278348e",
+          "tool_name": "get_consumer_lag",
+          "arguments": {
+            "consumer_group": "worker-dispatcher"
+          },
+          "result_summary": "{\"consumer_group\":\"worker-dispatcher\",\"lag\":23,\"lag_known\":true,\"source\":\"live\",\"cache_key\":\"kafka:consumer_lag:worker-dispatcher\",\"measured_at\":\"2026-10-10T07:31:28.646377Z\",\"age_seconds\":3,\"recent_samples\":[{\"lag\":23,\"measured_at\":\"2026-10-10T07:31:28.646377Z\"},{\"lag\":16,\"measured_at\":\"2026-10-10T07:31:23.481674Z\"},{\"lag\":10,\"measured_at\":\"2026-10-10T07:31:18.382287Z\"},{\"lag\":3,\"measured_at\":\"2026-10-10T07:31:12.832638Z\"},{\"lag\":0,\"measured_at\":\"2026-10-10T07:31:07.539124Z\"},{\"lag\":0,\"measured_at\":\"2026-10-10T07:31:02.327984Z\"},{\"lag\":0,\"measured_at\":\"2026-10-10T07:30:57.189060Z\"},{\"lag\":0,\"measured_at\":\"2026-10-10T07:30:52.058606Z\"},{\"lag\":0,\"measured_at\":\"2026-10-10T07:30:46.900142Z\"},{\"lag\":0,\"measured_at\":\"2026-10-10T07:30:41.783300Z\"},{\"lag\":0,\"measured_at\":\"2026-10-10T07:30:36.633533Z\"},{\"lag\":0,\"measured_at\":\"2026-10-10T07:30:31.469731Z\"},{\"lag\":0,\"measured_at\":\"2026-10-10T07:30:26.322216Z\"},{\"lag\":0,\"measured_at\":\"2026-10-10T07:30:21.201318Z\"},{\"lag\":0,\"measured_at\":\"2026-10-10T07:30:16.063423Z\"}]}",
+          "timestamp": "2026-10-10T07:31:31.662207Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "918663bc-c30e-4b27-b670-eeb4358861ce",
+          "tool_name": "_planner_remediate",
+          "arguments": {
+            "reason": "consumer_saturation confirmed; restart_consumer_group applies"
+          },
+          "result_summary": "planner handoff to PLANNING: consumer_saturation confirmed; restart_consumer_group applies",
+          "timestamp": "2026-10-10T07:31:31.700652Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "fbf8de48-c40d-4e92-b592-26ab6b9e6c75",
+          "tool_name": "_planner_plan",
+          "arguments": {
+            "target_hypothesis": "consumer_saturation"
+          },
+          "result_summary": "plan: restart_consumer_group({\"consumer_group\": \"worker-dispatcher\"}) then verify via get_consumer_lag",
+          "timestamp": "2026-10-10T07:31:31.711800Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "fe07ac57-21d0-4fa4-8bc9-9ea9db024a21",
+          "tool_name": "restart_consumer_group",
+          "arguments": {
+            "consumer_group": "worker-dispatcher",
+            "idempotency_key": "8f632d795ca7541c3b62280ed4fa9b57"
+          },
+          "result_summary": "{\"consumer_group\":\"worker-dispatcher\",\"kill_key_cleared\":true,\"latency_key_cleared\":false,\"group_recognized\":true,\"accepted\":true}",
+          "timestamp": "2026-10-10T07:31:31.721346Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [
+        {
+          "category": "consumer_saturation",
+          "name": "consumer_saturation",
+          "confidence": 0.85,
+          "reasoning": "Lag of 15000 and climbing with the group assignment retained is the stalled-consumer signature. Restart clears the kill state and lets the supervisor re-spawn it.\n"
+        }
+      ],
+      "pending_approval_id": null,
+      "remediation_plan": {
+        "target_hypothesis": "consumer_saturation",
+        "action_tool": "restart_consumer_group",
+        "action_arguments": {
+          "consumer_group": "worker-dispatcher"
+        },
+        "verify_tool": "get_consumer_lag",
+        "verify_arguments": {
+          "consumer_group": "worker-dispatcher"
+        },
+        "verify_expectation": "After the restart clears the kill flag the supervisor re-spawns the consumer within seconds and the backlog drains: get_consumer_lag drops toward 0. The cached metric may trail the recovery by ~30s, so an early read can still show the old high value.\n",
+        "action_rationale": null
+      },
+      "remediation_attempts": 1,
+      "created_at": "2026-10-10T07:31:31.604739Z",
+      "updated_at": "2026-10-10T07:31:31.744767Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "9d74e214-1fd4-4c55-a991-e1f753b02647",
+      "state": "resolved",
+      "alert": {
+        "lag": 23,
+        "group": "worker-dispatcher",
+        "source": "kafka:consumer_lag",
+        "summary": "worker-dispatcher is 23 messages behind (threshold 20); the group holds its assignment and keeps reporting, so the backlog is real. Measured at 2026-10-10T07:31:28.646377+00:00.",
+        "severity": "critical",
+        "threshold": 20,
+        "fingerprint": "consumer_stalled",
+        "measured_at": "2026-10-10T07:31:28.646377+00:00",
+        "consumer_group": "worker-dispatcher"
+      },
+      "budget": {
+        "max_tool_calls": 13,
+        "tool_calls_used": 4,
+        "max_tokens": 200000,
+        "tokens_used": 0,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 20.24038,
+        "max_usd": "1.00",
+        "usd_used": "0.000000"
+      },
+      "evidence": [
+        {
+          "evidence_id": "e2a4b0be-ecde-4772-96e0-c53f295d4f53",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "critical",
+            "dedup_key": "f3901e9d3ba426f59af19bae843d78a6"
+          },
+          "result_summary": "severity=critical classified as investigating",
+          "timestamp": "2026-10-10T07:31:31.650856Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "ebfefc46-dfe2-4c7d-afdd-36131278348e",
+          "tool_name": "get_consumer_lag",
+          "arguments": {
+            "consumer_group": "worker-dispatcher"
+          },
+          "result_summary": "{\"consumer_group\":\"worker-dispatcher\",\"lag\":23,\"lag_known\":true,\"source\":\"live\",\"cache_key\":\"kafka:consumer_lag:worker-dispatcher\",\"measured_at\":\"2026-10-10T07:31:28.646377Z\",\"age_seconds\":3,\"recent_samples\":[{\"lag\":23,\"measured_at\":\"2026-10-10T07:31:28.646377Z\"},{\"lag\":16,\"measured_at\":\"2026-10-10T07:31:23.481674Z\"},{\"lag\":10,\"measured_at\":\"2026-10-10T07:31:18.382287Z\"},{\"lag\":3,\"measured_at\":\"2026-10-10T07:31:12.832638Z\"},{\"lag\":0,\"measured_at\":\"2026-10-10T07:31:07.539124Z\"},{\"lag\":0,\"measured_at\":\"2026-10-10T07:31:02.327984Z\"},{\"lag\":0,\"measured_at\":\"2026-10-10T07:30:57.189060Z\"},{\"lag\":0,\"measured_at\":\"2026-10-10T07:30:52.058606Z\"},{\"lag\":0,\"measured_at\":\"2026-10-10T07:30:46.900142Z\"},{\"lag\":0,\"measured_at\":\"2026-10-10T07:30:41.783300Z\"},{\"lag\":0,\"measured_at\":\"2026-10-10T07:30:36.633533Z\"},{\"lag\":0,\"measured_at\":\"2026-10-10T07:30:31.469731Z\"},{\"lag\":0,\"measured_at\":\"2026-10-10T07:30:26.322216Z\"},{\"lag\":0,\"measured_at\":\"2026-10-10T07:30:21.201318Z\"},{\"lag\":0,\"measured_at\":\"2026-10-10T07:30:16.063423Z\"}]}",
+          "timestamp": "2026-10-10T07:31:31.662207Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "918663bc-c30e-4b27-b670-eeb4358861ce",
+          "tool_name": "_planner_remediate",
+          "arguments": {
+            "reason": "consumer_saturation confirmed; restart_consumer_group applies"
+          },
+          "result_summary": "planner handoff to PLANNING: consumer_saturation confirmed; restart_consumer_group applies",
+          "timestamp": "2026-10-10T07:31:31.700652Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "fbf8de48-c40d-4e92-b592-26ab6b9e6c75",
+          "tool_name": "_planner_plan",
+          "arguments": {
+            "target_hypothesis": "consumer_saturation"
+          },
+          "result_summary": "plan: restart_consumer_group({\"consumer_group\": \"worker-dispatcher\"}) then verify via get_consumer_lag",
+          "timestamp": "2026-10-10T07:31:31.711800Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "fe07ac57-21d0-4fa4-8bc9-9ea9db024a21",
+          "tool_name": "restart_consumer_group",
+          "arguments": {
+            "consumer_group": "worker-dispatcher",
+            "idempotency_key": "8f632d795ca7541c3b62280ed4fa9b57"
+          },
+          "result_summary": "{\"consumer_group\":\"worker-dispatcher\",\"kill_key_cleared\":true,\"latency_key_cleared\":false,\"group_recognized\":true,\"accepted\":true}",
+          "timestamp": "2026-10-10T07:31:31.721346Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "89916b07-beba-4f59-96a8-fbc8abb295e9",
+          "tool_name": "get_consumer_lag",
+          "arguments": {
+            "consumer_group": "worker-dispatcher",
+            "attempt": 1,
+            "of": 6
+          },
+          "result_summary": "{\"consumer_group\":\"worker-dispatcher\",\"lag\":23,\"lag_known\":true,\"source\":\"live\",\"cache_key\":\"kafka:consumer_lag:worker-dispatcher\",\"measured_at\":\"2026-10-10T07:31:28.646377Z\",\"age_seconds\":3,\"recent_samples\":[{\"lag\":23,\"measured_at\":\"2026-10-10T07:31:28.646377Z\"},{\"lag\":16,\"measured_at\":\"2026-10-10T07:31:23.481674Z\"},{\"lag\":10,\"measured_at\":\"2026-10-10T07:31:18.382287Z\"},{\"lag\":3,\"measured_at\":\"2026-10-10T07:31:12.832638Z\"},{\"lag\":0,\"measured_at\":\"2026-10-10T07:31:07.539124Z\"},{\"lag\":0,\"measured_at\":\"2026-10-10T07:31:02.327984Z\"},{\"lag\":0,\"measured_at\":\"2026-10-10T07:30:57.189060Z\"},{\"lag\":0,\"measured_at\":\"2026-10-10T07:30:52.058606Z\"},{\"lag\":0,\"measured_at\":\"2026-10-10T07:30:46.900142Z\"},{\"lag\":0,\"measured_at\":\"2026-10-10T07:30:41.783300Z\"},{\"lag\":0,\"measured_at\":\"2026-10-10T07:30:36.633533Z\"},{\"lag\":0,\"measured_at\":\"2026-10-10T07:30:31.469731Z\"},{\"lag\":0,\"measured_at\":\"2026-10-10T07:30:26.322216Z\"},{\"lag\":0,\"measured_at\":\"2026-10-10T07:30:21.201318Z\"},{\"lag\":0,\"measured_at\":\"2026-10-10T07:30:16.063423Z\"}]}",
+          "timestamp": "2026-10-10T07:31:31.755440Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "bf620778-c631-4522-b99f-ba2021f0d24f",
+          "tool_name": "_verify_judge",
+          "arguments": {
+            "expectation": "After the restart clears the kill flag the supervisor re-spawns the consumer within seconds and the backlog drains: get_consumer_lag drops toward 0. The cached metric may trail the recovery by ~30s, so an early read can still show the old high value.\n",
+            "attempt": 1,
+            "of": 6
+          },
+          "result_summary": "verified: The verify probe reads lag 0 after the restart: the kill flag was cleared (kill_key_cleared=true), the supervisor re-spawned the consumer, and the backlog has drained.\n",
+          "timestamp": "2026-10-10T07:31:31.755440Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "248a94b7-c0a2-4060-aff9-bfdd6edc3b61",
+          "tool_name": "_verify_reading_gate",
+          "arguments": {
+            "verdict": "verified_on_stale_reading",
+            "attempt": 1,
+            "of": 6
+          },
+          "result_summary": "verified_on_stale_reading: the last reading of get_consumer_lag(consumer_group=worker-dispatcher) (lag 23 measured at 2026-10-10T07:31:28.646377+00:00) was measured before restart_consumer_group ran at 2026-10-10T07:31:31.612283+00:00 on the platform's clock (2026-10-10T07:31:31.721346+00:00 on the agent's), so it cannot show what the action did; and 23 is not below the alert's threshold 20",
+          "timestamp": "2026-10-10T07:31:31.755440Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "89b702aa-3be8-45a7-a9ee-67f6ef9e9cb8",
+          "tool_name": "get_consumer_lag",
+          "arguments": {
+            "consumer_group": "worker-dispatcher",
+            "attempt": 2,
+            "of": 6
+          },
+          "result_summary": "{\"consumer_group\":\"worker-dispatcher\",\"lag\":0,\"lag_known\":true,\"source\":\"live\",\"cache_key\":\"kafka:consumer_lag:worker-dispatcher\",\"measured_at\":\"2026-10-10T07:31:49.910532Z\",\"age_seconds\":1,\"recent_samples\":[{\"lag\":0,\"measured_at\":\"2026-10-10T07:31:49.910532Z\"},{\"lag\":0,\"measured_at\":\"2026-10-10T07:31:44.430681Z\"},{\"lag\":0,\"measured_at\":\"2026-10-10T07:31:38.940542Z\"},{\"lag\":0,\"measured_at\":\"2026-10-10T07:31:33.894708Z\"},{\"lag\":23,\"measured_at\":\"2026-10-10T07:31:28.646377Z\"},{\"lag\":16,\"measured_at\":\"2026-10-10T07:31:23.481674Z\"},{\"lag\":10,\"measured_at\":\"2026-10-10T07:31:18.382287Z\"},{\"lag\":3,\"measured_at\":\"2026-10-10T07:31:12.832638Z\"},{\"lag\":0,\"measured_at\":\"2026-10-10T07:31:07.539124Z\"},{\"lag\":0,\"measured_at\":\"2026-10-10T07:31:02.327984Z\"},{\"lag\":0,\"measured_at\":\"2026-10-10T07:30:57.189060Z\"},{\"lag\":0,\"measured_at\":\"2026-10-10T07:30:52.058606Z\"},{\"lag\":0,\"measured_at\":\"2026-10-10T07:30:46.900142Z\"},{\"lag\":0,\"measured_at\":\"2026-10-10T07:30:41.783300Z\"},{\"lag\":0,\"measured_at\":\"2026-10-10T07:30:36.633533Z\"}]}",
+          "timestamp": "2026-10-10T07:31:51.812990Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "f79f693d-b2a8-4630-99e5-e9244d30eeac",
+          "tool_name": "_verify_judge",
+          "arguments": {
+            "expectation": "After the restart clears the kill flag the supervisor re-spawns the consumer within seconds and the backlog drains: get_consumer_lag drops toward 0. The cached metric may trail the recovery by ~30s, so an early read can still show the old high value.\n",
+            "attempt": 2,
+            "of": 6
+          },
+          "result_summary": "verified: Scripted rehearsal verdict; the loop accepts it only on a lag reading measured after the restart and below the threshold.",
+          "timestamp": "2026-10-10T07:31:51.812990Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [
+        {
+          "category": "consumer_saturation",
+          "name": "consumer_saturation",
+          "confidence": 0.85,
+          "reasoning": "Lag of 15000 and climbing with the group assignment retained is the stalled-consumer signature. Restart clears the kill state and lets the supervisor re-spawn it.\n"
+        }
+      ],
+      "pending_approval_id": null,
+      "remediation_plan": {
+        "target_hypothesis": "consumer_saturation",
+        "action_tool": "restart_consumer_group",
+        "action_arguments": {
+          "consumer_group": "worker-dispatcher"
+        },
+        "verify_tool": "get_consumer_lag",
+        "verify_arguments": {
+          "consumer_group": "worker-dispatcher"
+        },
+        "verify_expectation": "After the restart clears the kill flag the supervisor re-spawns the consumer within seconds and the backlog drains: get_consumer_lag drops toward 0. The cached metric may trail the recovery by ~30s, so an early read can still show the old high value.\n",
+        "action_rationale": null
+      },
+      "remediation_attempts": 1,
+      "created_at": "2026-10-10T07:31:31.604739Z",
+      "updated_at": "2026-10-10T07:31:51.845119Z"
+    }
+  ],
+  "invocation_id": "6a90e784b38a"
+}

@@ -75,9 +75,23 @@ _JUSTIFIED: Final[dict[tuple[object, ...], tuple[str, str]]] = {
         "kill_consumer makes worker-dispatcher's lag climb; the check probes "
         "the un-faulted world, so the canned backlog cannot match by design",
     ),
+    # v0.6.25 (plat #244, platform ADR 0041 amendment): `polling` is the platform's verdict on
+    # the consumer and is compared exactly, like `lag` (fixture_drift._VOLATILE says why), so a
+    # stopped consumer's `false` against the un-faulted world's `true` is written down here.
+    ("consumer_lag_high", "get_consumer_lag", "polling", "value"): (
+        POST_FAULT,
+        "kill_consumer stops worker-dispatcher, so the platform's verdict on it reads "
+        "`polling: false`; the check probes the un-faulted world, where the consumer polls "
+        "and reads true — the same mechanism as this scenario's `lag` row",
+    ),
     ("remediate_consumer_lag_success", "get_consumer_lag", "lag", "value"): (
         POST_FAULT,
         "same fault, same reason",
+    ),
+    ("remediate_consumer_lag_success", "get_consumer_lag", "polling", "value"): (
+        POST_FAULT,
+        "same fault, same reason as consumer_lag_high's `polling` row. The second element "
+        "is the post-restart read and reads true, matching live",
     ),
     ("remediate_dlq_backlog_success", "list_dlq_messages", "total", "value"): (
         POST_FAULT,
@@ -127,6 +141,12 @@ _JUSTIFIED: Final[dict[tuple[object, ...], tuple[str, str]]] = {
         "the same mechanism as consumer_lag_high, in this family's world. The "
         "second element of the sequence is the post-restart read and shares "
         "this key (the ledger excludes the index on purpose)",
+    ),
+    ("jobs_not_progressing_dispatcher_stall", "get_consumer_lag", "polling", "value"): (
+        POST_FAULT,
+        "kill_consumer stops worker-dispatcher, so the first element reads `polling: false` "
+        "(77 s since its last poll) against the un-faulted world's true; the second is the "
+        "post-restart read and matches. The same mechanism as this scenario's `lag` row",
     ),
     ("jobs_not_progressing_dispatcher_stall", "get_outbox_status", "unpublished_count", "value"): (
         POST_FAULT,
@@ -594,6 +614,16 @@ _JUSTIFIED: Final[dict[tuple[object, ...], tuple[str, str]]] = {
     ),
     # WO-R3-372 (O-49, ADR 0080): the stranded world's loop reading. The other ten loops read
     # `paused: false` live and in the canned reading alike; only this row cannot match.
+    # v0.6.25 (plat #244): the reading that proves this world's label, as the platform's verdict.
+    ("workflow_stuck_resolver_stall", "get_consumer_lag", "polling", "value"): (
+        POST_FAULT,
+        "kill_consumer stops dependency-resolver, so the investigation's read and the first "
+        "verify poll (taken the instant after the restart, before the next pass published a "
+        "fresh poll time) read `polling: false`, 18 s and 17 s since the last poll; the check "
+        "probes the un-faulted world, where the resolver polls and reads true. The second "
+        "verify poll reads true and matches. This verdict is the label's evidence (INC-008), "
+        "so it is guarded, never volatile",
+    ),
     (
         "workflow_stuck_resolver_stall",
         "get_control_loops",
@@ -1003,6 +1033,11 @@ _JUSTIFIED: Final[dict[tuple[object, ...], tuple[str, str]]] = {
         "use_live_mcp is false — the scenario never runs live, so its canned "
         "responses are its premise rather than a recording of anything",
     ),
+    ("remediate_verify_fails", "get_consumer_lag", "polling", "value"): (
+        CANNED_ONLY,
+        "use_live_mcp is false — its stopped dispatcher's `polling: false` is the premise, "
+        "against the un-faulted world's true",
+    ),
     ("tool_output_schema_mismatch", "get_consumer_lag", "lag", "value"): (
         CANNED_ONLY,
         "the scenario exists to feed the agent a malformed response; its "
@@ -1100,6 +1135,13 @@ _JUSTIFIED: Final[dict[tuple[object, ...], tuple[str, str]]] = {
         "element is the reading the ADR 0073 guard refuses, so a correct run never consumes "
         "it and no live walk could ever produce it; all three elements share this row",
     ),
+    ("planner_confirms_forever", "get_consumer_lag", "polling", "value"): (
+        CANNED_ONLY,
+        "the three readings are of a stopped worker-dispatcher (its poll frozen 56 to 116 s "
+        "before each measurement), so all three read `polling: false`; `use_live_mcp` is "
+        "false and the un-faulted world the check probes reads true. All three elements "
+        "share this row",
+    ),
     # WO-R3-332 (ADR 0074), the sibling scenario's own row and the same mechanism one packet
     # later. ONE row again, generic over the two elements, and the same three fields agree with
     # the platform for the same reasons: `source` says `live` and so does the platform for
@@ -1116,6 +1158,12 @@ _JUSTIFIED: Final[dict[tuple[object, ...], tuple[str, str]]] = {
         "probe, so a correct run never consumes it and no live walk could produce it; both "
         "elements share this row",
     ),
+    ("planner_probes_elsewhere_forever", "get_consumer_lag", "polling", "value"): (
+        CANNED_ONLY,
+        "both elements are the same stopped dispatcher (90 s since its last poll), so both "
+        "read `polling: false` against the un-faulted world's true; `use_live_mcp` is false, "
+        "so the pair is the premise. Both elements share this row",
+    ),
     # WO-R3-353 (INC-005, ADR 0077), the same shape as the two rows above. ONE row, generic over
     # the three elements; `source`, `lag_known` and `cache_key` agree with the platform for
     # `worker-dispatcher`, and the restart's answer is never probed (a probe does not act).
@@ -1127,6 +1175,13 @@ _JUSTIFIED: Final[dict[tuple[object, ...], tuple[str, str]]] = {
         "premise rather than a recording of anything. The un-faulted world the check probes "
         "answers 0. The THIRD element is the reading ADR 0077's gate polls for, so a run "
         "before the gate never consumes it; all three elements share this row",
+    ),
+    ("verify_judge_reads_history_backwards", "get_consumer_lag", "polling", "value"): (
+        CANNED_ONLY,
+        "the take's first two readings were measured while the dispatcher was stopped (23 s "
+        "and 44 s since its last poll), so they read `polling: false` against the un-faulted "
+        "world's true; the third, measured after the restart, reads true and matches. "
+        "`use_live_mcp` is false. All three elements share this row",
     ),
     # Group 2: a hot-set key nothing seeds. `create_stale_cache` writes
     # `cache:jobs:worker-dispatcher:hot_set`; this scenario's key is a different one, so the
@@ -1301,6 +1356,13 @@ _JUSTIFIED: Final[dict[tuple[object, ...], tuple[str, str]]] = {
         "investigation probe, the reinvestigation's re-read after the replay verified, "
         "and the post-restart verify",
     ),
+    ("dual_fault_dlq_and_consumer_lag", "get_consumer_lag", "polling", "value"): (
+        POST_FAULT,
+        "kill_consumer stops worker-dispatcher: the investigation probe and the "
+        "reinvestigation's re-read both read `polling: false` against the un-faulted world's "
+        "true; the post-restart verify reads true and matches. The same mechanism as this "
+        "scenario's `lag` row",
+    ),
     ("dual_fault_dlq_and_consumer_lag", "list_dlq_messages", "total", "value"): (
         CANNED_ONLY,
         "the premise is a queue holding exactly ONE actionable row, because this world's "
@@ -1436,6 +1498,11 @@ _JUSTIFIED: Final[dict[tuple[object, ...], tuple[str, str]]] = {
         "same hook, same mechanism as its sibling above: kill_consumer makes the backlog "
         "climb and the check probes the world before the kill. Both elements share this "
         "row — the investigation probe and the post-restart verify",
+    ),
+    ("dual_fault_consumer_lag_and_bad_deploy", "get_consumer_lag", "polling", "value"): (
+        POST_FAULT,
+        "same hook, same mechanism as its sibling above: the investigation probe reads "
+        "`polling: false` against the un-faulted world's true; the post-restart verify matches",
     ),
     # WO-R3-221 (WP-8.5, ADR 0066) — the `api_latency` family's four worlds. The
     # control needs no entry at all (its world IS the un-faulted one), and the redis
@@ -1632,6 +1699,13 @@ _JUSTIFIED: Final[dict[tuple[object, ...], tuple[str, str]]] = {
         "fresh one has no measurement either and it does not. `lag_known` is already "
         "volatile and this is the half that is not — the null IS the fault, and the "
         "cold-stack rows on the `jobs_not_progressing` worlds are this one's mirror",
+    ),
+    ("cascading_redis_starves_backpressure", "get_consumer_lag", "polling", "value"): (
+        WARM_STACK,
+        "the same absence, v0.6.25's half: the metrics pass writes the poll record to the "
+        "same Redis under the same TTL, so the starved world holds no poll time and the "
+        "verdict is null (unknown). A stack whose pass has published one reads true and this "
+        "drifts; a just-booted one holds none either and it does not",
     ),
     (
         "cascading_redis_starves_backpressure",

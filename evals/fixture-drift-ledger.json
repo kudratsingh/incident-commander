@@ -12,9 +12,9 @@
     "no-hook": "the fixture describes a fault no chaos hook can produce, so the canned value is the scenario's premise and the check probes a world that never had it. Not a defect; the fix, if that scenario is ever to run live, is a platform hook"
   },
   "_counts": {
-    "recorded": 184,
+    "recorded": 195,
     "fixture-defect": 10,
-    "explained": 174
+    "explained": 185
   },
   "known_drift": [
     {
@@ -228,6 +228,14 @@
     {
       "scenario": "cascading_redis_starves_backpressure",
       "tool": "get_consumer_lag",
+      "path": "polling",
+      "kind": "value",
+      "context": "warm-stack",
+      "why": "the same absence, v0.6.25's half: the metrics pass writes the poll record to the same Redis under the same TTL, so the starved world holds no poll time and the verdict is null (unknown). A stack whose pass has published one reads true and this drifts; a just-booted one holds none either and it does not"
+    },
+    {
+      "scenario": "cascading_redis_starves_backpressure",
+      "tool": "get_consumer_lag",
       "path": "recent_samples[].lag",
       "kind": "live_only_field",
       "context": "warm-stack",
@@ -306,6 +314,14 @@
       "why": "kill_consumer makes worker-dispatcher's lag climb; the check probes the un-faulted world, so the canned backlog cannot match by design"
     },
     {
+      "scenario": "consumer_lag_high",
+      "tool": "get_consumer_lag",
+      "path": "polling",
+      "kind": "value",
+      "context": "post-fault",
+      "why": "kill_consumer stops worker-dispatcher, so the platform's verdict on it reads `polling: false`; the check probes the un-faulted world, where the consumer polls and reads true \u2014 the same mechanism as this scenario's `lag` row"
+    },
+    {
       "scenario": "demo_dlq_replay_safe_backlog",
       "tool": "list_dlq_messages",
       "path": "items[].id[]",
@@ -378,12 +394,28 @@
       "why": "same hook, same mechanism as its sibling above: kill_consumer makes the backlog climb and the check probes the world before the kill. Both elements share this row \u2014 the investigation probe and the post-restart verify"
     },
     {
+      "scenario": "dual_fault_consumer_lag_and_bad_deploy",
+      "tool": "get_consumer_lag",
+      "path": "polling",
+      "kind": "value",
+      "context": "post-fault",
+      "why": "same hook, same mechanism as its sibling above: the investigation probe reads `polling: false` against the un-faulted world's true; the post-restart verify matches"
+    },
+    {
       "scenario": "dual_fault_dlq_and_consumer_lag",
       "tool": "get_consumer_lag",
       "path": "lag",
       "kind": "value",
       "context": "post-fault",
       "why": "kill_consumer makes worker-dispatcher's lag climb; the check probes the un-faulted world, so the canned backlog cannot match by design \u2014 the same mechanism as consumer_lag_high. All three elements share this row: the investigation probe, the reinvestigation's re-read after the replay verified, and the post-restart verify"
+    },
+    {
+      "scenario": "dual_fault_dlq_and_consumer_lag",
+      "tool": "get_consumer_lag",
+      "path": "polling",
+      "kind": "value",
+      "context": "post-fault",
+      "why": "kill_consumer stops worker-dispatcher: the investigation probe and the reinvestigation's re-read both read `polling: false` against the un-faulted world's true; the post-restart verify reads true and matches. The same mechanism as this scenario's `lag` row"
     },
     {
       "scenario": "dual_fault_dlq_and_consumer_lag",
@@ -507,6 +539,14 @@
     },
     {
       "scenario": "jobs_not_progressing_dispatcher_stall",
+      "tool": "get_consumer_lag",
+      "path": "polling",
+      "kind": "value",
+      "context": "post-fault",
+      "why": "kill_consumer stops worker-dispatcher, so the first element reads `polling: false` (77 s since its last poll) against the un-faulted world's true; the second is the post-restart read and matches. The same mechanism as this scenario's `lag` row"
+    },
+    {
+      "scenario": "jobs_not_progressing_dispatcher_stall",
       "tool": "get_outbox_status",
       "path": "unpublished_count",
       "kind": "value",
@@ -562,12 +602,28 @@
       "why": "the world is a three-reading sequence on worker-dispatcher \u2014 20 measured 55s ago, then a fresh 39, then that same measurement re-served with its age grown to 11s \u2014 and `use_live_mcp` is false, so the sequence is the scenario's premise rather than a recording of anything. The un-faulted world the check probes answers 0. The THIRD element is the reading the ADR 0073 guard refuses, so a correct run never consumes it and no live walk could ever produce it; all three elements share this row"
     },
     {
+      "scenario": "planner_confirms_forever",
+      "tool": "get_consumer_lag",
+      "path": "polling",
+      "kind": "value",
+      "context": "canned-only",
+      "why": "the three readings are of a stopped worker-dispatcher (its poll frozen 56 to 116 s before each measurement), so all three read `polling: false`; `use_live_mcp` is false and the un-faulted world the check probes reads true. All three elements share this row"
+    },
+    {
       "scenario": "planner_probes_elsewhere_forever",
       "tool": "get_consumer_lag",
       "path": "lag",
       "kind": "value",
       "context": "canned-only",
       "why": "the world is one reading of worker-dispatcher \u2014 30, measured 8s ago, over samples reading 0, 10, 30 \u2014 plus that same measurement re-served with its age grown to 52s, and `use_live_mcp` is false, so the pair is the scenario's premise rather than a recording of anything. The un-faulted world the check probes answers 0. The SECOND element is the fourth ask for the group that ADR 0074 refuses by withdrawing the probe, so a correct run never consumes it and no live walk could produce it; both elements share this row"
+    },
+    {
+      "scenario": "planner_probes_elsewhere_forever",
+      "tool": "get_consumer_lag",
+      "path": "polling",
+      "kind": "value",
+      "context": "canned-only",
+      "why": "both elements are the same stopped dispatcher (90 s since its last poll), so both read `polling: false` against the un-faulted world's true; `use_live_mcp` is false, so the pair is the premise. Both elements share this row"
     },
     {
       "scenario": "postgres_slow",
@@ -608,6 +664,14 @@
       "kind": "value",
       "context": "post-fault",
       "why": "same fault, same reason"
+    },
+    {
+      "scenario": "remediate_consumer_lag_success",
+      "tool": "get_consumer_lag",
+      "path": "polling",
+      "kind": "value",
+      "context": "post-fault",
+      "why": "same fault, same reason as consumer_lag_high's `polling` row. The second element is the post-restart read and reads true, matching live"
     },
     {
       "scenario": "remediate_dlq_backlog_success",
@@ -745,6 +809,14 @@
       "kind": "value",
       "context": "canned-only",
       "why": "use_live_mcp is false \u2014 the scenario never runs live, so its canned responses are its premise rather than a recording of anything"
+    },
+    {
+      "scenario": "remediate_verify_fails",
+      "tool": "get_consumer_lag",
+      "path": "polling",
+      "kind": "value",
+      "context": "canned-only",
+      "why": "use_live_mcp is false \u2014 its stopped dispatcher's `polling: false` is the premise, against the un-faulted world's true"
     },
     {
       "scenario": "retry_cap_escalates",
@@ -1099,6 +1171,14 @@
       "why": "the world is the seventh take's own two readings of worker-dispatcher \u2014 29, then 55 served 48 ms after the restart but measured before it \u2014 plus a third reading of 0 measured after it, and `use_live_mcp` is false, so the sequence is the scenario's premise rather than a recording of anything. The un-faulted world the check probes answers 0. The THIRD element is the reading ADR 0077's gate polls for, so a run before the gate never consumes it; all three elements share this row"
     },
     {
+      "scenario": "verify_judge_reads_history_backwards",
+      "tool": "get_consumer_lag",
+      "path": "polling",
+      "kind": "value",
+      "context": "canned-only",
+      "why": "the take's first two readings were measured while the dispatcher was stopped (23 s and 44 s since its last poll), so they read `polling: false` against the un-faulted world's true; the third, measured after the restart, reads true and matches. `use_live_mcp` is false. All three elements share this row"
+    },
+    {
       "scenario": "workflow_stuck_dead_lettered_root",
       "tool": "get_dag_state",
       "path": "edges",
@@ -1409,6 +1489,14 @@
       "kind": "not_live_reachable",
       "context": "post-fault",
       "why": "create_stuck_dag stamps each descendant's trace_id from the same namespace and chain_name, so the two trace ids appear and disappear with the rows themselves"
+    },
+    {
+      "scenario": "workflow_stuck_resolver_stall",
+      "tool": "get_consumer_lag",
+      "path": "polling",
+      "kind": "value",
+      "context": "post-fault",
+      "why": "kill_consumer stops dependency-resolver, so the investigation's read and the first verify poll (taken the instant after the restart, before the next pass published a fresh poll time) read `polling: false`, 18 s and 17 s since the last poll; the check probes the un-faulted world, where the resolver polls and reads true. The second verify poll reads true and matches. This verdict is the label's evidence (INC-008), so it is guarded, never volatile"
     },
     {
       "scenario": "workflow_stuck_resolver_stall",

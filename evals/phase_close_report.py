@@ -26,7 +26,21 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Any, Final, cast
 
-from evals import artifacts, regression
+from evals import artifacts, phase_acceptance, regression
+from evals.phase_acceptance import (
+    AcceptanceLine,
+    AcceptanceScope,
+    AlertTexts,
+    Artefact,
+    Blocked,
+    Calibrations,
+    DriftVerdicts,
+    Pending,
+    Recordings,
+    Runs,
+    Subjects,
+    UnitTests,
+)
 from evals.runner import RunReport, root_cause_coverage
 from evals.scenarios.loader import load_scenarios
 from incident_commander.agent.hypothesis import HypothesisCategory
@@ -223,6 +237,11 @@ class PhaseScope:
     #: (invariant 9), so it lands forward rather than retroactively. NOT the value —
     #: see ``draft_status``.
     reports_status: bool = False
+
+    @property
+    def document_id(self) -> str:
+        """The invocation id in this scope's committed filenames: its canned sweep."""
+        return self.canned_sweep
 
     @property
     def archives(self) -> tuple[str, ...]:
@@ -2536,7 +2555,327 @@ PHASE2: Final[PhaseScope] = replace(
 )
 
 
-SCOPES: Final[dict[int, PhaseScope]] = {scope.phase: scope for scope in (PHASE1, PHASE2)}
+# --------------------------------------------------------------------------
+# Phases 3–15: what each close reads (WO-R3-362)
+# --------------------------------------------------------------------------
+# Each line quotes plan 04's acceptance text and names the evidence that answers it.
+
+_RECORDED: Final[Subjects] = Subjects(recorded_worlds=True)
+_FAMILY_B: Final[Subjects] = Subjects(family="jobs_not_progressing")
+_FAMILY_C: Final[Subjects] = Subjects(family="workflow_stuck")
+_FAMILY_A: Final[Subjects] = Subjects(family="api_latency")
+_JUDGES: Final[tuple[str, ...]] = ("action_verifier", "briefing_judge", "candidate_selector")
+
+_RE_RECORD: Final[Pending] = Pending(
+    "WO-R3-294",
+    "re-record the worlds on the pinned platform: no recording passed its drift check on "
+    "2026-10-08, and ADR 0047 refuses such a recording as evidence",
+)
+_PROVE_FIRST: Final[Pending] = Pending(
+    "WO-R3-363",
+    "the agent makes the family's required reads before a verdict (INC-006, O-44); the live "
+    "runs after it are re-bought one by one on the owner's yes",
+)
+
+
+def _family_runs(subjects: Subjects) -> tuple[Runs, Runs]:
+    return Runs(subjects, "live"), Runs(subjects, "recorded")
+
+
+PHASE3: Final[AcceptanceScope] = AcceptanceScope(
+    phase=3,
+    title="Recorded-world mode",
+    close_packet="WP-3.4",
+    work_order="WO-R3-199",
+    lines=(
+        AcceptanceLine(
+            "WP-3.3",
+            "the existing read-only live scenarios have recordings",
+            (Recordings(_RECORDED),),
+        ),
+        AcceptanceLine(
+            "WP-3.3",
+            "a recorded run of each matches its live grade on ROOT_CAUSE",
+            (Runs(_RECORDED, "recorded"), Runs(_RECORDED, "live")),
+        ),
+        AcceptanceLine("WP-3.3", "drift check green", (DriftVerdicts(_RECORDED),)),
+    ),
+    pending=(_RE_RECORD,),
+)
+
+PHASE4: Final[AcceptanceScope] = AcceptanceScope(
+    phase=4,
+    title="Family B: jobs not progressing",
+    close_packet="WP-4.4",
+    work_order="WO-R3-203",
+    lines=(
+        AcceptanceLine("WP-4.3", "alert text alone cannot decide", (AlertTexts(_FAMILY_B),)),
+        AcceptanceLine(
+            "WP-4.3",
+            "baseline root-cause accuracy on the family reported",
+            (Runs(_FAMILY_B, "live", ("baseline",)), Runs(_FAMILY_B, "recorded", ("baseline",))),
+        ),
+        AcceptanceLine(
+            "WP-4.3",
+            "recordings drift-checked",
+            (Recordings(_FAMILY_B), DriftVerdicts(_FAMILY_B)),
+        ),
+    ),
+    pending=(_RE_RECORD,),
+)
+
+PHASE5: Final[AcceptanceScope] = AcceptanceScope(
+    phase=5,
+    title="Best-of-N (both variants)",
+    close_packet="WP-5.4",
+    work_order="WO-R3-207",
+    lines=(
+        AcceptanceLine(
+            "WP-5.2",
+            "Report: pass@1/2/4/8, appeared-at-any-step, duplicate rate, tokens, latency",
+            (Runs(_RECORDED, "recorded", ("best_of_n_enumerated",)),),
+        ),
+        AcceptanceLine(
+            "WP-5.3",
+            "Same reporting. Cost multiplier declared in budget policy",
+            (Runs(_RECORDED, "recorded", ("best_of_n_sampled",)),),
+        ),
+    ),
+)
+
+PHASE6: Final[AcceptanceScope] = AcceptanceScope(
+    phase=6,
+    title="candidate_selector, judge calibration, first headline experiment",
+    close_packet="WP-6.5",
+    work_order="WO-R3-212",
+    lines=(
+        AcceptanceLine(
+            "WP-6.3",
+            "no selector number appears in a report without a calibration report id beside it",
+            (Calibrations(_JUDGES),),
+        ),
+        AcceptanceLine(
+            "WP-6.4",
+            "Matrix from 03 §8 on Family B + existing families, recorded mode, "
+            "BENCHMARK_MODEL, 5 reps, 20+ instances",
+            (
+                Runs(
+                    _RECORDED,
+                    "recorded",
+                    ("baseline", "best_of_n_enumerated", "best_of_n_sampled", "candidate_selector"),
+                ),
+            ),
+        ),
+    ),
+)
+
+PHASE7: Final[AcceptanceScope] = AcceptanceScope(
+    phase=7,
+    title="Family C: workflow stuck",
+    close_packet="WP-7.3",
+    work_order="WO-R3-215",
+    lines=(
+        AcceptanceLine(
+            "WP-7.2",
+            "Evidence matrix on `get_dag_state` + `list_dlq_messages`. Recordings",
+            (Recordings(_FAMILY_C), DriftVerdicts(_FAMILY_C)),
+        ),
+        AcceptanceLine("WP-7.3", "the family's live and recorded runs", _family_runs(_FAMILY_C)),
+    ),
+    pending=(_RE_RECORD, _PROVE_FIRST),
+)
+
+PHASE8: Final[AcceptanceScope] = AcceptanceScope(
+    phase=8,
+    title="Family A: API latency",
+    close_packet="WP-8.6",
+    work_order="WO-R3-222",
+    lines=(
+        AcceptanceLine(
+            "WP-8.5",
+            'alert "latency above SLO"; `get_slo_status` confirms or refutes',
+            (AlertTexts(_FAMILY_A),),
+        ),
+        AcceptanceLine("WP-8.5", "Recordings", (Recordings(_FAMILY_A), DriftVerdicts(_FAMILY_A))),
+        AcceptanceLine("WP-8.6", "the family's live and recorded runs", _family_runs(_FAMILY_A)),
+    ),
+    pending=(_RE_RECORD, _PROVE_FIRST),
+)
+
+PHASE9: Final[AcceptanceScope] = AcceptanceScope(
+    phase=9,
+    title="Reflection",
+    close_packet="WP-9.2",
+    work_order="WO-R3-224",
+    lines=(
+        AcceptanceLine(
+            "WP-9.2",
+            "Fixed / harmed / net, added tokens and calls, by family and difficulty",
+            (
+                Runs(_RECORDED, "recorded", ("reflection",)),
+                Runs(_RECORDED, "recorded", ("baseline",)),
+            ),
+        ),
+    ),
+)
+
+PHASE10: Final[AcceptanceScope] = AcceptanceScope(
+    phase=10,
+    title="Retry-with-reinvestigation",
+    close_packet="WP-10.2",
+    work_order="WO-R3-227",
+    lines=(
+        AcceptanceLine(
+            "WP-10.1",
+            "the invariant guard fires at the cap; refusal test",
+            (UnitTests("tests/unit/test_remediation.py"),),
+        ),
+        AcceptanceLine(
+            "WP-10.2",
+            "`retry_second_hypothesis_succeeds` live, one per invocation, reset between",
+            (
+                Blocked(
+                    "`retry_second_hypothesis_succeeds` declares no live leg (canned only); "
+                    "WP-10.0's fault that survives the fix is what would give it one"
+                ),
+            ),
+        ),
+    ),
+)
+
+PHASE11: Final[AcceptanceScope] = AcceptanceScope(
+    phase=11,
+    title="Multi-fault and cascading",
+    close_packet="WP-11.4",
+    work_order="WO-R3-231",
+    lines=(
+        AcceptanceLine(
+            "WP-11.1",
+            "root-cause set grade; two remediations in one run via WP-10; both preconditioned",
+            (
+                Blocked(
+                    "both dual-fault scenarios declare no live leg (canned only); "
+                    "`make eval-reg` grades them"
+                ),
+            ),
+        ),
+        AcceptanceLine(
+            "WP-11.2",
+            "intermediate states verified by ordered preconditions",
+            (
+                Blocked(
+                    "`cascading_redis_starves_backpressure` declares no live leg (canned only); "
+                    "`make eval-reg` grades it"
+                ),
+            ),
+        ),
+    ),
+)
+
+PHASE12: Final[AcceptanceScope] = AcceptanceScope(
+    phase=12,
+    title="Shallow search",
+    close_packet="WP-12.2",
+    work_order="WO-R3-233",
+    lines=(
+        AcceptanceLine(
+            "WP-12.2",
+            "Search vs selector on the hardest ambiguous/noisy templates; cost and latency "
+            "beside accuracy",
+            (
+                Runs(_RECORDED, "recorded", ("search",)),
+                Runs(_RECORDED, "recorded", ("candidate_selector",)),
+            ),
+        ),
+    ),
+)
+
+PHASE13: Final[AcceptanceScope] = AcceptanceScope(
+    phase=13,
+    title="Adaptive compute",
+    close_packet="WP-13.2",
+    work_order="WO-R3-235",
+    lines=(
+        AcceptanceLine(
+            "WP-13.2",
+            "Easy cases terminate on baseline; hard cases escalate through the ladder; "
+            "accuracy/safety/tokens/tools/latency frontier",
+            (
+                Runs(_RECORDED, "recorded", ("adaptive",)),
+                Runs(_RECORDED, "recorded", ("baseline",)),
+            ),
+        ),
+    ),
+)
+
+PHASE14: Final[AcceptanceScope] = AcceptanceScope(
+    phase=14,
+    title="Temporal",
+    close_packet="WP-14.3",
+    work_order="WO-R3-238",
+    lines=(
+        AcceptanceLine(
+            "WP-14.1",
+            "grade false attribution via `action_verifier` verdict vs evaluator timeline. "
+            "Live only",
+            (
+                Runs(Subjects(family="temporal_recovery"), "live"),
+                Calibrations(("action_verifier",)),
+            ),
+        ),
+    ),
+)
+
+PHASE15: Final[AcceptanceScope] = AcceptanceScope(
+    phase=15,
+    title="Training readiness (no training)",
+    close_packet="WP-15.4",
+    work_order="WO-R3-242",
+    lines=(
+        AcceptanceLine(
+            "WP-15.1",
+            "JSONL per 03 §16.4; refuses holdout templates; records exported `template_id`s",
+            (Artefact("training_export_manifest"),),
+        ),
+        AcceptanceLine(
+            "WP-15.2",
+            '"always escalate" policy scores below correct-fix on every fixable template; '
+            '"probe nothing, escalate" strictly dominated',
+            (UnitTests("tests/unit/test_reward.py"),),
+        ),
+        AcceptanceLine(
+            "WP-15.3",
+            "Missing tool results, incomplete trajectories, leaked hidden truth, drift, "
+            "duplicates, invalid rewards, action/result mismatches, holdout contamination",
+            (UnitTests("tests/unit/test_dataset_checks.py"), Artefact("training_export")),
+        ),
+    ),
+)
+
+#: Phases closed by the seven-section protocol, and phases that so far declare only what
+#: their close reads. A phase moves to the first when its protocol run is committed.
+PROTOCOL_SCOPES: Final[dict[int, PhaseScope]] = {scope.phase: scope for scope in (PHASE1, PHASE2)}
+ACCEPTANCE_SCOPES: Final[dict[int, AcceptanceScope]] = {
+    scope.phase: scope
+    for scope in (
+        PHASE3,
+        PHASE4,
+        PHASE5,
+        PHASE6,
+        PHASE7,
+        PHASE8,
+        PHASE9,
+        PHASE10,
+        PHASE11,
+        PHASE12,
+        PHASE13,
+        PHASE14,
+        PHASE15,
+    )
+    if scope.phase not in PROTOCOL_SCOPES
+}
+_MERGED: Final[dict[int, PhaseScope | AcceptanceScope]] = {**ACCEPTANCE_SCOPES, **PROTOCOL_SCOPES}
+SCOPES: Final[dict[int, PhaseScope | AcceptanceScope]] = dict(sorted(_MERGED.items()))
 
 #: Every scope whose document is committed, in document order per phase. ``SCOPES``
 #: answers "what does phase N close on now?", this answers "which documents are
@@ -2544,8 +2883,16 @@ SCOPES: Final[dict[int, PhaseScope]] = {scope.phase: scope for scope in (PHASE1,
 #: regenerating byte for byte (invariant 9), so the regeneration test walks this.
 COMMITTED_SCOPES: Final[tuple[PhaseScope, ...]] = (PHASE1, PHASE2_DRAFT, PHASE2)
 
-#: What ``--phase`` defaults to: the phase currently being closed.
-LATEST_PHASE: Final[int] = max(SCOPES)
+#: Archives whose committed grades were superseded by a re-grade (INC-003); an acceptance
+#: reading prints the re-grade's id instead of the withdrawn figure.
+WITHDRAWN_GRADES: Final[dict[str, str]] = {
+    scope.read_only_pass.archive_id: scope.read_only_pass.regrade_report
+    for scope in COMMITTED_SCOPES
+    if scope.read_only_pass is not None
+}
+
+#: What ``--phase`` defaults to: the first phase not yet closed by the protocol.
+LATEST_PHASE: Final[int] = min(ACCEPTANCE_SCOPES, default=max(PROTOCOL_SCOPES))
 
 
 def _claims(document: dict[str, Any], scope: PhaseScope) -> dict[str, Any]:
@@ -3313,10 +3660,12 @@ def committed_versions(phase: int, *, root: Path | None = None) -> list[tuple[Pa
     halves: list[list[Path]] = []
     for kind in ("phase_close_report", "phase_close_report_md"):
         matching = [
-            path for path in artifacts.versions(kind, root=root) if scope.canned_sweep in path.name
+            path
+            for path in artifacts.versions(kind, root=root)
+            if f".{scope.document_id}." in path.name
         ]
         if not matching:
-            raise ValueError(f"no committed {kind} for phase {phase} ({scope.canned_sweep})")
+            raise ValueError(f"no committed {kind} for phase {phase} ({scope.document_id})")
         halves.append(matching)
     if len(halves[0]) != len(halves[1]):
         raise ValueError(f"phase {phase} has {len(halves[0])} JSON halves and {len(halves[1])} MD")
@@ -3353,6 +3702,38 @@ def committed_documents(*, root: Path | None = None) -> list[tuple[PhaseScope, t
     return pairs
 
 
+def assemble_acceptance(
+    root: Path, scope: AcceptanceScope, *, as_of: datetime | None = None
+) -> dict[str, Any]:
+    """A Phase 3–15 acceptance status; ``as_of`` caps the evidence, for regeneration."""
+    return phase_acceptance.assemble(root, scope, as_of=as_of, withdrawn=WITHDRAWN_GRADES)
+
+
+def write_acceptance(
+    document: dict[str, Any], scope: AcceptanceScope, *, root: Path | None = None
+) -> tuple[Path, Path]:
+    """Both halves, stamped by the newest evidence read; refuses when nothing was."""
+    if document["as_of"] is None:
+        raise ValueError(f"phase {scope.phase}: nothing is measured yet, so nothing to commit")
+    when = datetime.fromisoformat(document["as_of"])
+    return (
+        artifacts.write_versioned(
+            "phase_close_report",
+            content=render_json(document),
+            timestamp=when,
+            invocation_id=scope.document_id,
+            root=root,
+        ),
+        artifacts.write_versioned(
+            "phase_close_report_md",
+            content=phase_acceptance.render_markdown(document),
+            timestamp=when,
+            invocation_id=scope.document_id,
+            root=root,
+        ),
+    )
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", type=Path, default=REPO_ROOT, help="repository root to read")
@@ -3362,7 +3743,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         type=int,
         default=LATEST_PHASE,
         choices=sorted(SCOPES),
-        help="which phase to assemble (default: the most recent declared scope)",
+        help="which phase to assemble (default: the first phase not yet closed)",
     )
     parser.add_argument(
         "--write", action="store_true", help="write the two versioned halves instead of printing"
@@ -3370,17 +3751,22 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parser.parse_args(argv)
     scope = SCOPES[args.phase]
     try:
-        document = assemble(args.root, scope)
-        if args.write:
-            for path in write(document, scope, root=args.root):
-                print(f"wrote {path.relative_to(args.root)}")
-            return 0
+        if isinstance(scope, AcceptanceScope):
+            document = assemble_acceptance(args.root, scope)
+            paths = write_acceptance(document, scope, root=args.root) if args.write else ()
+            markdown = phase_acceptance.render_markdown(document)
+        else:
+            document = assemble(args.root, scope)
+            paths = write(document, scope, root=args.root) if args.write else ()
+            markdown = render_markdown(document, scope)
     except (OSError, ValueError) as error:
         print(f"PHASE CLOSE REPORT FAIL: {error}")
         return 2
-    print(
-        render_json(document) if args.format == "json" else render_markdown(document, scope), end=""
-    )
+    if args.write:
+        for path in paths:
+            print(f"wrote {path.relative_to(args.root)}")
+        return 0
+    print(render_json(document) if args.format == "json" else markdown, end="")
     return 0
 
 

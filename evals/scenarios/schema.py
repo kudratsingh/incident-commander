@@ -25,6 +25,7 @@ from evals.graders.deterministic import (
     where_path_errors,
 )
 from incident_commander.agent.hypothesis import HypothesisCategory
+from incident_commander.agent.required_reads import RequiredReading, VerdictCondition
 from incident_commander.api.schemas import AlertPayload
 from incident_commander.config import polling_window_seconds
 from incident_commander.tools.mcp_client import ToolResult
@@ -695,6 +696,35 @@ class ScenarioFamily(StrEnum):
     WORKFLOW_STUCK = "workflow_stuck"
 
 
+def _sweep(when: VerdictCondition, *tools: str) -> tuple[RequiredReading, ...]:
+    return tuple(RequiredReading.model_validate({"tool": tool, "when": when}) for tool in tools)
+
+
+#: The reads a family's verdict owes when its scenario declares none (ADR 0078). Only the two
+#: families whose page names no single cause: every other alert names its subject, which the
+#: subject guard already requires, so nothing new fires there.
+FAMILY_REQUIRED_BEFORE_VERDICT: Final[Mapping[ScenarioFamily, tuple[RequiredReading, ...]]] = (
+    MappingProxyType(
+        {
+            # The page names an objective, so "nothing is wrong" must have read the objective and
+            # every shared dependency that moves in a sibling world (README-api-latency.md).
+            ScenarioFamily.API_LATENCY: _sweep(
+                VerdictCondition.NO_FAULT,
+                "get_slo_status",
+                "get_postgres_health",
+                "get_redis_health",
+                "get_circuit_breakers",
+            ),
+            # One chain under five faults: any verdict about it lists the whole dead-letter
+            # queue first (README-workflow-stuck.md, ADR 0041's unfiltered read).
+            ScenarioFamily.WORKFLOW_STUCK: _sweep(
+                VerdictCondition.STUCK_CHAIN, "list_dlq_messages"
+            ),
+        }
+    )
+)
+
+
 class ScenarioDifficulty(StrEnum):
     """How hard the diagnosis is, on plan 03 § 3's closed vocabulary of nine.
 
@@ -740,6 +770,7 @@ class AgentVisibleScenario(BaseModel):
     canned_tool_responses: dict[str, ToolResult | tuple[ToolResult, ...]] = Field(
         default_factory=dict
     )
+    required_before_verdict: tuple[RequiredReading, ...] = ()
 
 
 class Scenario(BaseModel):
@@ -782,6 +813,9 @@ class Scenario(BaseModel):
     # How many verify polls a CANNED run makes (a live run uses VERIFY_PROBE_ATTEMPTS). One is
     # enough for most canned worlds; a scenario about re-polling declares more (ADR 0077).
     canned_verify_polls: int = Field(default=1, ge=1, le=10)
+    # The reads the loop refuses a verdict without (ADR 0078): the alert's breadth sets the burden
+    # of proof. Omitted means the family's default; ``[]`` declares none.
+    required_before_verdict: tuple[RequiredReading, ...] = ()
     # Optional single hook fired before a live run. LEGACY and deliberately kept: every shipped
     # scenario spells its one fault this way, and ``chaos`` below normalizes it to a plan.
     chaos_setup: ChaosHook | None = None
@@ -814,6 +848,9 @@ class Scenario(BaseModel):
             # The canned platform's responses ARE the world the agent reads
             # in an offline run, so they are agent-visible by definition.
             "canned_tool_responses",
+            # The loop's own burden of proof for this alert (ADR 0078). The same in every world
+            # of a family, so it names no cause; the refusal text quotes it to the planner.
+            "required_before_verdict",
         }
     )
     EVALUATOR_ONLY_FIELDS: ClassVar[frozenset[str]] = frozenset(
@@ -855,11 +892,27 @@ class Scenario(BaseModel):
             alert=self.alert.model_dump(),
             max_tool_calls=self.expectation.max_tool_calls,
             canned_tool_responses=dict(self.canned_tool_responses),
+            required_before_verdict=self.required_before_verdict,
         )
 
     def volatile_paths(self, tool: str) -> frozenset[str]:
         """The paths this scenario declares volatile for ``tool``."""
         return frozenset(entry.path for entry in self.volatile if entry.tool == tool)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _required_reads_default_to_the_family(cls, payload: Any) -> Any:
+        """Fill an omitted ``required_before_verdict`` from ``FAMILY_REQUIRED_BEFORE_VERDICT``."""
+        if not isinstance(payload, Mapping) or "required_before_verdict" in payload:
+            return payload
+        try:
+            family = ScenarioFamily(str(payload.get("family")))
+        except ValueError:
+            return payload
+        default = FAMILY_REQUIRED_BEFORE_VERDICT.get(family)
+        if default is None:
+            return payload
+        return {**payload, "required_before_verdict": default}
 
     @model_validator(mode="after")
     def _each_volatile_field_is_declared_once(self) -> Scenario:

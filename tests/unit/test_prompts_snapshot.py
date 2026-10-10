@@ -140,7 +140,9 @@ _EXPECTED_HASHES: Final[dict[str, str]] = {
     # that — refused a third reading of the consumer group, then read the DLQ, then the circuit
     # breakers, then asked for the group again. The bound is now the schema itself, so the
     # sentence says so. One hash, again: no other prompt carries the rule.
-    "investigation_planner": ("284f178947609419bc9588e6a615d20227646add20ec2cc8784e94ff36d23455"),
+    # WO-R3-363 (ADR 0078): the stuck-chain rule and the healthy-world rule each gain one
+    # sentence naming the reads the loop now requires before a verdict. One hash moves.
+    "investigation_planner": ("a0204b7c333cfbc1de7bb695948b96da9a71a1a6623ee6cfb360e6ad343ee415"),
     # WP-5.2's addendum, appended to `investigation_planner` by
     # `best_of_n_enumerated` and never loaded alone — which is why the planner prompt's
     # own hash did not move: the control group's system prompt is byte-for-byte what it was.

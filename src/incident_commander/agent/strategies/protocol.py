@@ -13,7 +13,12 @@ from typing import Any, Protocol
 
 from pydantic import BaseModel
 
-from incident_commander.agent.hypothesis import InvestigationStep, ProbeAction, without_probe
+from incident_commander.agent.hypothesis import (
+    InvestigationStep,
+    ProbeAction,
+    only_probes,
+    without_probe,
+)
 from incident_commander.agent.state import RunState
 from incident_commander.agent.strategies.records import StepRecord, StepSink
 from incident_commander.llm.client import LLMClientProtocol
@@ -66,13 +71,18 @@ class StrategyContext:
     #: Whether this step may propose another read at all. The loop decides it, because the
     #: conditions are the same ones its remediate gate uses, and that is the loop's policy.
     offer_probe: bool = True
+    #: The reads this step must choose from, set by the loop after it refused a verdict that
+    #: lacked them (ADR 0078). Empty means no such narrowing; it outranks ``offer_probe``.
+    required_probes: tuple[str, ...] = ()
 
     def step_model[T: BaseModel](self, model: type[T]) -> type[T]:
-        """The step schema THIS call is made with: ``model``, or ``model`` minus ``probe``.
+        """The step schema THIS call is made with: ``model``, ``model`` minus ``probe``, or
+        ``model`` offering only a probe of ``required_probes``.
 
         Every strategy's planner call goes through this, so a narrowing reaches every arm.
-        ``model`` is passed in because arms use different ones (``CandidateStep`` and friends).
         """
+        if self.required_probes:
+            return only_probes(model, self.required_probes)
         return model if self.offer_probe else without_probe(model)
 
 

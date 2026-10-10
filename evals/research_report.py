@@ -30,7 +30,7 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import Any, Final
 
-from evals import artifacts, regression
+from evals import artifacts, recorded_applies, regression
 from evals.candidate_metrics import (
     REPORTED_KS,
     measure,
@@ -1034,13 +1034,21 @@ def recorded_fingerprint(outcome: ScenarioOutcome) -> str | None:
     return None if fingerprint is None else str(fingerprint)
 
 
+def _enumerates(records: Sequence[Mapping[str, Any]]) -> bool:
+    """Whether a run's step records hold a set pass@k reports over (``ENUMERATING_SET_SIZE``)."""
+    steps = steps_of(records)
+    return max((len(step.candidates) for step in steps), default=0) >= ENUMERATING_SET_SIZE
+
+
 def _candidate_rows(root: Path, sources: Sequence[Source]) -> list[dict[str, Any]]:
     """One row per (archive, scenario) whose trace carries enumerated sets.
 
     Empty over today's scope (every ``step`` record is ``baseline``'s one-candidate
     set, ``ENUMERATING_SET_SIZE``), and measurable the moment a best-of-N or selector
     archive enters it, with no edit here. Each row carries its ``world`` (WP-6.2),
-    which is what makes ``pass@k`` and ``selected@k`` a PAIRED pair.
+    which is what makes ``pass@k`` and ``selected@k`` a PAIRED pair. A recorded run
+    whose answer key does not describe its world is not a row: ``_candidate_exclusions``
+    lists it instead.
     """
     rows: list[dict[str, Any]] = []
     truths: dict[str, tuple[HypothesisCategory, ...]] | None = None
@@ -1053,14 +1061,14 @@ def _candidate_rows(root: Path, sources: Sequence[Source]) -> list[dict[str, Any
                 # No label: not graded, not a miss — counted nowhere rather than as
                 # zero, the mistake INC-003 cost $2.15 to learn.
                 continue
-            metrics = measure(records, expected)
-            if metrics.candidates_generated == 0:
-                continue
-            if max(len(step.candidates) for step in steps_of(records)) < ENUMERATING_SET_SIZE:
+            if not _enumerates(records):
                 continue
             outcome = _outcome_of(source, scenario)
             if outcome is None or outcome.provenance is None:  # pragma: no cover
                 continue
+            if recorded_applies.why_key_does_not_apply(outcome, root=root):
+                continue
+            metrics = measure(records, expected)
             provenance = outcome.provenance
             world = world_key(
                 scenario=scenario,
@@ -1122,6 +1130,47 @@ def _candidate_rows(root: Path, sources: Sequence[Source]) -> list[dict[str, Any
     return rows
 
 
+def _candidate_exclusions(root: Path, sources: Sequence[Source]) -> list[dict[str, Any]]:
+    """The runs ``_candidate_rows`` would have scored and did not, each with its reason.
+
+    A recorded run whose answer key does not describe its world (``evals/recorded_applies.py``,
+    the rule ``oracle_gap`` uses). Listed, never counted as a miss; the rule is asked first, so
+    a scope with no recorded run never loads the corpus here.
+    """
+    excluded: list[dict[str, Any]] = []
+    truths: dict[str, tuple[HypothesisCategory, ...]] | None = None
+    for source in sources:
+        for scenario, records in step_records_in(root, source.archive).items():
+            outcome = _outcome_of(source, scenario)
+            if outcome is None or outcome.provenance is None:  # pragma: no cover
+                continue
+            reason = recorded_applies.why_key_does_not_apply(outcome, root=root)
+            if not reason:
+                continue
+            if truths is None:
+                truths = _ground_truths(root)
+            if scenario not in truths or not _enumerates(records):
+                continue
+            excluded.append(
+                {
+                    "archive": source.archive,
+                    "scenario": scenario,
+                    "recording": recorded_applies.recording_of(outcome),
+                    # Whether it would have been a row of the oracle gap too.
+                    "selector_calls": sum(
+                        1 for step in steps_of(records) if step.selection is not None
+                    ),
+                    "reason": reason,
+                }
+            )
+    return excluded
+
+
+def _with_exclusions(section: dict[str, Any], excluded: Sequence[dict[str, Any]]) -> dict[str, Any]:
+    """The section plus its excluded runs; unchanged when none, so older documents regenerate."""
+    return section if not excluded else {**section, "excluded": list(excluded)}
+
+
 def _group_of_scenario(root: Path, scenario: str) -> dict[str, str]:
     """This scenario's family and difficulty, for the by-group breakdowns.
 
@@ -1146,6 +1195,18 @@ def _pass_at_k(root: Path, sources: Sequence[Source]) -> dict[str, Any]:
     it is WITHHELD row by row until that arm has a calibration report (``_selector_number``).
     """
     rows = _candidate_rows(root, sources)
+    excluded = _candidate_exclusions(root, sources)
+    if not rows and excluded:
+        return _with_exclusions(
+            _not_measurable(
+                "pass@k (plan 03 § 7.2)",
+                f"all {len(excluded)} run(s) with an enumerated candidate set replayed a "
+                "recording whose answer key does not describe its world (ADR 0040), so none "
+                "is scored; each is listed below",
+                ("a recorded run of a world whose answer key applies",),
+            ),
+            excluded,
+        )
     if not rows:
         # Every string here is the one the committed document already carries: the
         # report is versioned evidence (invariant 9), so a re-render differing only in
@@ -1160,11 +1221,14 @@ def _pass_at_k(root: Path, sources: Sequence[Source]) -> dict[str, Any]:
         "metric": "pass@k (plan 03 § 7.2) and selected@k (plan 03 § 7.3)",
         "measurable": True,
         "value": {
+            # n: the runs scored, after the exclusions below.
+            "runs": len(rows),
             "rows": [_selector_number(row) for row in rows],
             "selector_gate": SELECTOR_GATE_RULE,
         },
         "why": "",
         "requires": [],
+        "excluded": excluded,
     }
 
 
@@ -1233,6 +1297,18 @@ def _oracle_gap(root: Path, sources: Sequence[Source]) -> dict[str, Any]:
     neither the planner nor the selector (ADR 0038, ADR 0049).
     """
     rows = [row for row in _candidate_rows(root, sources) if row["selector_calls"] > 0]
+    excluded = [run for run in _candidate_exclusions(root, sources) if run["selector_calls"] > 0]
+    if not rows and excluded:
+        return _with_exclusions(
+            _not_measurable(
+                "oracle_gap@k = pass@k − selected@k (plan 03 § 7.3)",
+                f"all {len(excluded)} selector run(s) in scope replayed a recording whose "
+                "answer key does not describe its world (ADR 0040), so none is scored; each "
+                "is listed below",
+                ("a recorded selector run of a world whose answer key applies",),
+            ),
+            excluded,
+        )
     if not rows:
         # Byte-identical to the committed document, for ``_pass_at_k``'s reason.
         return _not_measurable(
@@ -1243,11 +1319,14 @@ def _oracle_gap(root: Path, sources: Sequence[Source]) -> dict[str, Any]:
         )
     uncalibrated = sorted({row["arm"] for row in rows if row["calibration_report_id"] is None})
     if uncalibrated:
-        return _not_measurable(
-            "oracle_gap@k = pass@k − selected@k (plan 03 § 7.3)",
-            f"{len(rows)} selector row(s) are in scope and {len(uncalibrated)} arm(s) "
-            f"have no calibration report: {', '.join(uncalibrated)}. " + SELECTOR_GATE_RULE,
-            ("a calibration report id in research_report.CALIBRATION_REPORTS",),
+        return _with_exclusions(
+            _not_measurable(
+                "oracle_gap@k = pass@k − selected@k (plan 03 § 7.3)",
+                f"{len(rows)} selector row(s) are in scope and {len(uncalibrated)} arm(s) "
+                f"have no calibration report: {', '.join(uncalibrated)}. " + SELECTOR_GATE_RULE,
+                ("a calibration report id in research_report.CALIBRATION_REPORTS",),
+            ),
+            excluded,
         )
     return {
         "metric": "oracle_gap@k = pass@k − selected@k (plan 03 § 7.3)",
@@ -1273,6 +1352,7 @@ def _oracle_gap(root: Path, sources: Sequence[Source]) -> dict[str, Any]:
         },
         "why": "",
         "requires": [],
+        "excluded": excluded,
     }
 
 
@@ -2044,7 +2124,7 @@ def _render_candidate_rows(value: dict[str, Any]) -> list[str]:
     """
     ks = [entry["k"] for entry in value["rows"][0]["pass_at_k"]]
     lines = [
-        f"Selected@k: not available — {value['selected_at_k_why']}.",
+        f"{len(value['rows'])} run(s) scored (n). Selected@k: {value['selector_gate']}",
         "",
     ]
     lines.extend(
@@ -2078,6 +2158,52 @@ def _render_candidate_rows(value: dict[str, Any]) -> list[str]:
     )
     lines.append("")
     return lines
+
+
+def _render_oracle_gap(value: dict[str, Any]) -> list[str]:
+    """The gap by world, family and difficulty, the scored count beside every number."""
+    lines = [f"Calibration reports: {value['calibration_reports']}.", ""]
+    for title, key in (
+        ("world", "by_world"),
+        ("family", "by_family"),
+        ("difficulty", "by_difficulty"),
+    ):
+        lines.extend(
+            _table(
+                (title, "paired runs", "k", "n scored", "pass@k", "selected@k", "oracle gap"),
+                (
+                    (
+                        f"`{entry['group']}`",
+                        str(entry["paired_runs"]),
+                        str(at["k"]),
+                        str(at["scored_runs"]),
+                        _number(at["pass_at_k"]),
+                        _number(at["selected_at_k"]),
+                        _number(at["oracle_gap"]),
+                    )
+                    for entry in value[key]
+                    for at in entry["at_k"]
+                ),
+            )
+        )
+    return lines
+
+
+def _render_excluded(section: Mapping[str, Any]) -> list[str]:
+    """The runs a section left out and why; nothing when it left none out."""
+    excluded = section.get("excluded") or []
+    if not excluded:
+        return []
+    return [
+        f"Excluded ({len(excluded)}) — not scored and not counted as a miss:",
+        "",
+        *(
+            f"- `{run['archive']}` {run['scenario']} (recording `{run['recording']}`): "
+            f"{run['reason']}"
+            for run in excluded
+        ),
+        "",
+    ]
 
 
 def _pass_cell(entry: dict[str, Any]) -> str:
@@ -2303,8 +2429,11 @@ def render_markdown(document: dict[str, Any]) -> str:
                 "Needs: " + "; ".join(section["requires"]) + ".",
                 "",
             ]
+            lines.extend(_render_excluded(section))
             continue
-        lines.extend(_render_candidate_rows(section["value"]))
+        render = _render_oracle_gap if key == "oracle_gap" else _render_candidate_rows
+        lines.extend(render(section["value"]))
+        lines.extend(_render_excluded(section))
 
     regressions = sections["scenario_level_regressions"]
     lines += [

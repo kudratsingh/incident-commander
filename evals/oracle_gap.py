@@ -26,10 +26,8 @@ from typing import Any, Final
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from evals import artifacts, research_report
+from evals import artifacts, recorded_applies, research_report
 from evals.candidate_metrics import REPORTED_KS, WorldKey, measure, measure_selection, world_key
-from evals.graders.deterministic import GradeDimension
-from evals.graders.root_cause import is_not_graded_detail
 from evals.recorded_client import matching_recordings
 from evals.runner import ScenarioOutcome
 from evals.scenarios.loader import load_scenarios
@@ -93,15 +91,6 @@ def load_plan(path: Path = PLAN_PATH) -> SamplePlan:
     return SamplePlan.model_validate_json(path.read_text(encoding="utf-8"))
 
 
-def label_applies(scenario: str, recording: str) -> bool | None:
-    """Does the answer key beside this recording describe its world (ADR 0040)? ``None``: no key."""
-    for path in artifacts.versions("recorded_world_truth", scenario):
-        if path.name.endswith(f".{recording}.truth.json"):
-            value = json.loads(path.read_text(encoding="utf-8")).get("applies")
-            return value if isinstance(value, bool) else None
-    return None
-
-
 def plan_refusals(plan: SamplePlan, worlds: Sequence[SampleWorld]) -> list[str]:
     """Every reason these worlds cannot run yet; empty when they can. Spends nothing."""
     corpus = {s.name: s for s in load_scenarios(REPO_ROOT / "evals" / "scenarios")}
@@ -128,7 +117,7 @@ def plan_refusals(plan: SamplePlan, worlds: Sequence[SampleWorld]) -> list[str]:
                 f"evals/recorded_worlds/{world.scenario}/."
             )
             continue
-        applies = label_applies(world.scenario, world.recording)
+        applies = recorded_applies.label_applies(world.scenario, world.recording)
         if applies is not True:
             refusals.append(
                 f"{world.scenario}: the answer key beside recording {world.recording} does not "
@@ -232,16 +221,6 @@ def run_row(
     )
 
 
-def recording_of(outcome: ScenarioOutcome) -> str | None:
-    """The recording id a recorded run replayed, off its ``replay.recording`` path."""
-    replay = outcome.replay if isinstance(outcome.replay, Mapping) else {}
-    path = replay.get("recording")
-    if not isinstance(path, str):
-        return None
-    parsed = artifacts.parse_version_name(Path(path).name, suffix=".json")
-    return None if parsed is None else parsed.invocation_id
-
-
 def step_records(root: Path, archive: str, scenario: str) -> list[dict[str, Any]]:
     """The ``step`` records of one scenario in one archive, read by name (never a glob)."""
     path = research_report.archive_dir(root, archive) / "traces" / f"{scenario}.jsonl"
@@ -287,7 +266,7 @@ def why_not_scored(
     arm = research_report.selector_arm_key(provenance.strategy, dict(provenance.strategy_config))
     if arm != plan.arm:
         return f"ran arm {arm}, the plan's arm is {plan.arm}"
-    recording = recording_of(outcome)
+    recording = recorded_applies.recording_of(outcome)
     if recording != pins[outcome.scenario]:
         return f"replayed recording {recording}, the plan pins {pins[outcome.scenario]}"
     # 3. A replay miss makes the run not comparable: it acted on an error the world never sent.
@@ -297,10 +276,10 @@ def why_not_scored(
             f"not comparable: the replay missed {replay.get('misses', '?')} call(s) and refused "
             f"{len(replay.get('refusals') or ())} (ADR 0047) — re-record the world wider"
         )
-    # 4. A label that does not describe this recording's world is not graded (ADR 0040).
-    root_cause = [d for d in outcome.report.dimensions if d.dimension is GradeDimension.ROOT_CAUSE]
-    if root_cause and is_not_graded_detail(root_cause[0].detail):
-        return "not graded: the label does not describe this recording's world (ADR 0040)"
+    # 4. A label that does not describe this recording's world is not graded (ADR 0040); the
+    #    rule research_report applies too, so the two reports cannot disagree.
+    if reason := recorded_applies.why_key_does_not_apply(outcome):
+        return reason
     scenario = corpus.get(outcome.scenario)
     if scenario is None or scenario.ground_truth is None:
         return "no ground truth to score against"

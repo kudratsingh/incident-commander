@@ -137,10 +137,12 @@ canned_tool_responses:
   # `…20261010T155558Z.35c7dada96b9`. Here both rule the outside-the-chain
   # stall OUT: the resolver is polling (last_poll_age_seconds 0) and no loop is
   # paused, so the DAG pause is the whole story.
+  # `polling` true / `poll_interval_seconds` 2.0 (platform v0.6.25) were added at that re-pin,
+  # not recorded (WO-R3-374 re-records this world on v0.6.25).
   get_consumer_lag:
     content:
     - type: text
-      text: '{"consumer_group":"dependency-resolver","lag":0,"lag_known":true,"source":"live","cache_key":"kafka:consumer_lag:dependency-resolver","measured_at":"2026-10-10T15:56:00.966659Z","age_seconds":0,"recent_samples":[{"lag":0,"measured_at":"2026-10-10T15:56:00.966659Z"},{"lag":0,"measured_at":"2026-10-10T15:55:55.709185Z"},{"lag":0,"measured_at":"2026-10-10T15:55:50.554427Z"},{"lag":0,"measured_at":"2026-10-10T15:55:45.312319Z"},{"lag":0,"measured_at":"2026-10-10T15:55:40.133556Z"},{"lag":0,"measured_at":"2026-10-10T15:55:34.947155Z"},{"lag":0,"measured_at":"2026-10-10T15:55:29.778829Z"},{"lag":0,"measured_at":"2026-10-10T15:55:24.579346Z"},{"lag":0,"measured_at":"2026-10-10T15:55:19.368471Z"},{"lag":0,"measured_at":"2026-10-10T15:55:14.147486Z"},{"lag":0,"measured_at":"2026-10-10T15:55:08.984348Z"},{"lag":0,"measured_at":"2026-10-10T15:55:03.847948Z"},{"lag":0,"measured_at":"2026-10-10T15:54:58.703392Z"},{"lag":0,"measured_at":"2026-10-10T15:54:53.503471Z"},{"lag":0,"measured_at":"2026-10-10T15:54:48.285720Z"}],"last_poll_at":"2026-10-10T15:56:00.959402Z","last_poll_age_seconds":0}'
+      text: '{"consumer_group":"dependency-resolver","lag":0,"lag_known":true,"source":"live","cache_key":"kafka:consumer_lag:dependency-resolver","measured_at":"2026-10-10T15:56:00.966659Z","age_seconds":0,"recent_samples":[{"lag":0,"measured_at":"2026-10-10T15:56:00.966659Z"},{"lag":0,"measured_at":"2026-10-10T15:55:55.709185Z"},{"lag":0,"measured_at":"2026-10-10T15:55:50.554427Z"},{"lag":0,"measured_at":"2026-10-10T15:55:45.312319Z"},{"lag":0,"measured_at":"2026-10-10T15:55:40.133556Z"},{"lag":0,"measured_at":"2026-10-10T15:55:34.947155Z"},{"lag":0,"measured_at":"2026-10-10T15:55:29.778829Z"},{"lag":0,"measured_at":"2026-10-10T15:55:24.579346Z"},{"lag":0,"measured_at":"2026-10-10T15:55:19.368471Z"},{"lag":0,"measured_at":"2026-10-10T15:55:14.147486Z"},{"lag":0,"measured_at":"2026-10-10T15:55:08.984348Z"},{"lag":0,"measured_at":"2026-10-10T15:55:03.847948Z"},{"lag":0,"measured_at":"2026-10-10T15:54:58.703392Z"},{"lag":0,"measured_at":"2026-10-10T15:54:53.503471Z"},{"lag":0,"measured_at":"2026-10-10T15:54:48.285720Z"}],"last_poll_at":"2026-10-10T15:56:00.959402Z","last_poll_age_seconds":0,"polling":true,"poll_interval_seconds":2.0}'
     is_error: false
   get_control_loops:
     content:

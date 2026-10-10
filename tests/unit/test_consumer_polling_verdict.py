@@ -5,27 +5,38 @@ platform looked: true / false / null) and `poll_interval_seconds` (the cadence t
 drawn against: 2.0 on the two live groups, null elsewhere). INC-008's addendum is why: on v0.6.24
 the dead resolver read `last_poll_age_seconds 39` beside `age_seconds 3`, and the planner called
 that "polling". These tests pin that both fields reach the typed model — `extra="ignore"` would
-otherwise drop the one reading that says a consumer is dead — and that a replay holds them.
+otherwise drop the one reading that says a consumer is dead — that a replay holds them, and that
+every canned lag reading carries both, written by the platform's own rule.
 
 RED BEFORE: on `main` at the v0.6.24 pin, `GetConsumerLagOutput` has neither field, so every
 parse test below fails there (the attribute is missing), and the replay test fails on the
-unlisted `poll_interval_seconds`.
+unlisted `poll_interval_seconds`. The fixture tests fail against the canned readings as v0.6.24
+left them, none of which carries either field.
 """
 
 from __future__ import annotations
 
 import json
-from datetime import timedelta
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Final
 
 from evals import recorded_client
+from evals.fixture_drift import _VOLATILE, canned_calls
+from evals.scenarios.loader import load_scenarios
 from incident_commander.tools.mcp_client import ToolResult
 from incident_commander.tools.registry import GetConsumerLagOutput
 
 _SNAPSHOT: Final[Path] = (
     Path(__file__).resolve().parents[2] / "contracts" / "platform-tools.snapshot.json"
 )
+_SCENARIOS_DIR: Final[Path] = Path(__file__).resolve().parents[2] / "evals" / "scenarios"
+
+#: The platform's rule (`app/core/consumer_lag.py`): the groups it measures, the poll loop's
+#: fetch bound, and how many of those may pass since the last poll before `polling` is false.
+_MEASURED_GROUPS: Final[frozenset[str]] = frozenset({"worker-dispatcher", "dependency-resolver"})
+_POLL_INTERVAL_SECONDS: Final[float] = 2.0
+_POLLING_INTERVALS: Final[int] = 5
 
 #: `get_consumer_lag(dependency-resolver)` as the v0.6.25 demo stack answered it on 2026-10-10,
 #: under the read-only token (`recent_samples` trimmed to one entry).
@@ -137,6 +148,62 @@ class TestTheVerdictReplaysUnchanged:
         assert "poll_interval_seconds" in recorded_client.HELD_DURATION_FIELDS["get_consumer_lag"]
         assert "polling" not in recorded_client.HELD_DURATION_FIELDS["get_consumer_lag"]
         assert "polling" not in recorded_client.SHIFTED_CLOCK_FIELDS["get_consumer_lag"]
+
+
+class TestEveryCannedReadingCarriesTheVerdict:
+    """The canned fixtures were brought up to v0.6.25 in one commit, by the platform's own rule.
+
+    RED BEFORE: against the fixtures as v0.6.24 left them, no reading carries either field.
+    """
+
+    def test_every_reading_carries_both_fields_by_the_platforms_rule(self) -> None:
+        readings = _canned_lag_readings()
+        assert len(readings) >= 40, "the walk lost its subject"
+        wrong = []
+        for label, payload in readings:
+            if "polling" not in payload or "poll_interval_seconds" not in payload:
+                wrong.append(f"{label}: missing")
+            elif (payload["polling"], payload["poll_interval_seconds"]) != _expected(payload):
+                wrong.append(
+                    f"{label}: {payload['polling']!r} {payload['poll_interval_seconds']!r}"
+                )
+        assert not wrong, "\n".join(wrong)
+
+    def test_the_corpus_holds_both_verdicts(self) -> None:
+        # Running and stopped consumers alike: a corpus of one verdict could not show the agent
+        # reading the other.
+        verdicts = {payload.get("polling") for _, payload in _canned_lag_readings()}
+        assert {True, False, None} <= verdicts
+
+    def test_the_verdict_is_compared_exactly_by_the_drift_walk(self) -> None:
+        # `polling` is the evidence a stopped-consumer world rests on, so the drift walk holds it
+        # to the live value (a seeded stop is ledgered post-fault, like `lag`), and the interval
+        # is a code constant, the same on every stack. Neither is forgiven as volatile.
+        assert "polling" not in _VOLATILE["get_consumer_lag"]
+        assert "poll_interval_seconds" not in _VOLATILE["get_consumer_lag"]
+
+
+def _canned_lag_readings() -> list[tuple[str, dict[str, Any]]]:
+    return [
+        (call.label, dict(call.payload))
+        for call in canned_calls(load_scenarios(_SCENARIOS_DIR))
+        if call.tool == "get_consumer_lag"
+    ]
+
+
+def _expected(payload: dict[str, Any]) -> tuple[bool | None, float | None]:
+    """What the platform answers for this reading: by group NAME, then by poll time."""
+    if payload.get("consumer_group") not in _MEASURED_GROUPS:
+        return None, None
+    last_poll_at, measured_at = payload.get("last_poll_at"), payload.get("measured_at")
+    if last_poll_at is None or measured_at is None:
+        return None, _POLL_INTERVAL_SECONDS
+    gap = (_parse(measured_at) - _parse(last_poll_at)).total_seconds()
+    return max(0.0, gap) <= _POLLING_INTERVALS * _POLL_INTERVAL_SECONDS, _POLL_INTERVAL_SECONDS
+
+
+def _parse(value: str) -> datetime:
+    return datetime.fromisoformat(value.replace("Z", "+00:00"))
 
 
 def _snapshot_tool(name: str) -> dict[str, Any]:

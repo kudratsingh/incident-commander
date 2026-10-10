@@ -1,5 +1,6 @@
 # Family C, the stranded world (plan 01 § 7.2, WO-R3-214 / WP-7.2, ADR 0053) —
-# a REPAIR scenario since WO-R3-372 (owner decision O-49, ADR 0080).
+# a REPAIR scenario since WO-R3-372 (owner decision O-49, ADR 0080), graded on the
+# platform's `polling` verdict since WO-R3-374 (owner decision O-51, ADR 0081).
 #
 # The chain's root SUCCEEDED and its descendants are still waiting. Nothing in
 # the chain is dead-lettered, so there is nothing to replay; the chain is not
@@ -11,13 +12,21 @@
 # Until platform v0.6.24 neither half could be read (INC-008), so this world
 # escalated and its label was a coin flip against `saga_coordinator_stall` on
 # identical evidence. Since v0.6.24 (platform ADR 0041) both halves are
-# readings: `get_consumer_lag(consumer_group="dependency-resolver")` carries
-# `last_poll_age_seconds` (far above `age_seconds` once the consumer stops
-# asking), and `get_control_loops` reports the sweep `paused: true` with its
-# expiry. So the owner's ruling O-49 applies: the resolver half has a Tier-1
-# fix — ONE `restart_consumer_group` on `dependency-resolver`, verified by the
-# resolver polling again — and the sweep half has none (no tool lifts a loop
+# readings: `get_consumer_lag(consumer_group="dependency-resolver")` carries the
+# resolver's poll time, and `get_control_loops` reports the sweep `paused: true`
+# with its expiry. So the owner's ruling O-49 applies: the resolver half has a
+# Tier-1 fix — ONE `restart_consumer_group` on `dependency-resolver`, verified by
+# the resolver polling again — and the sweep half has none (no tool lifts a loop
 # pause), so it is named with its expiry and left to run out.
+#
+# The first paid run on v0.6.24 (archive `daea4943f3a5`, INC-008 addendum) made
+# every read and still read the dead resolver's `last_poll_age_seconds 39`
+# (beside `age_seconds 3`) as "polling, somewhat elevated", then anchored on the
+# paused sweep. A number the model must threshold lost to a boolean with a clock.
+# Since v0.6.25 (platform ADR 0041 amendment) the platform states the verdict,
+# `polling: false`, and this world is graded on it (ADR 0081): the resolver read
+# BEFORE the restart must say `polling: false`, the last read AFTER it
+# `polling: true`.
 #
 # What a correct run does NOT claim: that the chain drained. The parent's
 # `job.completed` was consumed before the chain was built, so a restarted
@@ -40,12 +49,13 @@ description: >
   fault: the root completed, the upstream parent completed, the first descendant
   has sat in `waiting` for 47 minutes, and `paused` is false. `list_dlq_messages`
   holds only the platform's own four rows — nothing of this chain. The resolver
-  that promotes waiting children reads `last_poll_age_seconds` far above its
-  `age_seconds` (it stopped polling) and `get_control_loops` reads the
-  `resume_unblocked_waiting` sweep paused. Correct trajectory: read the chain the
-  alert names, the whole queue, the resolver and the loops; rank
-  `resolver_stall`; restart `dependency-resolver` once; verify it is polling
-  again; resolve, naming the paused sweep and its expiry in the briefing.
+  that promotes waiting children reads `polling: false` (it stopped asking for
+  messages, though its lag reads 0) and `get_control_loops` reads the
+  `resume_unblocked_waiting` sweep paused — a held backstop, which does not
+  explain the stopped resolver. Correct trajectory: read the chain the alert
+  names, the whole queue, the resolver and the loops; rank `resolver_stall`;
+  restart `dependency-resolver` once; verify it reads `polling: true` again;
+  resolve, naming the paused sweep and its expiry in the briefing.
 
 tags:
 - phase-7
@@ -272,13 +282,13 @@ canned_llm_responses:
       reasoning: >
         The queue holds four rows and none of them belongs to this chain, so
         nothing in it failed and there is nothing to replay. What promotes the
-        descendant is the dependency-resolver consumer group: read whether it
-        is still polling.
+        descendant is the dependency-resolver consumer group: read its polling
+        verdict.
     - category: saga_coordinator_stall
       name: the coordinator stopped stepping the workflow
       confidence: 0.3
       reasoning: >
-        Still possible until the resolver's own reading says it is polling.
+        Still possible until the resolver's own reading says polling true.
     next_action:
       kind: probe
       tool_name: get_consumer_lag
@@ -289,18 +299,18 @@ canned_llm_responses:
       name: nothing is promoting the waiting descendant
       confidence: 0.8
       reasoning: >
-        dependency-resolver reads lag 0, known and measured 2 s ago, but
-        last_poll_age_seconds is 20 — the consumer stopped asking
-        long before the platform last measured it, and a lag of 0 is what a
-        stopped resolver reads when nothing completes. The resolver is not
-        polling. Read the background loops before concluding, because the
-        resume sweep should have promoted the child even without it.
+        dependency-resolver reads polling false — the platform's verdict that
+        the consumer stopped asking for messages — although its lag reads 0,
+        known and measured 2 s ago: a lag of 0 is what a stopped resolver reads
+        when nothing completes. Read the background loops before concluding,
+        because the resume sweep should have promoted the child even without
+        it.
     - category: saga_coordinator_stall
       name: the coordinator stopped stepping the workflow
       confidence: 0.1
       reasoning: >
-        The resolver reading explains the stall on its own; nothing points at
-        the coordinator.
+        Only what remains once the resolver reads polling true; it reads
+        polling false.
     next_action:
       kind: probe
       tool_name: get_control_loops
@@ -310,17 +320,18 @@ canned_llm_responses:
       name: nothing is promoting the waiting descendant
       confidence: 0.9
       reasoning: >
-        The resolver stopped polling, and the resume_unblocked_waiting sweep
-        that backstops it reads paused, expiring in 880 seconds. The
-        resolver is restartable with one Tier-1 action; the sweep has no tool
-        and lifts by itself, so it is named rather than acted on.
+        The resolver reads polling false, and the resume_unblocked_waiting
+        sweep that backstops it reads paused, expiring in 880 seconds. A paused
+        backstop does not explain a stopped resolver, and the chain itself is
+        not paused, so this is not dag_paused. The resolver is restartable with
+        one Tier-1 action; the sweep has no tool and lifts by itself, so it is
+        named rather than acted on.
     next_action:
       kind: remediate
       reason: >
-        resolver_stall — dependency-resolver stopped polling (last_poll_age
-        20 s against a reading 2 s old) while the chain's own rows are
-        healthy. Restart that consumer group; the paused resume sweep is left
-        to expire and named in the handoff.
+        resolver_stall — dependency-resolver reads polling false while the
+        chain's own rows are healthy. Restart that consumer group; the paused
+        resume sweep is left to expire and named in the handoff.
   remediation_planner:
   - target_hypothesis: nothing is promoting the waiting descendant
     action_tool: restart_consumer_group
@@ -331,46 +342,46 @@ canned_llm_responses:
       consumer_group: dependency-resolver
     verify_expectation: >
       The restart clears the stop state and the supervisor re-spawns the
-      resolver within seconds, so last_poll_age_seconds falls back to within a
-      few seconds of age_seconds. The chain itself stays waiting until the
+      resolver within seconds, so a reading taken after the restart says
+      polling true (the read right after it can still say polling false until
+      the platform's next pass). The chain itself stays waiting until the
       paused resume sweep expires, so it is not the reading to verify on.
   # Two polls, in the order the live world produces them (canned_verify_polls
   # above): the first read lands before the next metrics pass and still shows
-  # the stopped value; the second shows the resolver polling.
+  # the stopped verdict; the second shows the resolver polling.
   verification_judge:
   - verdict: not_verified
     reasoning: >
-      The read taken right after the restart still shows last_poll_age_seconds
-      far above age_seconds — the poll time the platform published before the
-      consumer came back. Not yet evidence that it is polling.
+      The read taken right after the restart still says polling false — the
+      verdict the platform published before the consumer came back. Not yet
+      evidence that it is polling.
   - verdict: verified
     reasoning: >
-      last_poll_age_seconds is back within a second or two of age_seconds on
-      dependency-resolver: the restarted consumer is polling again, and the
-      restart reported kill_key_cleared=true.
+      dependency-resolver now reads polling true: the restarted consumer is
+      asking for messages again, and the restart reported
+      kill_key_cleared=true.
   briefing_writer:
   - findings: >
       The workflow rooted at 4a30546f-d3c5-549f-a772-633c0b26219d stalled
       with no failed node: the root and its parent completed, descendant
       7fb11dea-d182-5033-a4d0-2d2a645eb1df was still waiting after 47 minutes,
       and the dead-letter queue held nothing of the chain. dependency-resolver
-      had stopped polling (last_poll_age_seconds 20 against a fresh
-      measurement), so the agent restarted it, and the follow-up read shows it
-      polling again. The resume_unblocked_waiting sweep is still paused,
+      read polling false although its lag read 0, so the agent restarted it,
+      and the follow-up read shows polling true. The resume_unblocked_waiting
+      sweep, which backstops the resolver, is still paused,
       expiring in about 880 seconds, and the waiting descendants
       promote when it does.
     recommendation: >
       Check get_dag_state on the root after the resume_unblocked_waiting pause
       expires and confirm both descendants left waiting; if they have not,
       the sweep did not resume and needs a human. Watch dependency-resolver's
-      last_poll_age_seconds for the next few minutes to confirm it keeps
-      polling.
+      polling verdict for the next few minutes to confirm it stays true.
   briefing_judge:
   - groundedness: 0.95
     actionability: 0.9
     reasoning: >
       Findings quote the chain's statuses, the empty queue, the resolver's
-      stopped poll time and its recovery, and name the paused sweep with its
+      polling verdict before and after the restart, and name the paused sweep with its
       expiry without claiming the chain drained; the recommendation names the
       read to make and the condition that sends it to a human.
 
@@ -405,18 +416,25 @@ expectation:
   - tools: [list_dlq_messages]
     field: total
     at_most: 4
-  # THE READING THAT PROVES THE LABEL (INC-008's fix, platform ADR 0041), read
-  # BEFORE the action. A polling consumer's `last_poll_age_seconds` is never
-  # more than a few seconds above `age_seconds` (the demo's metrics pass runs
-  # every 5 s); 20 is three passes and more, and by the time any run reads the
-  # resolver its kill is well older than that (seeding, the settle wait and the
-  # precondition polls come first). `before_tools` keeps the post-restart reads
-  # out of it, and `call_arguments` keeps the dispatcher's reading out of it —
-  # one tool answers for every group.
+  # THE READING THAT PROVES THE LABEL (INC-008's fix, platform ADR 0041 and its
+  # v0.6.25 amendment), read BEFORE the action: the platform's own verdict,
+  # `polling: false`. `before_tools` keeps the post-restart reads out of it, and
+  # `call_arguments` keeps the dispatcher's reading out of it — one tool answers
+  # for every group.
+  #
+  # Until WO-R3-374 this claim was `last_poll_age_seconds at_least 20`. It is
+  # REPLACED, not kept as an `any_of` beside the verdict (PROTOCOL step 4, ADR
+  # 0081): there is one call shape, the verdict is true of it on every correct
+  # run (the precondition below proves the resolver dead before the run starts,
+  # and nothing revives it before the restart), and the age is not a second
+  # honest shape of "dead" but a proxy for this stack's 5 s metrics pass — at the
+  # platform's default 60 s pass a LIVING resolver reads ages up to ~70 with
+  # `polling: true`, so as an alternative it would admit a reading of a consumer
+  # that never stopped. A disjunction with it would loosen the claim.
   - tools: [get_consumer_lag]
     call_arguments: {consumer_group: dependency-resolver}
-    field: last_poll_age_seconds
-    at_least: 20
+    field: polling
+    equals: false
     before_tools: [restart_consumer_group]
   # THE OTHER HALF, read and named: the backstop sweep is paused. Selected by
   # the loop's NAME, because the reading lists all eleven loops and ten of them
@@ -431,27 +449,42 @@ expectation:
     field: kill_key_cleared
     equals: true
   # THE VERIFY CLAIM (PROTOCOL step 4, both questions). After the restart the
-  # resolver polls again, so the newest reading of it AFTER the action reads
-  # `last_poll_age_seconds` back within a few seconds of `age_seconds`; 15 is
-  # three passes, and the stopped reading it replaces was far above 20.
+  # resolver polls again, so the newest reading of it AFTER the action says
+  # `polling: true` — the platform's verdict at its next pass.
   #
-  # Every correct verify shape, and why this one claim holds for each: only ONE
+  # Every correct verify shape, and why this group holds for each: only ONE
   # read can observe the action (`VERIFY_PROBE_FOR_ACTION`: `get_consumer_lag`
   # on the restarted group — the plan guard refuses any other), so there is one
-  # CALL shape and no `any_of` to write. What varies is the TIMING: the first
-  # post-action poll can land before the supervisor has re-spawned the consumer
-  # or before the next metrics pass has published its poll time, and then reads
-  # the frozen stopped value; the correct judge says `not_verified` and the
-  # loop polls again. `which: last` grades the reading the run verified on,
-  # whichever poll it was, and `after_tools` cuts at the action, so a
-  # pre-action reading can never satisfy it. A run that resolves on the frozen
-  # reading is wrong, and this claim says so.
-  - tools: [get_consumer_lag]
-    call_arguments: {consumer_group: dependency-resolver}
-    field: last_poll_age_seconds
-    which: last
-    at_most: 15
-    after_tools: [restart_consumer_group]
+  # CALL shape. What varies is the TIMING: the first post-action poll can land
+  # before the supervisor has re-spawned the consumer or before the next
+  # metrics pass has published its poll time, and then still reads the frozen
+  # stopped verdict (`polling: false`, the age 20 s and climbing); the correct
+  # judge says `not_verified` and the loop polls again. `which: last` grades the
+  # reading the run verified on, whichever poll it was, and `after_tools` cuts
+  # at the action, so a pre-action reading can never satisfy it. A run that
+  # resolves on the frozen reading fails both members.
+  #
+  # Why `last_poll_age_seconds at_most 15` stays, as the second member: after
+  # the restart it is an honest reading of the same fact. The precondition
+  # proves the frozen poll time at least 20 s old before the run starts and it
+  # only ages from there, so an age of 15 or less on a reading taken after the
+  # restart can only be a poll the restarted consumer made — it cannot admit
+  # the stopped resolver. Unlike the pre-action age claim it can only err the
+  # safe way: on a slow metrics pass a polling consumer's age can exceed 15
+  # (a correct run failing that member), which the verdict member covers.
+  - any_of:
+    - tools: [get_consumer_lag]
+      call_arguments: {consumer_group: dependency-resolver}
+      field: polling
+      which: last
+      equals: true
+      after_tools: [restart_consumer_group]
+    - tools: [get_consumer_lag]
+      call_arguments: {consumer_group: dependency-resolver}
+      field: last_poll_age_seconds
+      which: last
+      at_most: 15
+      after_tools: [restart_consumer_group]
 
   # WHICH group was restarted, universally over every matching call and
   # fail-closed on absence. `restart_consumer_group` never refuses a group
@@ -557,10 +590,15 @@ expected_precondition:
   expect:
   - path: total
     at_most: 4
-# THE RESOLVER STOPPED, as a reading (O-49). The kill lands at seeding and the
-# poll time freezes there, so the age climbs one second per second; the
-# graded claim's 20 is reached within a few polls of the settle wait. This is
-# what makes the label observable: without it the world would be INC-008's
+# THE RESOLVER STOPPED, as a reading (O-49) and as the platform's verdict
+# (O-51, ADR 0081). The kill lands at seeding and the poll time freezes there,
+# so the age climbs one second per second, and the platform's metrics pass
+# turns `polling` false once the last poll is more than 5 x 2.0 s old (within
+# 15 s on this stack's 5 s pass). Both are asserted: `polling: false` is the
+# verdict the run is graded on, and an age of at least 20 is what makes the
+# verify claim's age member honest (a post-restart reading at 15 or less can
+# then only be a new poll). Reached within a few polls of the settle wait. This
+# is what makes the label observable: without it the world would be INC-008's
 # again and the run would be graded on a coin flip.
 - tool: get_consumer_lag
   arguments:
@@ -570,6 +608,8 @@ expected_precondition:
   expect:
   - path: source
     equals: live
+  - path: polling
+    equals: false
   - path: last_poll_age_seconds
     at_least: 20
 # THE SWEEP HELD, as a reading. The pause is what keeps the children waiting
@@ -585,7 +625,7 @@ expected_precondition:
 # state, the queue read says there is nothing of the chain to act on, and the
 # resolver read is the one that separates this label from its nearest
 # neighbour, `saga_coordinator_stall` (PROTOCOL step 4's third question,
-# INC-008): polling stopped is this world, polling normally is not. The loop
+# INC-008): `polling: false` is this world, `polling: true` is not. The loop
 # read names what the restart does not fix.
 discriminating_probes:
 - tool: get_dag_state

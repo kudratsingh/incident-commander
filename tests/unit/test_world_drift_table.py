@@ -200,6 +200,47 @@ def test_main_from_logs_exits_1_on_drift_and_0_when_all_clean(
     assert "| `dlq_backlog` |" in capsys.readouterr().out
 
 
+_NOT_RUN_LOG = "\n".join(
+    (
+        "DRIFT NOT RUN (api_latency_db_query): INC-007 window — every api_latency precondition "
+        "refuses until ~09:02 UTC 2026-10-11",
+        "DRIFT: recording  evals/recorded_worlds/api_latency_db_query/"
+        "api_latency_db_query.20261010T082148Z.8c4a32a50d4b.json",
+        "",
+    )
+)
+
+
+def test_a_check_deliberately_not_run_reads_back_as_not_run_with_its_reason() -> None:
+    """WO-R3-366: a table can carry every world while saying which were not checked."""
+    row = world_drift_table.row_from_log(_NOT_RUN_LOG, checked_at="t")
+    assert (row.scenario, row.recording, row.verdict, row.disagreements) == (
+        "api_latency_db_query",
+        "8c4a32a50d4b",
+        NOT_RUN,
+        None,
+    )
+    assert row.detail.startswith("INC-007 window")
+
+
+def test_a_not_run_marker_is_not_a_failed_reset(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Exit 6 means a reset failed mid-loop; a marked world is just not all-clean (1)."""
+    (tmp_path / "a.log").write_text(_CLEAN_LOG)
+    (tmp_path / "b.log").write_text(_NOT_RUN_LOG)
+    assert world_drift_table.main(["--from-logs", str(tmp_path)]) == 1
+    assert "| `api_latency_db_query` | `8c4a32a50d4b` | NOT RUN |" in capsys.readouterr().out
+
+
+def test_an_expired_breaker_record_has_its_own_reason() -> None:
+    from evals.world_drift import EXIT_RECORD_EXPIRED, RECORD_EXPIRED_MESSAGE
+
+    row = world_drift_table.row_of("s", "aaa", EXIT_RECORD_EXPIRED, None, "")
+    assert row.verdict == REFUSED
+    assert row.detail == f"record expired: {RECORD_EXPIRED_MESSAGE}"
+
+
 # --------------------------------------------------------------------------
 # The table as evidence
 # --------------------------------------------------------------------------

@@ -15,12 +15,69 @@ from evals import dossier
 from evals import world_audit as audit
 from evals.guards import PrincipalGuardError
 from evals.runner import _eval_defaults
-from evals.scenarios.loader import load_scenario
+from evals.scenarios.loader import ScenarioLoadError, load_scenario
+from evals.scenarios.schema import PreconditionField, PreconditionProbe
 from incident_commander.tools.mcp_client import MCPError, ToolResult
+
+#: The moment the canned SLO readings below were taken; the budget clears 24 h after it at most.
+_MEASURED_AT = "2026-10-10T11:30:05.123456Z"
+_API_LATENCY = (
+    "api_latency_db_query",
+    "api_latency_downstream",
+    "api_latency_healthy_control",
+    "api_latency_redis",
+)
+
+
+def _objective(objective_id: str, failed: int, total: int, target: float) -> dict[str, object]:
+    """One objective row as get_slo_status returns it, with the platform's own arithmetic."""
+    rate = failed / total if total else 0.0
+    budget = 100.0 if not total else max(-100.0, (1 - rate / (1 - target)) * 100)
+    return {
+        "id": objective_id,
+        "target": target,
+        "window_hours": 24,
+        "total": total,
+        "failed": failed,
+        "current_success_rate": 1 - rate,
+        "budget_remaining_pct": budget,
+        "burn_rate": rate / (1 - target),
+        "healthy": 1 - rate >= target,
+        "fast_burn": rate / (1 - target) >= 14.4,
+    }
+
+
+def _slo_reading(
+    *, dispatch_failed: int, completion_failed: int = 0, measured_at: object = _MEASURED_AT
+) -> dict[str, object]:
+    """A get_slo_status answer: the completion objective first, as the platform declares them."""
+    return {
+        "measured_at": measured_at,
+        "objectives": [
+            _objective("job_completion_rate", completion_failed, 253, 0.99),
+            _objective("job_dispatch_latency", dispatch_failed, 271, 0.95),
+        ],
+        "total": 2,
+        "fast_burn_threshold": 14.4,
+    }
+
+
+#: The real corpus loader, kept before any fixture swaps it for the session's cached copy.
+_LOAD_CORPUS_DEMANDS = audit._corpus_demands
+
+
+@pytest.fixture(scope="session")
+def corpus_demands() -> tuple[audit.BudgetDemand, ...]:
+    """The corpus's budget checks, loaded once rather than on every ``main()`` call."""
+    demands, warnings = _LOAD_CORPUS_DEMANDS()
+    assert not warnings
+    return demands
 
 
 @pytest.fixture
-def world(monkeypatch: pytest.MonkeyPatch) -> dict[str, object]:
+def world(
+    monkeypatch: pytest.MonkeyPatch, corpus_demands: tuple[audit.BudgetDemand, ...]
+) -> dict[str, object]:
     payloads: dict[str, object] = {
         "list_dlq_messages": {
             "total": 4,
@@ -39,6 +96,7 @@ def world(monkeypatch: pytest.MonkeyPatch) -> dict[str, object]:
                 {"trace_id": "edeeb994-56d2-53e6-88fd-8af47e695dbc"},
             ]
         },
+        "get_slo_status": _slo_reading(dispatch_failed=0),
     }
     client = Mock()
     # ``**kwargs`` because every read now goes through ``LabProbeClient``, which adds
@@ -53,6 +111,7 @@ def world(monkeypatch: pytest.MonkeyPatch) -> dict[str, object]:
     monkeypatch.setattr(audit, "assert_read_only_principal", lambda client, **_kwargs: None)
     monkeypatch.setattr(audit, "chaos_key_count", lambda: (0, "none"))
     monkeypatch.setattr(audit, "process_count", lambda: (0, "none"))
+    monkeypatch.setattr(audit, "_corpus_demands", lambda: (corpus_demands, []))
     return payloads
 
 
@@ -240,3 +299,158 @@ def test_subprocess_error_cannot_look_like_zero(
         subprocess, "run", lambda *a, **kw: subprocess.CompletedProcess(a, 2, "", "failed")
     )
     assert getattr(audit, scanner)()[0] is None
+
+
+# The objectives read (WO-R3-367, INC-007): a budget under 100 WARNs and never fails the audit.
+
+
+def _summary(output: str) -> str:
+    return next(line for line in output.splitlines() if line.startswith("WORLD AUDIT:"))
+
+
+def test_whole_budgets_print_one_row_each_and_no_warning(
+    world: dict[str, object], capsys: pytest.CaptureFixture[str]
+) -> None:
+    assert audit.main([]) == 0
+    output = capsys.readouterr().out
+    assert "[INFO] SLO job_completion_rate: 0 failed of 253, budget_remaining_pct 100" in output
+    assert "[INFO] SLO job_dispatch_latency: 0 failed of 271, budget_remaining_pct 100" in output
+    assert "healthy True" in output
+    assert "[WARN]" not in output
+    assert _summary(output) == "WORLD AUDIT: PASS"
+
+
+def test_spent_dispatch_budget_warns_naming_the_family_and_the_clear_time(
+    world: dict[str, object], capsys: pytest.CaptureFixture[str]
+) -> None:
+    world["get_slo_status"] = _slo_reading(dispatch_failed=28)
+    assert audit.main([]) == 0
+    output = capsys.readouterr().out
+    assert "[PASS] DLQ total" in output
+    assert "[INFO] SLO job_dispatch_latency: 28 failed of 271, budget_remaining_pct -100" in output
+    assert "healthy False" in output
+    warnings = [line for line in output.splitlines() if line.startswith("[WARN]")]
+    assert len(warnings) == 1
+    [warning] = warnings
+    assert warning.startswith("[WARN] SLO job_dispatch_latency budget:")
+    assert "api_latency (" + ", ".join(_API_LATENCY) + ")" in warning
+    # No contract tool says when the late jobs were created, so the clear time is the latest
+    # it can be: the reading's own moment plus the 24 h window.
+    assert "no later than 2026-10-11 11:30 UTC" in warning
+    assert _MEASURED_AT in warning
+    summary = _summary(output)
+    assert summary.startswith("WORLD AUDIT: PASS")
+    assert "WARN" in summary
+    assert "api_latency (" in summary
+    assert "no later than 2026-10-11 11:30 UTC" in summary
+
+
+def test_spent_completion_budget_names_only_the_control_that_reads_it(
+    world: dict[str, object], capsys: pytest.CaptureFixture[str]
+) -> None:
+    world["get_slo_status"] = _slo_reading(dispatch_failed=0, completion_failed=1)
+    assert audit.main([]) == 0
+    [warning] = [line for line in capsys.readouterr().out.splitlines() if "[WARN]" in line]
+    assert warning.startswith("[WARN] SLO job_completion_rate budget:")
+    assert "api_latency (api_latency_healthy_control)" in warning
+
+
+@pytest.mark.parametrize("measured_at", [None, "not a time"])
+def test_unreadable_clock_still_warns_with_the_rule(
+    world: dict[str, object], capsys: pytest.CaptureFixture[str], measured_at: object
+) -> None:
+    world["get_slo_status"] = _slo_reading(dispatch_failed=3, measured_at=measured_at)
+    assert audit.main([]) == 0
+    [warning] = [line for line in capsys.readouterr().out.splitlines() if "[WARN]" in line]
+    assert "24 h after the last failure in its window" in warning
+    assert "no later than" not in warning
+
+
+@pytest.mark.parametrize("failure", ["transport", "is_error", "no objectives"])
+def test_a_failed_slo_read_says_so_and_the_rest_still_reports(
+    world: dict[str, object],
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    failure: str,
+) -> None:
+    client = Mock()
+    monkeypatch.setattr(audit, "make_client", lambda settings, *, token: client)
+
+    def reply(tool: str, args: object, **_kwargs: object) -> ToolResult:
+        if tool == "get_slo_status":
+            if failure == "transport":
+                raise MCPError(-32000, "slo read failed")
+            payload = {"measured_at": _MEASURED_AT} if failure == "no objectives" else {}
+            return ToolResult(
+                content=[{"type": "text", "text": json.dumps(payload)}],
+                is_error=failure == "is_error",
+            )
+        return ToolResult(content=[{"type": "text", "text": json.dumps(world[tool])}])
+
+    client.call_tool.side_effect = reply
+    assert audit.main(["--roots", "root-a"]) == 0
+    output = capsys.readouterr().out
+    assert "[PASS] DLQ total" in output
+    assert "[PASS] chain root-a paused" in output
+    assert '"id": "row-3"' in output
+    [warning] = [line for line in output.splitlines() if "[WARN]" in line]
+    assert warning.startswith("[WARN] SLO budgets: unreadable")
+    assert "api_latency (" + ", ".join(_API_LATENCY) + ")" in warning
+    assert "WARN" in _summary(output)
+
+
+def test_a_warning_never_hides_a_failed_baseline(
+    world: dict[str, object], capsys: pytest.CaptureFixture[str]
+) -> None:
+    world["list_active_alerts"] = {"total": 6}
+    world["get_slo_status"] = _slo_reading(dispatch_failed=28)
+    assert audit.main([]) == 1
+    summary = _summary(capsys.readouterr().out)
+    assert summary.startswith("WORLD AUDIT: FAIL")
+    assert "WARN" in summary
+
+
+def test_an_unreadable_corpus_warns_and_the_audit_still_runs(
+    world: dict[str, object], monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    def broken(_directory: Path) -> list[object]:
+        raise ScenarioLoadError(Path("evals/scenarios/x.yaml"), "half-edited")
+
+    monkeypatch.setattr(audit, "load_scenarios", broken)
+    monkeypatch.setattr(audit, "_corpus_demands", _LOAD_CORPUS_DEMANDS)
+    world["get_slo_status"] = _slo_reading(dispatch_failed=28)
+    assert audit.main([]) == 0
+    output = capsys.readouterr().out
+    assert "[WARN] scenario corpus: unreadable" in output
+    assert "[WARN] SLO job_dispatch_latency budget:" in output
+
+
+def test_the_families_come_from_the_corpus_preconditions(
+    corpus_demands: tuple[audit.BudgetDemand, ...],
+) -> None:
+    demands = corpus_demands
+    by_objective: dict[str, set[tuple[str, str]]] = {}
+    for objective in ("job_dispatch_latency", "job_completion_rate"):
+        row = {"id": objective}
+        by_objective[objective] = {(d.family, d.scenario) for d in demands if d.reads(row)}
+    assert by_objective["job_dispatch_latency"] == {("api_latency", name) for name in _API_LATENCY}
+    assert by_objective["job_completion_rate"] == {("api_latency", "api_latency_healthy_control")}
+
+
+def test_a_precondition_the_reading_still_meets_is_not_named() -> None:
+    lenient = audit.BudgetDemand(
+        scenario="lenient",
+        family="api_latency",
+        probe=PreconditionProbe(
+            tool="get_slo_status",
+            expect=(PreconditionField(path="objectives[].budget_remaining_pct", at_least=0.0),),
+        ),
+    )
+    client = Mock()
+    client.call_tool.return_value = ToolResult(
+        content=[{"type": "text", "text": json.dumps(_slo_reading(dispatch_failed=1))}]
+    )
+    lines = audit.audit_slo_budgets(client, (lenient,))
+    [warning] = [line for line in lines if line.warn]
+    assert "lenient" not in warning.detail
+    assert "none" in warning.detail

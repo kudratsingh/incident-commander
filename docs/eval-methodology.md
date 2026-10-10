@@ -1338,6 +1338,18 @@ contract is unchanged: it still re-audits the same three lines after its reset.
 taken straight after a reset can describe the world before it. It is a pre-run
 check, where the operator controls the timing.
 
+**The objectives read warns and never fails** (WO-R3-367, INC-007). One
+`get_slo_status` read prints each objective's failed/total, budget and
+`healthy`; a budget under 100% (or an unreadable read) adds a WARN row that
+names the families whose preconditions will refuse on this reading — computed
+by running each scenario's own `expected_precondition` budget check through
+`evals/preconditions.py::unmet`, so the list follows the corpus — and the
+latest moment the 24-hour window can have forgotten every failure
+(`measured_at` + `window_hours`; the tool exposes no job timestamps). It is a
+WARN because the seeded baseline is still intact and nothing the operator can
+run fixes it: the window has to pass. The WARN is repeated on the
+`WORLD AUDIT:` summary line and the exit code does not change.
+
 ### The eval-debt ledger walk
 
 [ADR 0011](ADR/0011-campaign-eval-freeze.md) says the eval-debt ledger

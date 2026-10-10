@@ -1,0 +1,451 @@
+{
+  "schema_version": 1,
+  "scenario": "api_latency_downstream",
+  "world": {
+    "label": "the live platform with `api_latency_downstream`'s fault plan seeded (1 hook(s): `degrade_downstream`), settled 90.0s, read under the read-scoped principal",
+    "live_mcp": true,
+    "chaos_seeded": true,
+    "chaos_hooks": [
+      "degrade_downstream"
+    ],
+    "settle_seconds": 90.0
+  },
+  "calls": [
+    {
+      "tool": "get_circuit_breakers",
+      "arguments": {},
+      "key": "get_circuit_breakers 44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+      "result": {
+        "content": [
+          {
+            "type": "text",
+            "text": "{\"measured_at\":\"2026-10-10T08:46:47.749254Z\",\"breakers\":[{\"name\":\"bulk-api-sync\",\"state\":\"open\",\"failure_count\":3,\"failure_threshold\":3,\"recovery_timeout_s\":30.0,\"last_state_change_at\":\"2026-10-10T08:45:20.986711Z\",\"seconds_since_state_change\":86.763,\"last_failure_at\":\"2026-10-10T08:45:20.986708Z\",\"last_failure_reason_class\":\"other\",\"recorded_at\":\"2026-10-10T08:45:20.993304Z\",\"reported_age_s\":86.756}],\"total\":1,\"unknown_reason\":null}"
+          }
+        ],
+        "is_error": false
+      },
+      "started_at": "2026-10-10T08:46:47.732605+00:00",
+      "completed_at": "2026-10-10T08:46:47.760784+00:00",
+      "duration_ms": 28,
+      "origins": [
+        "evidence claim: `get_circuit_breakers.breakers[].state` not_equals 'closed' — the claim says the agent read this tool, so the field it asserts on has to be in what the world returns.",
+        "evidence claim: `get_circuit_breakers.breakers[].failure_count` at_least 3.0 — the claim says the agent read this tool, so the field it asserts on has to be in what the world returns.",
+        "evidence claim: `get_circuit_breakers.breakers[].failure_threshold` equals 3 — the claim says the agent read this tool, so the field it asserts on has to be in what the world returns.",
+        "evidence claim: `get_circuit_breakers.breakers[].last_failure_reason_class` is_null False — the claim says the agent read this tool, so the field it asserts on has to be in what the world returns.",
+        "expected_precondition: get_circuit_breakers must show breakers[].state not_equals 'closed'; breakers[].failure_count at_least 3.0",
+        "recorded-world sweep: every read tool crossed with the resource values this scenario names (plan 02 §181), so a replayed agent that reads more widely than the expected set gets an answer instead of a `not_recorded` miss."
+      ]
+    },
+    {
+      "tool": "get_deploy_history",
+      "arguments": {
+        "environment": null,
+        "limit": 20
+      },
+      "key": "get_deploy_history 90888d4cf190562bc38b4cd4c9183c2f643847d44602498c9db191ac6201db65",
+      "result": {
+        "content": [
+          {
+            "type": "text",
+            "text": "{\"total\":6,\"entries\":[{\"version\":\"v0.4.3\",\"revision\":\"d1e5a83\",\"image_tag\":\"v0.4.3\",\"deployed_at\":\"2026-10-10T06:45:13.211986Z\",\"environment\":\"prod\",\"notes\":null},{\"version\":\"v0.4.3\",\"revision\":\"d1e5a83\",\"image_tag\":\"v0.4.3\",\"deployed_at\":\"2026-10-10T05:45:13.211986Z\",\"environment\":\"staging\",\"notes\":\"staging soak before prod\"},{\"version\":\"v0.4.2\",\"revision\":\"c9f4d02\",\"image_tag\":\"v0.4.2\",\"deployed_at\":\"2026-10-10T02:45:13.211986Z\",\"environment\":\"prod\",\"notes\":\"correlated with billing failures\"},{\"version\":\"v0.4.1\",\"revision\":\"b7c3e51\",\"image_tag\":\"v0.4.1\",\"deployed_at\":\"2026-10-09T14:45:13.211986Z\",\"environment\":\"prod\",\"notes\":null},{\"version\":\"v0.4.0\",\"revision\":\"a1940af\",\"image_tag\":\"v0.4.0\",\"deployed_at\":\"2026-10-09T10:45:13.211986Z\",\"environment\":\"prod\",\"notes\":null},{\"version\":\"v0.3.9\",\"revision\":\"e0f6b14\",\"image_tag\":\"v0.3.9\",\"deployed_at\":\"2026-10-08T08:45:13.211986Z\",\"environment\":\"prod\",\"notes\":null}],\"source\":\"deploy_markers\"}"
+          }
+        ],
+        "is_error": false
+      },
+      "started_at": "2026-10-10T08:46:47.802092+00:00",
+      "completed_at": "2026-10-10T08:46:47.827886+00:00",
+      "duration_ms": 25,
+      "origins": [
+        "recorded-world sweep: every read tool crossed with the resource values this scenario names (plan 02 §181), so a replayed agent that reads more widely than the expected set gets an answer instead of a `not_recorded` miss."
+      ]
+    },
+    {
+      "tool": "get_outbox_status",
+      "arguments": {},
+      "key": "get_outbox_status 44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+      "result": {
+        "content": [
+          {
+            "type": "text",
+            "text": "{\"measured_at\":\"2026-10-10T08:46:47.833747Z\",\"unpublished_count\":0,\"oldest_unpublished_at\":null,\"oldest_unpublished_age_s\":null,\"newest_unpublished_at\":null,\"newest_unpublished_age_s\":null,\"unpublished_past_attempt_limit\":0,\"last_publish_at\":\"2026-10-10T08:45:43.643692Z\",\"seconds_since_last_publish\":64.19,\"relay_last_tick_at\":\"2026-10-10T08:46:47.770238Z\",\"relay_heartbeat_age_s\":0.064,\"relay_heartbeat_known\":true,\"relay_heartbeat_unknown_reason\":null,\"relay_tick_interval_s\":1.0}"
+          }
+        ],
+        "is_error": false
+      },
+      "started_at": "2026-10-10T08:46:47.827971+00:00",
+      "completed_at": "2026-10-10T08:46:47.859971+00:00",
+      "duration_ms": 31,
+      "origins": [
+        "recorded-world sweep: every read tool crossed with the resource values this scenario names (plan 02 §181), so a replayed agent that reads more widely than the expected set gets an answer instead of a `not_recorded` miss."
+      ]
+    },
+    {
+      "tool": "get_postgres_health",
+      "arguments": {},
+      "key": "get_postgres_health 44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+      "result": {
+        "content": [
+          {
+            "type": "text",
+            "text": "{\"ok\":true,\"ping_latency_ms\":1.246,\"active_connections\":1,\"dialect\":\"postgresql\",\"error\":null,\"pool_size\":5,\"pool_checked_out\":1,\"pool_overflow\":0,\"pool_max_overflow\":10,\"pool_wait_timeouts_1m\":0,\"pool_stats_unknown_reason\":null,\"longest_active_query_ms\":null,\"active_queries_over_slow_threshold\":0,\"slow_query_threshold_ms\":500.0,\"p95_query_ms_1m\":null,\"slow_query_count_1m\":null,\"query_stats_unknown_reason\":\"the PostgreSQL extension that records per-query timings is not installed on this database, so no per-query timing history exists\",\"pools\":[{\"process\":\"api_worker\",\"size\":5,\"checked_out\":0,\"overflow\":0,\"max_overflow\":10,\"wait_timeouts_1m\":0,\"written_at\":\"2026-10-10T08:46:38.562388Z\",\"reported_age_s\":9.217},{\"process\":\"mcp\",\"size\":5,\"checked_out\":0,\"overflow\":0,\"max_overflow\":10,\"wait_timeouts_1m\":0,\"written_at\":\"2026-10-10T08:46:38.593710Z\",\"reported_age_s\":9.186}],\"pool_gauges_unknown_reason\":null}"
+          }
+        ],
+        "is_error": false
+      },
+      "started_at": "2026-10-10T08:46:47.760866+00:00",
+      "completed_at": "2026-10-10T08:46:47.785275+00:00",
+      "duration_ms": 24,
+      "origins": [
+        "evidence claim: `get_postgres_health.longest_active_query_ms` is_null True — the claim says the agent read this tool, so the field it asserts on has to be in what the world returns.",
+        "expected_precondition: get_postgres_health must show longest_active_query_ms is_null True",
+        "recorded-world sweep: every read tool crossed with the resource values this scenario names (plan 02 §181), so a replayed agent that reads more widely than the expected set gets an answer instead of a `not_recorded` miss."
+      ]
+    },
+    {
+      "tool": "get_redis_health",
+      "arguments": {},
+      "key": "get_redis_health 44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+      "result": {
+        "content": [
+          {
+            "type": "text",
+            "text": "{\"ok\":true,\"ping_latency_ms\":0.351,\"connected_clients\":16,\"used_memory_bytes\":3052848,\"used_memory_human\":\"2.91M\",\"keyspace_hits\":59566,\"keyspace_misses\":2519238,\"error\":null}"
+          }
+        ],
+        "is_error": false
+      },
+      "started_at": "2026-10-10T08:46:47.785385+00:00",
+      "completed_at": "2026-10-10T08:46:47.801972+00:00",
+      "duration_ms": 16,
+      "origins": [
+        "evidence claim: `get_redis_health.used_memory_bytes` at_most 10000000.0 — the claim says the agent read this tool, so the field it asserts on has to be in what the world returns.",
+        "recorded-world sweep: every read tool crossed with the resource values this scenario names (plan 02 §181), so a replayed agent that reads more widely than the expected set gets an answer instead of a `not_recorded` miss."
+      ]
+    },
+    {
+      "tool": "get_slo_status",
+      "arguments": {},
+      "key": "get_slo_status 44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+      "result": {
+        "content": [
+          {
+            "type": "text",
+            "text": "{\"measured_at\":\"2026-10-10T08:46:47.716138Z\",\"objectives\":[{\"id\":\"job_completion_rate\",\"name\":\"Job completion rate\",\"description\":\"Share of jobs that reach COMPLETED rather than DEAD_LETTER. Cancelled jobs are excluded from the denominator.\",\"target\":0.99,\"window_hours\":24,\"total\":91,\"failed\":20,\"current_success_rate\":0.7802197802197802,\"budget_remaining_pct\":-100.0,\"burn_rate\":21.978021978021957,\"healthy\":false,\"fast_burn\":true},{\"id\":\"job_dispatch_latency\",\"name\":\"Job dispatch latency\",\"description\":\"Share of dispatched jobs that left PENDING within 30 seconds of creation. Waiting jobs (held by the DAG) and cancelled jobs (saga rollback, or a stranded dependency parent) are excluded — a job nobody decided to dispatch has no dispatch latency.\",\"target\":0.95,\"window_hours\":24,\"total\":91,\"failed\":0,\"current_success_rate\":1.0,\"budget_remaining_pct\":100.0,\"burn_rate\":0.0,\"healthy\":true,\"fast_burn\":false}],\"total\":2,\"fast_burn_threshold\":14.4}"
+          }
+        ],
+        "is_error": false
+      },
+      "started_at": "2026-10-10T08:46:47.696242+00:00",
+      "completed_at": "2026-10-10T08:46:47.732517+00:00",
+      "duration_ms": 36,
+      "origins": [
+        "evidence claim: `get_slo_status.objectives[].budget_remaining_pct` equals 100.0 — the claim says the agent read this tool, so the field it asserts on has to be in what the world returns.",
+        "evidence claim: `get_slo_status.objectives[].failed` equals 0 — the claim says the agent read this tool, so the field it asserts on has to be in what the world returns.",
+        "evidence claim: `get_slo_status.objectives[].total` at_least 1.0 — the claim says the agent read this tool, so the field it asserts on has to be in what the world returns.",
+        "evidence claim: `get_slo_status.objectives[].failed` at_least 1.0 — the claim says the agent read this tool, so the field it asserts on has to be in what the world returns.",
+        "evidence claim: `get_slo_status.objectives[].budget_remaining_pct` at_most 0.0 — the claim says the agent read this tool, so the field it asserts on has to be in what the world returns.",
+        "evidence claim: `get_slo_status.objectives[].fast_burn` equals True — the claim says the agent read this tool, so the field it asserts on has to be in what the world returns.",
+        "expected_precondition: get_slo_status must show objectives[].total at_least 1.0; objectives[].failed at_least 1.0; objectives[].fast_burn equals True; objectives[].budget_remaining_pct equals 100.0",
+        "recorded-world sweep: every read tool crossed with the resource values this scenario names (plan 02 §181), so a replayed agent that reads more widely than the expected set gets an answer instead of a `not_recorded` miss."
+      ]
+    },
+    {
+      "tool": "list_active_alerts",
+      "arguments": {
+        "limit": 50,
+        "severity": null
+      },
+      "key": "list_active_alerts 1a18583a9f5a31fdbbaca25c3c3ef4a780199ae2808165311be14e9c631b3453",
+      "result": {
+        "content": [
+          {
+            "type": "text",
+            "text": "{\"total\":4,\"alerts\":[{\"id\":\"d0e1e74e-fdc1-402a-9dec-cd0d47ab12a8\",\"severity\":\"critical\",\"source\":\"dlq:threshold\",\"title\":\"Dead-letter queue depth 8 (threshold 5)\",\"description\":\"8 jobs are in the dead-letter queue (threshold 5). The rows above the baseline carry no category yet.\",\"fired_at\":\"2026-10-10T08:45:32.822994Z\",\"extra_data\":{\"source\":\"dlq:threshold\",\"summary\":\"8 jobs are in the dead-letter queue (threshold 5). The rows above the baseline carry no category yet.\",\"severity\":\"critical\",\"dlq_depth\":8,\"dlq_scope\":\"unclassified\",\"threshold\":5,\"fingerprint\":\"dlq_depth_warning\",\"measured_at\":\"2026-10-10T08:45:32.819576+00:00\",\"remediation_hint\":null}},{\"id\":\"7c9d648f-0215-544d-a9c3-adcf74ea68ab\",\"severity\":\"critical\",\"source\":\"api\",\"title\":\"5xx rate above threshold\",\"description\":\"API 5xx rate 3.2% over last 10 minutes.\",\"fired_at\":\"2026-10-10T08:37:13.224090Z\",\"extra_data\":null},{\"id\":\"c6c4e180-f625-53c2-85c2-2d505fec61e5\",\"severity\":\"warning\",\"source\":\"dlq\",\"title\":\"DLQ backlog growing\",\"description\":\"3 send_email jobs dead-lettered in last hour.\",\"fired_at\":\"2026-10-10T08:30:13.224090Z\",\"extra_data\":null},{\"id\":\"e33d75bb-3769-594a-9443-57abff0f7580\",\"severity\":\"critical\",\"source\":\"kafka\",\"title\":\"billing-consumer lag exceeds 10k\",\"description\":\"Sustained lag on billing-consumer for 20+ minutes.\",\"fired_at\":\"2026-10-10T08:20:13.224090Z\",\"extra_data\":null}]}"
+          }
+        ],
+        "is_error": false
+      },
+      "started_at": "2026-10-10T08:46:47.860023+00:00",
+      "completed_at": "2026-10-10T08:46:47.883739+00:00",
+      "duration_ms": 23,
+      "origins": [
+        "recorded-world sweep: every read tool crossed with the resource values this scenario names (plan 02 §181), so a replayed agent that reads more widely than the expected set gets an answer instead of a `not_recorded` miss."
+      ]
+    },
+    {
+      "tool": "list_audit_events",
+      "arguments": {
+        "action": null,
+        "action_prefix": null,
+        "limit": 50,
+        "principal_type": null
+      },
+      "key": "list_audit_events f175a5040f1c7a5d173162493cecf76e45237f98df6fb15af5343a4100cceaeb",
+      "result": {
+        "content": [
+          {
+            "type": "text",
+            "text": "{\"total\":34873,\"events\":[{\"id\":\"e98f2452-2582-4fd4-947e-85092775e2ac\",\"action\":\"agent.tool_invoked\",\"principal_type\":\"service_account\",\"principal_id\":\"d6bd0ef1-9a9d-490e-aae6-1bdb8868e349\",\"resource_type\":\"mcp_tool\",\"resource_id\":\"list_active_alerts\",\"request_id\":\"a08dd46f-4218-4661-8f0f-f2647daf2774\",\"created_at\":\"2026-10-10T08:46:47.866024Z\",\"extra_data\":{\"outcome\":\"success\",\"arguments\":{\"limit\":50,\"severity\":null},\"tool_name\":\"list_active_alerts\",\"latency_ms\":6.976,\"scope_used\":\"incidents:read\"}},{\"id\":\"e4bbac8a-4b13-4785-b022-1fd6838502fb\",\"action\":\"agent.tool_invoked\",\"principal_type\":\"service_account\",\"principal_id\":\"d6bd0ef1-9a9d-490e-aae6-1bdb8868e349\",\"resource_type\":\"mcp_tool\",\"resource_id\":\"get_outbox_status\",\"request_id\":\"67c0004f-ed4c-4f7f-9e25-a4167241e6aa\",\"created_at\":\"2026-10-10T08:46:47.833747Z\",\"extra_data\":{\"outcome\":\"success\",\"arguments\":{},\"tool_name\":\"get_outbox_status\",\"latency_ms\":16.215,\"scope_used\":\"telemetry:read\"}},{\"id\":\"cfbdf7f5-f961-4614-ae67-fd207a2c0bd2\",\"action\":\"agent.tool_invoked\",\"principal_type\":\"service_account\",\"principal_id\":\"d6bd0ef1-9a9d-490e-aae6-1bdb8868e349\",\"resource_type\":\"mcp_tool\",\"resource_id\":\"get_deploy_history\",\"request_id\":\"70f5645e-caf2-413e-b165-8abc11e216ad\",\"created_at\":\"2026-10-10T08:46:47.807105Z\",\"extra_data\":{\"outcome\":\"success\",\"arguments\":{\"limit\":20,\"environment\":null},\"tool_name\":\"get_deploy_history\",\"latency_ms\":9.439,\"scope_used\":\"telemetry:read\"}},{\"id\":\"72b811cb-fb53-4372-85f7-03f724ae586f\",\"action\":\"agent.tool_invoked\",\"principal_type\":\"service_account\",\"principal_id\":\"d6bd0ef1-9a9d-490e-aae6-1bdb8868e349\",\"resource_type\":\"mcp_tool\",\"resource_id\":\"get_redis_health\",\"request_id\":\"f281d80d-5f8c-4a80-8661-7dd009018da7\",\"created_at\":\"2026-10-10T08:46:47.790611Z\",\"extra_data\":{\"outcome\":\"success\",\"arguments\":{},\"tool_name\":\"get_redis_health\",\"latency_ms\":3.592,\"scope_used\":\"telemetry:read\"}},{\"id\":\"42216438-d3ae-4fb0-8467-2c01f2afab9d\",\"action\":\"agent.tool_invoked\",\"principal_type\":\"service_account\",\"principal_id\":\"d6bd0ef1-9a9d-490e-aae6-1bdb8868e349\",\"resource_type\":\"mcp_tool\",\"resource_id\":\"get_postgres_health\",\"request_id\":\"3dbf1b39-a6ae-4d1a-aa0c-5cf28bf196c0\",\"created_at\":\"2026-10-10T08:46:47.767292Z\",\"extra_data\":{\"outcome\":\"success\",\"arguments\":{},\"tool_name\":\"get_postgres_health\",\"latency_ms\":9.287,\"scope_used\":\"telemetry:read\"}},{\"id\":\"f41e48cb-dbd0-4280-8c6d-be26d2e8da54\",\"action\":\"agent.tool_invoked\",\"principal_type\":\"service_account\",\"principal_id\":\"d6bd0ef1-9a9d-490e-aae6-1bdb8868e349\",\"resource_type\":\"mcp_tool\",\"resource_id\":\"get_circuit_breakers\",\"request_id\":\"62cce88b-fb27-413f-be1a-5b3035fb7b7a\",\"created_at\":\"2026-10-10T08:46:47.740202Z\",\"extra_data\":{\"outcome\":\"success\",\"arguments\":{},\"tool_name\":\"get_circuit_breakers\",\"latency_ms\":4.932,\"scope_used\":\"telemetry:read\"}},{\"id\":\"a99222ed-0e67-45a3-95b1-5327a602eba0\",\"action\":\"agent.tool_invoked\",\"principal_type\":\"service_account\",\"principal_id\":\"d6bd0ef1-9a9d-490e-aae6-1bdb8868e349\",\"resource_type\":\"mcp_tool\",\"resource_id\":\"get_slo_status\",\"request_id\":\"69fd4269-8f50-48e5-8f19-358ebea81716\",\"created_at\":\"2026-10-10T08:46:47.700153Z\",\"extra_data\":{\"outcome\":\"success\",\"arguments\":{},\"tool_name\":\"get_slo_status\",\"latency_ms\":14.582,\"scope_used\":\"telemetry:read\"}},{\"id\":\"3615f0db-8b61-47ea-a61f-3d99a6e3f15d\",\"action\":\"agent.tool_invoked\",\"principal_type\":\"service_account\",\"principal_id\":\"d6bd0ef1-9a9d-490e-aae6-1bdb8868e349\",\"resource_type\":\"mcp_tool\",\"resource_id\":\"get_postgres_health\",\"request_id\":\"dfc16f0f-4fda-4288-b6ed-18616d7d1771\",\"created_at\":\"2026-10-10T08:46:47.675690Z\",\"extra_data\":{\"outcome\":\"success\",\"arguments\":{},\"tool_name\":\"get_postgres_health\",\"latency_ms\":8.708,\"scope_used\":\"telemetry:read\"}},{\"id\":\"ca7859ed-2535-4ebd-b247-c1dd3769c076\",\"action\":\"agent.tool_invoked\",\"principal_type\":\"service_account\",\"principal_id\":\"d6bd0ef1-9a9d-490e-aae6-1bdb8868e349\",\"resource_type\":\"mcp_tool\",\"resource_id\":\"get_slo_status\",\"request_id\":\"b2f0ef74-7e28-420e-b0b3-69361345f3a0\",\"created_at\":\"2026-10-10T08:46:47.654866Z\",\"extra_data\":{\"outcome\":\"success\",\"arguments\":{},\"tool_name\":\"get_slo_status\",\"latency_ms\":9.107,\"scope_used\":\"telemetry:read\"}},{\"id\":\"bd715044-6d26-44b4-87a0-93650d86c788\",\"action\":\"agent.tool_invoked\",\"principal_type\":\"service_account\",\"principal_id\":\"d6bd0ef1-9a9d-490e-aae6-1bdb8868e349\",\"resource_type\":\"mcp_tool\",\"resource_id\":\"get_circuit_breakers\",\"request_id\":\"3a99abc2-baec-4359-98e2-dcc3f9c01e76\",\"created_at\":\"2026-10-10T08:46:47.631175Z\",\"extra_data\":{\"outcome\":\"success\",\"arguments\":{},\"tool_name\":\"get_circuit_breakers\",\"latency_ms\":3.452,\"scope_used\":\"telemetry:read\"}},{\"id\":\"aade1770-0792-4eec-8251-b1bfb41ee448\",\"action\":\"event.job.dead_letter\",\"principal_type\":\"user\",\"principal_id\":\"6e56900c-2fbe-4e34-99a8-c452ce021b5c\",\"resource_type\":\"job\",\"resource_id\":\"7904a03c-b86e-4a8c-a09a-1d21a6896d4a\",\"request_id\":null,\"created_at\":\"2026-10-10T08:45:43.687065Z\",\"extra_data\":{\"error\":\"bulk api sync failed: all 5 endpoint calls failed (0 of 5 endpoints returned a result)\",\"message\":\"Job exhausted after 3 attempts: bulk api sync failed: all 5 endpoint calls failed (0 of 5 endpoints returned a result)\",\"payload\":{\"source\":\"eval-traffic-loop\"},\"job_type\":\"bulk_api_sync\",\"trace_id\":\"d9cd9c7a-32dd-4323-9ac4-5f8d7b94dd1f\",\"max_retries\":3,\"retry_count\":3,\"max_attempts\":3,\"dead_lettered\":true}},{\"id\":\"14f84122-d728-4449-84e9-f196e8131c46\",\"action\":\"event.job.dead_letter\",\"principal_type\":\"user\",\"principal_id\":\"6e56900c-2fbe-4e34-99a8-c452ce021b5c\",\"resource_type\":\"job\",\"resource_id\":\"4506966a-a662-492c-ba4d-cd5d45580ba3\",\"request_id\":null,\"created_at\":\"2026-10-10T08:45:43.650830Z\",\"extra_data\":{\"error\":\"bulk api sync failed: all 5 endpoint calls failed (0 of 5 endpoints returned a result)\",\"message\":\"Job exhausted after 3 attempts: bulk api sync failed: all 5 endpoint calls failed (0 of 5 endpoints returned a result)\",\"payload\":{\"source\":\"eval-traffic-loop\"},\"job_type\":\"bulk_api_sync\",\"trace_id\":\"ba9694fd-e6a5-470b-9f1e-4d6262864f13\",\"max_retries\":3,\"retry_count\":3,\"max_attempts\":3,\"dead_lettered\":true}},{\"id\":\"61cbf256-3823-48c0-924e-592e702dca8e\",\"action\":\"job.dead_letter\",\"principal_type\":\"user\",\"principal_id\":null,\"resource_type\":null,\"resource_id\":null,\"request_id\":null,\"created_at\":\"2026-10-10T08:45:42.717307Z\",\"extra_data\":{\"error\":\"bulk api sync failed: all 5 endpoint calls failed (0 of 5 endpoints returned a result)\",\"retry_count\":3}},{\"id\":\"757ca0c6-327f-44d9-974d-da4d80d11b26\",\"action\":\"job.dead_letter\",\"principal_type\":\"user\",\"principal_id\":null,\"resource_type\":null,\"resource_id\":null,\"request_id\":null,\"created_at\":\"2026-10-10T08:45:42.682416Z\",\"extra_data\":{\"error\":\"bulk api sync failed: all 5 endpoint calls failed (0 of 5 endpoints returned a result)\",\"retry_count\":3}},{\"id\":\"5cabfcbc-c732-4178-9ac1-3514b4b4093a\",\"action\":\"event.job.submitted\",\"principal_type\":\"user\",\"principal_id\":\"6e56900c-2fbe-4e34-99a8-c452ce021b5c\",\"resource_type\":\"job\",\"resource_id\":\"7904a03c-b86e-4a8c-a09a-1d21a6896d4a\",\"request_id\":null,\"created_at\":\"2026-10-10T08:45:42.627729Z\",\"extra_data\":{\"payload\":{\"source\":\"eval-traffic-loop\",\"__traceparent\":{\"traceparent\":\"00-03af8535da72df0ee4a8c03074f919fc-c9326e59ef4ef114-03\"}},\"job_type\":\"bulk_api_sync\",\"priority\":0,\"trace_id\":\"d9cd9c7a-32dd-4323-9ac4-5f8d7b94dd1f\"}},{\"id\":\"4aeb5ec3-ab45-4929-8a80-d90874abcd70\",\"action\":\"event.job.submitted\",\"principal_type\":\"user\",\"principal_id\":\"6e56900c-2fbe-4e34-99a8-c452ce021b5c\",\"resource_type\":\"job\",\"resource_id\":\"4506966a-a662-492c-ba4d-cd5d45580ba3\",\"request_id\":null,\"created_at\":\"2026-10-10T08:45:42.549666Z\",\"extra_data\":{\"payload\":{\"source\":\"eval-traffic-loop\",\"__traceparent\":{\"traceparent\":\"00-36773a9cb1605a11e34db4aa5489708e-113739c84aff0535-03\"}},\"job_type\":\"bulk_api_sync\",\"priority\":0,\"trace_id\":\"ba9694fd-e6a5-470b-9f1e-4d6262864f13\"}},{\"id\":\"402915f7-833f-4a79-97ff-a825f9b2ebbd\",\"action\":\"event.job.dead_letter\",\"principal_type\":\"user\",\"principal_id\":\"6e56900c-2fbe-4e34-99a8-c452ce021b5c\",\"resource_type\":\"job\",\"resource_id\":\"21189ff8-2e65-4e64-b075-17df4b8e797f\",\"request_id\":null,\"created_at\":\"2026-10-10T08:45:40.523604Z\",\"extra_data\":{\"error\":\"bulk api sync failed: all 5 endpoint calls failed (0 of 5 endpoints returned a result)\",\"message\":\"Job exhausted after 3 attempts: bulk api sync failed: all 5 endpoint calls failed (0 of 5 endpoints returned a result)\",\"payload\":{\"source\":\"eval-traffic-loop\"},\"job_type\":\"bulk_api_sync\",\"trace_id\":\"70562eef-da35-4e38-82f5-b06ed44bb83f\",\"max_retries\":3,\"retry_count\":3,\"max_attempts\":3,\"dead_lettered\":true}},{\"id\":\"c12bca6e-b845-4406-b313-37fb85a369fa\",\"action\":\"event.job.dead_letter\",\"principal_type\":\"user\",\"principal_id\":\"6e56900c-2fbe-4e34-99a8-c452ce021b5c\",\"resource_type\":\"job\",\"resource_id\":\"777a5596-7e8e-414e-a2fa-58f869477990\",\"request_id\":null,\"created_at\":\"2026-10-10T08:45:40.502544Z\",\"extra_data\":{\"error\":\"bulk api sync failed: all 5 endpoint calls failed (0 of 5 endpoints returned a result)\",\"message\":\"Job exhausted after 3 attempts: bulk api sync failed: all 5 endpoint calls failed (0 of 5 endpoints returned a result)\",\"payload\":{\"source\":\"eval-traffic-loop\"},\"job_type\":\"bulk_api_sync\",\"trace_id\":\"d64f8937-5706-4d61-9d00-8cc144fe9ad0\",\"max_retries\":3,\"retry_count\":3,\"max_attempts\":3,\"dead_lettered\":true}},{\"id\":\"e460fde3-2521-4e13-8950-b60fc8e16823\",\"action\":\"event.job.dead_letter\",\"principal_type\":\"user\",\"principal_id\":\"6e56900c-2fbe-4e34-99a8-c452ce021b5c\",\"resource_type\":\"job\",\"resource_id\":\"6b4da0ee-8a58-4727-b5c0-a90b3413d2e7\",\"request_id\":null,\"created_at\":\"2026-10-10T08:45:40.479359Z\",\"extra_data\":{\"error\":\"bulk api sync failed: all 5 endpoint calls failed (0 of 5 endpoints returned a result)\",\"message\":\"Job exhausted after 3 attempts: bulk api sync failed: all 5 endpoint calls failed (0 of 5 endpoints returned a result)\",\"payload\":{\"source\":\"eval-traffic-loop\"},\"job_type\":\"bulk_api_sync\",\"trace_id\":\"fa85f1e1-79d0-4c55-ba72-c03e27b3b957\",\"max_retries\":3,\"retry_count\":3,\"max_attempts\":3,\"dead_lettered\":true}},{\"id\":\"48675608-b224-4b74-9cd7-711c2373695f\",\"action\":\"event.job.dead_letter\",\"principal_type\":\"user\",\"principal_id\":\"6e56900c-2fbe-4e34-99a8-c452ce021b5c\",\"resource_type\":\"job\",\"resource_id\":\"816f3503-b747-487e-84df-ddeb5b92aa03\",\"request_id\":null,\"created_at\":\"2026-10-10T08:45:40.437482Z\",\"extra_data\":{\"error\":\"bulk api sync failed: all 5 endpoint calls failed (0 of 5 endpoints returned a result)\",\"message\":\"Job exhausted after 3 attempts: bulk api sync failed: all 5 endpoint calls failed (0 of 5 endpoints returned a result)\",\"payload\":{\"source\":\"eval-traffic-loop\"},\"job_type\":\"bulk_api_sync\",\"trace_id\":\"2b20445c-5e67-4cf1-bcae-1e9c034c4d36\",\"max_retries\":3,\"retry_count\":3,\"max_attempts\":3,\"dead_lettered\":true}},{\"id\":\"7473720d-290d-4be1-ad1f-78ba20ff2bcb\",\"action\":\"event.job.submitted\",\"principal_type\":\"user\",\"principal_id\":\"6e56900c-2fbe-4e34-99a8-c452ce021b5c\",\"resource_type\":\"job\",\"resource_id\":\"21189ff8-2e65-4e64-b075-17df4b8e797f\",\"request_id\":null,\"created_at\":\"2026-10-10T08:45:39.545843Z\",\"extra_data\":{\"payload\":{\"source\":\"eval-traffic-loop\",\"__traceparent\":{\"traceparent\":\"00-3fa3925bfa43b031158feb05119e44bc-b8fc51c942b3c235-03\"}},\"job_type\":\"bulk_api_sync\",\"priority\":0,\"trace_id\":\"70562eef-da35-4e38-82f5-b06ed44bb83f\"}},{\"id\":\"e9894900-df38-4add-86ec-52d148021a45\",\"action\":\"job.dead_letter\",\"principal_type\":\"user\",\"principal_id\":null,\"resource_type\":null,\"resource_id\":null,\"request_id\":null,\"created_at\":\"2026-10-10T08:45:39.506790Z\",\"extra_data\":{\"error\":\"bulk api sync failed: all 5 endpoint calls failed (0 of 5 endpoints returned a result)\",\"retry_count\":3}},{\"id\":\"22fd4787-80d3-4c48-9177-89a85099fc2f\",\"action\":\"event.job.submitted\",\"principal_type\":\"user\",\"principal_id\":\"6e56900c-2fbe-4e34-99a8-c452ce021b5c\",\"resource_type\":\"job\",\"resource_id\":\"777a5596-7e8e-414e-a2fa-58f869477990\",\"request_id\":null,\"created_at\":\"2026-10-10T08:45:39.503039Z\",\"extra_data\":{\"payload\":{\"source\":\"eval-traffic-loop\",\"__traceparent\":{\"traceparent\":\"00-c0017e68680a1758e9a147390ad00b34-5ee796495d3a89d9-03\"}},\"job_type\":\"bulk_api_sync\",\"priority\":0,\"trace_id\":\"d64f8937-5706-4d61-9d00-8cc144fe9ad0\"}},{\"id\":\"dcd240ba-04de-4bac-921b-d1674d63cc4c\",\"action\":\"job.dead_letter\",\"principal_type\":\"user\",\"principal_id\":null,\"resource_type\":null,\"resource_id\":null,\"request_id\":null,\"created_at\":\"2026-10-10T08:45:39.496845Z\",\"extra_data\":{\"error\":\"bulk api sync failed: all 5 endpoint calls failed (0 of 5 endpoints returned a result)\",\"retry_count\":3}},{\"id\":\"7927aae5-55b5-450a-943d-28a837e3c3e5\",\"action\":\"job.dead_letter\",\"principal_type\":\"user\",\"principal_id\":null,\"resource_type\":null,\"resource_id\":null,\"request_id\":null,\"created_at\":\"2026-10-10T08:45:39.477116Z\",\"extra_data\":{\"error\":\"bulk api sync failed: all 5 endpoint calls failed (0 of 5 endpoints returned a result)\",\"retry_count\":3}},{\"id\":\"9395a016-cb16-410d-9ca3-1923d7c9560c\",\"action\":\"event.job.submitted\",\"principal_type\":\"user\",\"principal_id\":\"6e56900c-2fbe-4e34-99a8-c452ce021b5c\",\"resource_type\":\"job\",\"resource_id\":\"6b4da0ee-8a58-4727-b5c0-a90b3413d2e7\",\"request_id\":null,\"created_at\":\"2026-10-10T08:45:39.461890Z\",\"extra_data\":{\"payload\":{\"source\":\"eval-traffic-loop\",\"__traceparent\":{\"traceparent\":\"00-e562352190cded6a2b091794d012d778-c0746f5962bec832-03\"}},\"job_type\":\"bulk_api_sync\",\"priority\":0,\"trace_id\":\"fa85f1e1-79d0-4c55-ba72-c03e27b3b957\"}},{\"id\":\"866f6342-37d3-4216-87fc-ab2138df3886\",\"action\":\"job.dead_letter\",\"principal_type\":\"user\",\"principal_id\":null,\"resource_type\":null,\"resource_id\":null,\"request_id\":null,\"created_at\":\"2026-10-10T08:45:39.460635Z\",\"extra_data\":{\"error\":\"bulk api sync failed: all 5 endpoint calls failed (0 of 5 endpoints returned a result)\",\"retry_count\":3}},{\"id\":\"9fc5bb92-4dfc-4beb-a352-8b02e436ceda\",\"action\":\"event.job.submitted\",\"principal_type\":\"user\",\"principal_id\":\"6e56900c-2fbe-4e34-99a8-c452ce021b5c\",\"resource_type\":\"job\",\"resource_id\":\"816f3503-b747-487e-84df-ddeb5b92aa03\",\"request_id\":null,\"created_at\":\"2026-10-10T08:45:39.435285Z\",\"extra_data\":{\"payload\":{\"source\":\"eval-traffic-loop\",\"__traceparent\":{\"traceparent\":\"00-9eeacec0b17f3999f5d0abd60a8520c8-a1106d933dfb55c9-03\"}},\"job_type\":\"bulk_api_sync\",\"priority\":0,\"trace_id\":\"2b20445c-5e67-4cf1-bcae-1e9c034c4d36\"}},{\"id\":\"c4bf26f0-1b1f-478b-b7be-90721ac7b466\",\"action\":\"event.job.dead_letter\",\"principal_type\":\"user\",\"principal_id\":\"6e56900c-2fbe-4e34-99a8-c452ce021b5c\",\"resource_type\":\"job\",\"resource_id\":\"6d7acb51-95c2-4259-8c4d-6ce5e614e6af\",\"request_id\":null,\"created_at\":\"2026-10-10T08:45:39.369726Z\",\"extra_data\":{\"error\":\"bulk api sync failed: all 5 endpoint calls failed (0 of 5 endpoints returned a result)\",\"message\":\"Job exhausted after 3 attempts: bulk api sync failed: all 5 endpoint calls failed (0 of 5 endpoints returned a result)\",\"payload\":{\"source\":\"eval-traffic-loop\"},\"job_type\":\"bulk_api_sync\",\"trace_id\":\"98bb7dbd-2381-4bc7-a380-a3a96d659bae\",\"max_retries\":3,\"retry_count\":3,\"max_attempts\":3,\"dead_lettered\":true}},{\"id\":\"9ac0ca29-b2ed-4cef-b62b-4766b259e5ea\",\"action\":\"event.job.dead_letter\",\"principal_type\":\"user\",\"principal_id\":\"6e56900c-2fbe-4e34-99a8-c452ce021b5c\",\"resource_type\":\"job\",\"resource_id\":\"f20c81dc-1014-4416-9338-da2de979e074\",\"request_id\":null,\"created_at\":\"2026-10-10T08:45:39.244397Z\",\"extra_data\":{\"error\":\"bulk api sync failed: all 5 endpoint calls failed (0 of 5 endpoints returned a result)\",\"message\":\"Job exhausted after 3 attempts: bulk api sync failed: all 5 endpoint calls failed (0 of 5 endpoints returned a result)\",\"payload\":{\"source\":\"eval-traffic-loop\"},\"job_type\":\"bulk_api_sync\",\"trace_id\":\"5d715cba-5599-449b-97c4-0f44d88800f7\",\"max_retries\":3,\"retry_count\":3,\"max_attempts\":3,\"dead_lettered\":true}},{\"id\":\"19f7c5a4-a537-4133-89c5-4b964a5142af\",\"action\":\"event.job.dead_letter\",\"principal_type\":\"user\",\"principal_id\":\"6e56900c-2fbe-4e34-99a8-c452ce021b5c\",\"resource_type\":\"job\",\"resource_id\":\"7ff8d38c-0c0b-4118-aef0-176320cf761c\",\"request_id\":null,\"created_at\":\"2026-10-10T08:45:38.345575Z\",\"extra_data\":{\"error\":\"bulk api sync failed: all 5 endpoint calls failed (0 of 5 endpoints returned a result)\",\"message\":\"Job exhausted after 3 attempts: bulk api sync failed: all 5 endpoint calls failed (0 of 5 endpoints returned a result)\",\"payload\":{\"source\":\"eval-traffic-loop\"},\"job_type\":\"bulk_api_sync\",\"trace_id\":\"18857796-1bd2-4563-a216-1f9a36a84737\",\"max_retries\":3,\"retry_count\":3,\"max_attempts\":3,\"dead_lettered\":true}},{\"id\":\"e46dc2e6-bd74-4a03-be07-dec724887df4\",\"action\":\"job.dead_letter\",\"principal_type\":\"user\",\"principal_id\":null,\"resource_type\":null,\"resource_id\":null,\"request_id\":null,\"created_at\":\"2026-10-10T08:45:38.328815Z\",\"extra_data\":{\"error\":\"bulk api sync failed: all 5 endpoint calls failed (0 of 5 endpoints returned a result)\",\"retry_count\":3}},{\"id\":\"64abfe43-5205-4da8-a883-8bfb6da566c5\",\"action\":\"event.job.dead_letter\",\"principal_type\":\"user\",\"principal_id\":\"6e56900c-2fbe-4e34-99a8-c452ce021b5c\",\"resource_type\":\"job\",\"resource_id\":\"446398b4-28bd-47ee-a83a-b91146763c53\",\"request_id\":null,\"created_at\":\"2026-10-10T08:45:38.304319Z\",\"extra_data\":{\"error\":\"bulk api sync failed: all 5 endpoint calls failed (0 of 5 endpoints returned a result)\",\"message\":\"Job exhausted after 3 attempts: bulk api sync failed: all 5 endpoint calls failed (0 of 5 endpoints returned a result)\",\"payload\":{\"source\":\"eval-traffic-loop\"},\"job_type\":\"bulk_api_sync\",\"trace_id\":\"2cc0c70a-2236-447a-a9ce-3193e04b4043\",\"max_retries\":3,\"retry_count\":3,\"max_attempts\":3,\"dead_lettered\":true}},{\"id\":\"7ab85303-c5dd-422e-9288-96498490dedd\",\"action\":\"job.dead_letter\",\"principal_type\":\"user\",\"principal_id\":null,\"resource_type\":null,\"resource_id\":null,\"request_id\":null,\"created_at\":\"2026-10-10T08:45:38.278297Z\",\"extra_data\":{\"error\":\"bulk api sync failed: all 5 endpoint calls failed (0 of 5 endpoints returned a result)\",\"retry_count\":3}},{\"id\":\"fc82ea09-59aa-40e7-9e6a-2051de18e248\",\"action\":\"event.job.submitted\",\"principal_type\":\"user\",\"principal_id\":\"6e56900c-2fbe-4e34-99a8-c452ce021b5c\",\"resource_type\":\"job\",\"resource_id\":\"6d7acb51-95c2-4259-8c4d-6ce5e614e6af\",\"request_id\":null,\"created_at\":\"2026-10-10T08:45:38.259483Z\",\"extra_data\":{\"payload\":{\"source\":\"eval-traffic-loop\",\"__traceparent\":{\"traceparent\":\"00-4de68e5745096f1c4f9453957c501681-2635e2d4b609da41-03\"}},\"job_type\":\"bulk_api_sync\",\"priority\":0,\"trace_id\":\"98bb7dbd-2381-4bc7-a380-a3a96d659bae\"}},{\"id\":\"05a08578-b8cb-48f6-87fb-08efba7768b7\",\"action\":\"event.job.submitted\",\"principal_type\":\"user\",\"principal_id\":\"6e56900c-2fbe-4e34-99a8-c452ce021b5c\",\"resource_type\":\"job\",\"resource_id\":\"f20c81dc-1014-4416-9338-da2de979e074\",\"request_id\":null,\"created_at\":\"2026-10-10T08:45:38.236132Z\",\"extra_data\":{\"payload\":{\"source\":\"eval-traffic-loop\",\"__traceparent\":{\"traceparent\":\"00-c950ed372407cdf2be901bbd0167e846-7f83c3864a9ac94f-03\"}},\"job_type\":\"bulk_api_sync\",\"priority\":0,\"trace_id\":\"5d715cba-5599-449b-97c4-0f44d88800f7\"}},{\"id\":\"87a4d300-9257-4664-8676-2de7392491e2\",\"action\":\"event.job.failed\",\"principal_type\":\"user\",\"principal_id\":\"6e56900c-2fbe-4e34-99a8-c452ce021b5c\",\"resource_type\":\"job\",\"resource_id\":\"7904a03c-b86e-4a8c-a09a-1d21a6896d4a\",\"request_id\":null,\"created_at\":\"2026-10-10T08:45:38.150255Z\",\"extra_data\":{\"error\":\"bulk api sync failed: all 5 endpoint calls failed (0 of 5 endpoints returned a result)\",\"message\":\"Retrying in 4s (attempt 2 of 3)\",\"job_type\":\"bulk_api_sync\",\"retry_count\":2,\"dead_lettered\":false}},{\"id\":\"f90c748c-9f1a-4afe-aa0f-4f604512d336\",\"action\":\"event.job.failed\",\"principal_type\":\"user\",\"principal_id\":\"6e56900c-2fbe-4e34-99a8-c452ce021b5c\",\"resource_type\":\"job\",\"resource_id\":\"4506966a-a662-492c-ba4d-cd5d45580ba3\",\"request_id\":null,\"created_at\":\"2026-10-10T08:45:38.093729Z\",\"extra_data\":{\"error\":\"bulk api sync failed: all 5 endpoint calls failed (0 of 5 endpoints returned a result)\",\"message\":\"Retrying in 4s (attempt 2 of 3)\",\"job_type\":\"bulk_api_sync\",\"retry_count\":2,\"dead_lettered\":false}},{\"id\":\"0aa7a880-faa5-486c-92f4-88817c46fb4e\",\"action\":\"event.job.submitted\",\"principal_type\":\"user\",\"principal_id\":\"6e56900c-2fbe-4e34-99a8-c452ce021b5c\",\"resource_type\":\"job\",\"resource_id\":\"7ff8d38c-0c0b-4118-aef0-176320cf761c\",\"request_id\":null,\"created_at\":\"2026-10-10T08:45:37.190410Z\",\"extra_data\":{\"payload\":{\"source\":\"eval-traffic-loop\",\"__traceparent\":{\"traceparent\":\"00-bb065af2b5636aa525391022d3b30a16-841584f7bfa26c07-03\"}},\"job_type\":\"bulk_api_sync\",\"priority\":0,\"trace_id\":\"18857796-1bd2-4563-a216-1f9a36a84737\"}},{\"id\":\"8882c9f1-0cb4-4ab6-9c4a-bfe6306a338f\",\"action\":\"job.dead_letter\",\"principal_type\":\"user\",\"principal_id\":null,\"resource_type\":null,\"resource_id\":null,\"request_id\":null,\"created_at\":\"2026-10-10T08:45:37.175385Z\",\"extra_data\":{\"error\":\"bulk api sync failed: all 5 endpoint calls failed (0 of 5 endpoints returned a result)\",\"retry_count\":3}},{\"id\":\"93baa734-a301-44b9-b6dd-e09483c02055\",\"action\":\"event.job.submitted\",\"principal_type\":\"user\",\"principal_id\":\"6e56900c-2fbe-4e34-99a8-c452ce021b5c\",\"resource_type\":\"job\",\"resource_id\":\"446398b4-28bd-47ee-a83a-b91146763c53\",\"request_id\":null,\"created_at\":\"2026-10-10T08:45:37.146932Z\",\"extra_data\":{\"payload\":{\"source\":\"eval-traffic-loop\",\"__traceparent\":{\"traceparent\":\"00-f03e5946fe2115313f05e0199a0e2a85-b5858c26555dceaa-03\"}},\"job_type\":\"bulk_api_sync\",\"priority\":0,\"trace_id\":\"2cc0c70a-2236-447a-a9ce-3193e04b4043\"}},{\"id\":\"e4e04092-91ac-41ef-87d9-16e61c738109\",\"action\":\"job.dead_letter\",\"principal_type\":\"user\",\"principal_id\":null,\"resource_type\":null,\"resource_id\":null,\"request_id\":null,\"created_at\":\"2026-10-10T08:45:37.130885Z\",\"extra_data\":{\"error\":\"bulk api sync failed: all 5 endpoint calls failed (0 of 5 endpoints returned a result)\",\"retry_count\":3}},{\"id\":\"8112bc9f-6a57-40ff-8760-43d7ab055573\",\"action\":\"event.job.submitted\",\"principal_type\":\"user\",\"principal_id\":\"6e56900c-2fbe-4e34-99a8-c452ce021b5c\",\"resource_type\":\"job\",\"resource_id\":\"7904a03c-b86e-4a8c-a09a-1d21a6896d4a\",\"request_id\":null,\"created_at\":\"2026-10-10T08:45:37.104223Z\",\"extra_data\":{\"payload\":{\"source\":\"eval-traffic-loop\",\"__traceparent\":{\"traceparent\":\"00-03af8535da72df0ee4a8c03074f919fc-c9326e59ef4ef114-03\"}},\"job_type\":\"bulk_api_sync\",\"priority\":0,\"trace_id\":\"d9cd9c7a-32dd-4323-9ac4-5f8d7b94dd1f\"}},{\"id\":\"5a7d5fcc-3a4f-4442-9fc1-c711acecdf55\",\"action\":\"event.job.dead_letter\",\"principal_type\":\"user\",\"principal_id\":\"6e56900c-2fbe-4e34-99a8-c452ce021b5c\",\"resource_type\":\"job\",\"resource_id\":\"2345f348-f561-4e3e-8f8f-a57c90e578ee\",\"request_id\":null,\"created_at\":\"2026-10-10T08:45:37.077448Z\",\"extra_data\":{\"error\":\"bulk api sync failed: all 5 endpoint calls failed (0 of 5 endpoints returned a result)\",\"message\":\"Job exhausted after 3 attempts: bulk api sync failed: all 5 endpoint calls failed (0 of 5 endpoints returned a result)\",\"payload\":{\"source\":\"eval-traffic-loop\"},\"job_type\":\"bulk_api_sync\",\"trace_id\":\"f5a609c1-6259-41c6-8c3d-9b50c876e0ee\",\"max_retries\":3,\"retry_count\":3,\"max_attempts\":3,\"dead_lettered\":true}},{\"id\":\"ab153363-8976-4931-aa84-797f0e58a327\",\"action\":\"event.job.dead_letter\",\"principal_type\":\"user\",\"principal_id\":\"6e56900c-2fbe-4e34-99a8-c452ce021b5c\",\"resource_type\":\"job\",\"resource_id\":\"bc24700c-dbd6-45b7-b076-8033e585b3a0\",\"request_id\":null,\"created_at\":\"2026-10-10T08:45:36.957949Z\",\"extra_data\":{\"error\":\"bulk api sync failed: all 5 endpoint calls failed (0 of 5 endpoints returned a result)\",\"message\":\"Job exhausted after 3 attempts: bulk api sync failed: all 5 endpoint calls failed (0 of 5 endpoints returned a result)\",\"payload\":{\"source\":\"eval-traffic-loop\"},\"job_type\":\"bulk_api_sync\",\"trace_id\":\"d068a648-c22f-4531-8fcc-e2a80bd3c160\",\"max_retries\":3,\"retry_count\":3,\"max_attempts\":3,\"dead_lettered\":true}},{\"id\":\"3b0ddaee-54c0-49d4-b4bc-1cdae8bd6168\",\"action\":\"event.job.submitted\",\"principal_type\":\"user\",\"principal_id\":\"6e56900c-2fbe-4e34-99a8-c452ce021b5c\",\"resource_type\":\"job\",\"resource_id\":\"4506966a-a662-492c-ba4d-cd5d45580ba3\",\"request_id\":null,\"created_at\":\"2026-10-10T08:45:36.840938Z\",\"extra_data\":{\"payload\":{\"source\":\"eval-traffic-loop\",\"__traceparent\":{\"traceparent\":\"00-36773a9cb1605a11e34db4aa5489708e-113739c84aff0535-03\"}},\"job_type\":\"bulk_api_sync\",\"priority\":0,\"trace_id\":\"ba9694fd-e6a5-470b-9f1e-4d6262864f13\"}},{\"id\":\"a11bae5a-3441-4e98-aa2a-cf8999c27fc9\",\"action\":\"event.job.failed\",\"principal_type\":\"user\",\"principal_id\":\"6e56900c-2fbe-4e34-99a8-c452ce021b5c\",\"resource_type\":\"job\",\"resource_id\":\"21189ff8-2e65-4e64-b075-17df4b8e797f\",\"request_id\":null,\"created_at\":\"2026-10-10T08:45:35.981971Z\",\"extra_data\":{\"error\":\"bulk api sync failed: all 5 endpoint calls failed (0 of 5 endpoints returned a result)\",\"message\":\"Retrying in 4s (attempt 2 of 3)\",\"job_type\":\"bulk_api_sync\",\"retry_count\":2,\"dead_lettered\":false}},{\"id\":\"5b97be75-45ca-4410-9d73-f2c657b9f10e\",\"action\":\"event.job.dead_letter\",\"principal_type\":\"user\",\"principal_id\":\"6e56900c-2fbe-4e34-99a8-c452ce021b5c\",\"resource_type\":\"job\",\"resource_id\":\"605a574a-96da-4d2b-a4d6-79ccf2801667\",\"request_id\":null,\"created_at\":\"2026-10-10T08:45:35.965411Z\",\"extra_data\":{\"error\":\"bulk api sync failed: all 5 endpoint calls failed (0 of 5 endpoints returned a result)\",\"message\":\"Job exhausted after 3 attempts: bulk api sync failed: all 5 endpoint calls failed (0 of 5 endpoints returned a result)\",\"payload\":{\"source\":\"eval-traffic-loop\"},\"job_type\":\"bulk_api_sync\",\"trace_id\":\"366ff795-00fa-45c7-a0e9-9b675718f1d7\",\"max_retries\":3,\"retry_count\":3,\"max_attempts\":3,\"dead_lettered\":true}},{\"id\":\"b3360bba-96bd-47ca-b699-470fe476a226\",\"action\":\"event.job.dead_letter\",\"principal_type\":\"user\",\"principal_id\":\"6e56900c-2fbe-4e34-99a8-c452ce021b5c\",\"resource_type\":\"job\",\"resource_id\":\"c600bd21-26e2-4fb4-8a61-f0667f96d2f3\",\"request_id\":null,\"created_at\":\"2026-10-10T08:45:35.945704Z\",\"extra_data\":{\"error\":\"bulk api sync failed: all 5 endpoint calls failed (0 of 5 endpoints returned a result)\",\"message\":\"Job exhausted after 3 attempts: bulk api sync failed: all 5 endpoint calls failed (0 of 5 endpoints returned a result)\",\"payload\":{\"source\":\"eval-traffic-loop\"},\"job_type\":\"bulk_api_sync\",\"trace_id\":\"4eb459ad-c742-4d89-a065-a8f1d321778c\",\"max_retries\":3,\"retry_count\":3,\"max_attempts\":3,\"dead_lettered\":true}},{\"id\":\"c672b2e8-93a6-49ec-8763-e124b05c7891\",\"action\":\"event.job.submitted\",\"principal_type\":\"user\",\"principal_id\":\"6e56900c-2fbe-4e34-99a8-c452ce021b5c\",\"resource_type\":\"job\",\"resource_id\":\"2345f348-f561-4e3e-8f8f-a57c90e578ee\",\"request_id\":null,\"created_at\":\"2026-10-10T08:45:35.902858Z\",\"extra_data\":{\"payload\":{\"source\":\"eval-traffic-loop\",\"__traceparent\":{\"traceparent\":\"00-ca93ac9188cc09ee17f6bd36f2e058ed-a4d6c064985f330c-03\"}},\"job_type\":\"bulk_api_sync\",\"priority\":0,\"trace_id\":\"f5a609c1-6259-41c6-8c3d-9b50c876e0ee\"}}]}"
+          }
+        ],
+        "is_error": false
+      },
+      "started_at": "2026-10-10T08:46:47.883830+00:00",
+      "completed_at": "2026-10-10T08:46:47.943654+00:00",
+      "duration_ms": 59,
+      "origins": [
+        "recorded-world sweep: every read tool crossed with the resource values this scenario names (plan 02 §181), so a replayed agent that reads more widely than the expected set gets an answer instead of a `not_recorded` miss."
+      ]
+    },
+    {
+      "tool": "list_dlq_messages",
+      "arguments": {
+        "job_type": null,
+        "limit": 50,
+        "offset": 0,
+        "remediation_hint": null
+      },
+      "key": "list_dlq_messages a3408295961d541f66d7a266e2fd218ad6fe7ffe40d6912daeea90ce2215348d",
+      "result": {
+        "content": [
+          {
+            "type": "text",
+            "text": "{\"total\":24,\"items\":[{\"id\":\"7904a03c-b86e-4a8c-a09a-1d21a6896d4a\",\"type\":\"bulk_api_sync\",\"error_message\":\"bulk api sync failed: all 5 endpoint calls failed (0 of 5 endpoints returned a result)\",\"retry_count\":3,\"remediation_hint\":null,\"created_at\":\"2026-10-10T08:45:32.510500Z\",\"dead_lettered_at\":\"2026-10-10T08:45:42.708959Z\",\"fenced_at\":null,\"fenced_by\":null,\"updated_at\":\"2026-10-10T08:45:42.717307Z\",\"trace_id\":\"d9cd9c7a-32dd-4323-9ac4-5f8d7b94dd1f\",\"triage\":null,\"extra\":null},{\"id\":\"4506966a-a662-492c-ba4d-cd5d45580ba3\",\"type\":\"bulk_api_sync\",\"error_message\":\"bulk api sync failed: all 5 endpoint calls failed (0 of 5 endpoints returned a result)\",\"retry_count\":3,\"remediation_hint\":null,\"created_at\":\"2026-10-10T08:45:31.748199Z\",\"dead_lettered_at\":\"2026-10-10T08:45:42.675732Z\",\"fenced_at\":null,\"fenced_by\":null,\"updated_at\":\"2026-10-10T08:45:42.682416Z\",\"trace_id\":\"ba9694fd-e6a5-470b-9f1e-4d6262864f13\",\"triage\":null,\"extra\":null},{\"id\":\"21189ff8-2e65-4e64-b075-17df4b8e797f\",\"type\":\"bulk_api_sync\",\"error_message\":\"bulk api sync failed: all 5 endpoint calls failed (0 of 5 endpoints returned a result)\",\"retry_count\":3,\"remediation_hint\":null,\"created_at\":\"2026-10-10T08:45:31.136782Z\",\"dead_lettered_at\":\"2026-10-10T08:45:39.498950Z\",\"fenced_at\":null,\"fenced_by\":null,\"updated_at\":\"2026-10-10T08:45:39.506790Z\",\"trace_id\":\"70562eef-da35-4e38-82f5-b06ed44bb83f\",\"triage\":null,\"extra\":null},{\"id\":\"777a5596-7e8e-414e-a2fa-58f869477990\",\"type\":\"bulk_api_sync\",\"error_message\":\"bulk api sync failed: all 5 endpoint calls failed (0 of 5 endpoints returned a result)\",\"retry_count\":3,\"remediation_hint\":null,\"created_at\":\"2026-10-10T08:45:30.526229Z\",\"dead_lettered_at\":\"2026-10-10T08:45:39.486365Z\",\"fenced_at\":null,\"fenced_by\":null,\"updated_at\":\"2026-10-10T08:45:39.496845Z\",\"trace_id\":\"d64f8937-5706-4d61-9d00-8cc144fe9ad0\",\"triage\":null,\"extra\":null},{\"id\":\"6b4da0ee-8a58-4727-b5c0-a90b3413d2e7\",\"type\":\"bulk_api_sync\",\"error_message\":\"bulk api sync failed: all 5 endpoint calls failed (0 of 5 endpoints returned a result)\",\"retry_count\":3,\"remediation_hint\":null,\"created_at\":\"2026-10-10T08:45:29.894518Z\",\"dead_lettered_at\":\"2026-10-10T08:45:39.466051Z\",\"fenced_at\":null,\"fenced_by\":null,\"updated_at\":\"2026-10-10T08:45:39.477116Z\",\"trace_id\":\"fa85f1e1-79d0-4c55-ba72-c03e27b3b957\",\"triage\":null,\"extra\":null},{\"id\":\"816f3503-b747-487e-84df-ddeb5b92aa03\",\"type\":\"bulk_api_sync\",\"error_message\":\"bulk api sync failed: all 5 endpoint calls failed (0 of 5 endpoints returned a result)\",\"retry_count\":3,\"remediation_hint\":null,\"created_at\":\"2026-10-10T08:45:29.300479Z\",\"dead_lettered_at\":\"2026-10-10T08:45:39.454321Z\",\"fenced_at\":null,\"fenced_by\":null,\"updated_at\":\"2026-10-10T08:45:39.460635Z\",\"trace_id\":\"2b20445c-5e67-4cf1-bcae-1e9c034c4d36\",\"triage\":null,\"extra\":null},{\"id\":\"6d7acb51-95c2-4259-8c4d-6ce5e614e6af\",\"type\":\"bulk_api_sync\",\"error_message\":\"bulk api sync failed: all 5 endpoint calls failed (0 of 5 endpoints returned a result)\",\"retry_count\":3,\"remediation_hint\":null,\"created_at\":\"2026-10-10T08:45:28.726551Z\",\"dead_lettered_at\":\"2026-10-10T08:45:38.320072Z\",\"fenced_at\":null,\"fenced_by\":null,\"updated_at\":\"2026-10-10T08:45:38.328815Z\",\"trace_id\":\"98bb7dbd-2381-4bc7-a380-a3a96d659bae\",\"triage\":null,\"extra\":null},{\"id\":\"f20c81dc-1014-4416-9338-da2de979e074\",\"type\":\"bulk_api_sync\",\"error_message\":\"bulk api sync failed: all 5 endpoint calls failed (0 of 5 endpoints returned a result)\",\"retry_count\":3,\"remediation_hint\":null,\"created_at\":\"2026-10-10T08:45:28.127609Z\",\"dead_lettered_at\":\"2026-10-10T08:45:38.273379Z\",\"fenced_at\":null,\"fenced_by\":null,\"updated_at\":\"2026-10-10T08:45:38.278297Z\",\"trace_id\":\"5d715cba-5599-449b-97c4-0f44d88800f7\",\"triage\":null,\"extra\":null},{\"id\":\"7ff8d38c-0c0b-4118-aef0-176320cf761c\",\"type\":\"bulk_api_sync\",\"error_message\":\"bulk api sync failed: all 5 endpoint calls failed (0 of 5 endpoints returned a result)\",\"retry_count\":3,\"remediation_hint\":null,\"created_at\":\"2026-10-10T08:45:27.542618Z\",\"dead_lettered_at\":\"2026-10-10T08:45:37.169198Z\",\"fenced_at\":null,\"fenced_by\":null,\"updated_at\":\"2026-10-10T08:45:37.175385Z\",\"trace_id\":\"18857796-1bd2-4563-a216-1f9a36a84737\",\"triage\":null,\"extra\":null},{\"id\":\"446398b4-28bd-47ee-a83a-b91146763c53\",\"type\":\"bulk_api_sync\",\"error_message\":\"bulk api sync failed: all 5 endpoint calls failed (0 of 5 endpoints returned a result)\",\"retry_count\":3,\"remediation_hint\":null,\"created_at\":\"2026-10-10T08:45:26.942582Z\",\"dead_lettered_at\":\"2026-10-10T08:45:37.123889Z\",\"fenced_at\":null,\"fenced_by\":null,\"updated_at\":\"2026-10-10T08:45:37.130885Z\",\"trace_id\":\"2cc0c70a-2236-447a-a9ce-3193e04b4043\",\"triage\":null,\"extra\":null},{\"id\":\"2345f348-f561-4e3e-8f8f-a57c90e578ee\",\"type\":\"bulk_api_sync\",\"error_message\":\"bulk api sync failed: all 5 endpoint calls failed (0 of 5 endpoints returned a result)\",\"retry_count\":3,\"remediation_hint\":null,\"created_at\":\"2026-10-10T08:45:26.336832Z\",\"dead_lettered_at\":\"2026-10-10T08:45:35.874290Z\",\"fenced_at\":null,\"fenced_by\":null,\"updated_at\":\"2026-10-10T08:45:35.892469Z\",\"trace_id\":\"f5a609c1-6259-41c6-8c3d-9b50c876e0ee\",\"triage\":null,\"extra\":null},{\"id\":\"bc24700c-dbd6-45b7-b076-8033e585b3a0\",\"type\":\"bulk_api_sync\",\"error_message\":\"bulk api sync failed: all 5 endpoint calls failed (0 of 5 endpoints returned a result)\",\"retry_count\":3,\"remediation_hint\":null,\"created_at\":\"2026-10-10T08:45:25.745288Z\",\"dead_lettered_at\":\"2026-10-10T08:45:35.852169Z\",\"fenced_at\":null,\"fenced_by\":null,\"updated_at\":\"2026-10-10T08:45:35.861504Z\",\"trace_id\":\"d068a648-c22f-4531-8fcc-e2a80bd3c160\",\"triage\":null,\"extra\":null},{\"id\":\"605a574a-96da-4d2b-a4d6-79ccf2801667\",\"type\":\"bulk_api_sync\",\"error_message\":\"bulk api sync failed: all 5 endpoint calls failed (0 of 5 endpoints returned a result)\",\"retry_count\":3,\"remediation_hint\":null,\"created_at\":\"2026-10-10T08:45:25.177770Z\",\"dead_lettered_at\":\"2026-10-10T08:45:34.752386Z\",\"fenced_at\":null,\"fenced_by\":null,\"updated_at\":\"2026-10-10T08:45:34.770610Z\",\"trace_id\":\"366ff795-00fa-45c7-a0e9-9b675718f1d7\",\"triage\":null,\"extra\":null},{\"id\":\"c600bd21-26e2-4fb4-8a61-f0667f96d2f3\",\"type\":\"bulk_api_sync\",\"error_message\":\"bulk api sync failed: all 5 endpoint calls failed (0 of 5 endpoints returned a result)\",\"retry_count\":3,\"remediation_hint\":null,\"created_at\":\"2026-10-10T08:45:24.518036Z\",\"dead_lettered_at\":\"2026-10-10T08:45:34.734928Z\",\"fenced_at\":null,\"fenced_by\":null,\"updated_at\":\"2026-10-10T08:45:34.744367Z\",\"trace_id\":\"4eb459ad-c742-4d89-a065-a8f1d321778c\",\"triage\":null,\"extra\":null},{\"id\":\"1a1c0b2a-304a-47fd-bd17-4483925e63cc\",\"type\":\"bulk_api_sync\",\"error_message\":\"bulk api sync failed: all 5 endpoint calls failed (0 of 5 endpoints returned a result)\",\"retry_count\":3,\"remediation_hint\":null,\"created_at\":\"2026-10-10T08:45:23.331978Z\",\"dead_lettered_at\":\"2026-10-10T08:45:33.477797Z\",\"fenced_at\":null,\"fenced_by\":null,\"updated_at\":\"2026-10-10T08:45:33.488003Z\",\"trace_id\":\"5866ad9d-a01c-405e-9a22-7384514b8e8a\",\"triage\":null,\"extra\":null},{\"id\":\"7d23d6eb-2ed7-42c2-8463-aa75d313a032\",\"type\":\"bulk_api_sync\",\"error_message\":\"bulk api sync failed: all 5 endpoint calls failed (0 of 5 endpoints returned a result)\",\"retry_count\":3,\"remediation_hint\":null,\"created_at\":\"2026-10-10T08:45:23.938563Z\",\"dead_lettered_at\":\"2026-10-10T08:45:33.470931Z\",\"fenced_at\":null,\"fenced_by\":null,\"updated_at\":\"2026-10-10T08:45:33.479702Z\",\"trace_id\":\"9318143e-9aac-487c-9547-8d2f381ee2e7\",\"triage\":null,\"extra\":null},{\"id\":\"b2ab1f30-05de-4347-8aed-629581f61c4f\",\"type\":\"bulk_api_sync\",\"error_message\":\"bulk api sync failed: all 5 endpoint calls failed (0 of 5 endpoints returned a result)\",\"retry_count\":3,\"remediation_hint\":null,\"created_at\":\"2026-10-10T08:45:22.757508Z\",\"dead_lettered_at\":\"2026-10-10T08:45:32.002275Z\",\"fenced_at\":null,\"fenced_by\":null,\"updated_at\":\"2026-10-10T08:45:32.010238Z\",\"trace_id\":\"2f00450e-9948-42df-9685-4601e417e326\",\"triage\":null,\"extra\":null},{\"id\":\"945dd466-e1ff-43c7-b4f1-739eba8fc4b5\",\"type\":\"bulk_api_sync\",\"error_message\":\"bulk api sync failed: all 5 endpoint calls failed (0 of 5 endpoints returned a result)\",\"retry_count\":3,\"remediation_hint\":null,\"created_at\":\"2026-10-10T08:45:22.160987Z\",\"dead_lettered_at\":\"2026-10-10T08:45:31.991457Z\",\"fenced_at\":null,\"fenced_by\":null,\"updated_at\":\"2026-10-10T08:45:31.998507Z\",\"trace_id\":\"c0c18539-81d2-4c82-9be2-c7ae6adde3c0\",\"triage\":null,\"extra\":null},{\"id\":\"6fce8d77-ca3c-48cc-8e66-4b25c377ed95\",\"type\":\"bulk_api_sync\",\"error_message\":\"bulk api sync failed: all 5 endpoint calls failed (0 of 5 endpoints returned a result)\",\"retry_count\":3,\"remediation_hint\":null,\"created_at\":\"2026-10-10T08:45:21.438774Z\",\"dead_lettered_at\":\"2026-10-10T08:45:30.668482Z\",\"fenced_at\":null,\"fenced_by\":null,\"updated_at\":\"2026-10-10T08:45:30.675636Z\",\"trace_id\":\"743bb178-eebd-4d3f-84b7-79fafb51061e\",\"triage\":null,\"extra\":null},{\"id\":\"ab819886-9e98-4c33-9782-4fef45ac20d3\",\"type\":\"bulk_api_sync\",\"error_message\":\"bulk api sync failed: all 5 endpoint calls failed (0 of 5 endpoints returned a result)\",\"retry_count\":3,\"remediation_hint\":null,\"created_at\":\"2026-10-10T08:45:20.858360Z\",\"dead_lettered_at\":\"2026-10-10T08:45:30.577722Z\",\"fenced_at\":null,\"fenced_by\":null,\"updated_at\":\"2026-10-10T08:45:30.592324Z\",\"trace_id\":\"a33e8cf1-73c7-413c-9fe8-e3fcabd91f1c\",\"triage\":null,\"extra\":null},{\"id\":\"fc8d2a03-23b3-5371-9acb-46443c73baa5\",\"type\":\"bulk_api_sync\",\"error_message\":\"UpstreamTimeout: bulk_api_sync POST https://partner-api.internal/v2/sync timed out after 30s on attempt 3/3 — the request was never acknowledged, so no downstream write was recorded\",\"retry_count\":3,\"remediation_hint\":\"replay_safe\",\"created_at\":\"2026-10-10T08:37:13.211982Z\",\"dead_lettered_at\":\"2026-10-10T08:37:19.211982Z\",\"fenced_at\":null,\"fenced_by\":null,\"updated_at\":\"2026-10-10T08:37:19.211982Z\",\"trace_id\":\"c5ca46c1-f4dd-5021-8be4-130143553096\",\"triage\":{\"root_cause_category\":\"upstream_timeout\",\"summary\":\"partner-api.internal did not answer inside the 30s deadline on any of the three attempts. The payload was accepted by validation and nothing was committed downstream.\",\"suggested_fix\":\"Re-run the job as it stands: the call is idempotent, no partial write survived the timeout, and a fresh attempt is the entire remedy. Neither the payload nor the producer needs changing.\",\"is_retryable\":true,\"confidence\":0.88},\"extra\":null},{\"id\":\"f030f975-974e-5ce3-aa6b-444136507d86\",\"type\":\"csv_upload\",\"error_message\":\"ValueError: invalid literal for int() with base 10: 'not-a-number' at row 15,382\",\"retry_count\":3,\"remediation_hint\":\"human_required\",\"created_at\":\"2026-10-10T08:33:13.211982Z\",\"dead_lettered_at\":\"2026-10-10T08:33:35.211982Z\",\"fenced_at\":null,\"fenced_by\":null,\"updated_at\":\"2026-10-10T08:33:35.211982Z\",\"trace_id\":\"89609789-fdcb-5a5a-b826-d7d5d5f9cf37\",\"triage\":{\"root_cause_category\":\"bad_input\",\"summary\":\"Non-numeric value in a supposedly-integer CSV column.\",\"suggested_fix\":\"Not retryable — data quality issue. Notify the uploader; add a validation step in the CSV importer that fails the whole upload with a clear error rather than half-processing.\",\"is_retryable\":false,\"confidence\":0.94},\"extra\":null},{\"id\":\"af67d1b1-13f8-5a2c-8c44-66ec5564597d\",\"type\":\"bulk_api_sync\",\"error_message\":\"RateLimited: partner-api.internal answered 429 Too Many Requests on attempt 3/3 (retry-after: 120s); the per-tenant quota window has not rolled over yet\",\"retry_count\":3,\"remediation_hint\":\"wait_and_replay\",\"created_at\":\"2026-10-10T08:20:13.211982Z\",\"dead_lettered_at\":\"2026-10-10T08:20:47.211982Z\",\"fenced_at\":null,\"fenced_by\":null,\"updated_at\":\"2026-10-10T08:20:47.211982Z\",\"trace_id\":\"6f76e48d-72c4-5e5a-a5cf-bc29758167cb\",\"triage\":{\"root_cause_category\":\"rate_limited\",\"summary\":\"All three attempts landed inside one quota window. The partner is shedding load, not rejecting the payload.\",\"suggested_fix\":\"Let the 120s retry-after window pass before the next attempt. An immediate re-run spends another attempt against the same closed window and comes back 429.\",\"is_retryable\":true,\"confidence\":0.86},\"extra\":null},{\"id\":\"97d91272-9774-5b8e-980b-f0d2fa6ed619\",\"type\":\"bulk_api_sync\",\"error_message\":\"send_email downstream call failed: ConnectionRefusedError('smtp.mailer.internal:587')\",\"retry_count\":3,\"remediation_hint\":\"wait_and_replay\",\"created_at\":\"2026-10-10T08:05:13.211982Z\",\"dead_lettered_at\":\"2026-10-10T08:05:29.211982Z\",\"fenced_at\":null,\"fenced_by\":null,\"updated_at\":\"2026-10-10T08:05:29.211982Z\",\"trace_id\":\"1bfc7482-c957-5217-beae-e8cba48a152d\",\"triage\":{\"root_cause_category\":\"downstream_unavailable\",\"summary\":\"SMTP relay unreachable — connection refused at TCP layer.\",\"suggested_fix\":\"Check smtp.mailer.internal ECS task health; recent billing hotfix (v0.4.2) may have changed VPC egress rules — cross-reference `get_deploy_history`. Re-run once the dependency answers.\",\"is_retryable\":true,\"confidence\":0.82},\"extra\":null}]}"
+          }
+        ],
+        "is_error": false
+      },
+      "started_at": "2026-10-10T08:46:47.943721+00:00",
+      "completed_at": "2026-10-10T08:46:47.980619+00:00",
+      "duration_ms": 36,
+      "origins": [
+        "recorded-world sweep: every read tool crossed with the resource values this scenario names (plan 02 §181), so a replayed agent that reads more widely than the expected set gets an answer instead of a `not_recorded` miss."
+      ]
+    },
+    {
+      "tool": "list_incidents",
+      "arguments": {
+        "include_resolved": false,
+        "limit": 50,
+        "severity": null,
+        "source": null
+      },
+      "key": "list_incidents 02a360ce275b4d4d73ac4305d9b6c8f429a4619fc02fda559a3dc9653a8d7f28",
+      "result": {
+        "content": [
+          {
+            "type": "text",
+            "text": "{\"total\":4,\"incidents\":[{\"id\":\"d0e1e74e-fdc1-402a-9dec-cd0d47ab12a8\",\"severity\":\"critical\",\"source\":\"dlq:threshold\",\"title\":\"Dead-letter queue depth 8 (threshold 5)\",\"description\":\"8 jobs are in the dead-letter queue (threshold 5). The rows above the baseline carry no category yet.\",\"fired_at\":\"2026-10-10T08:45:32.822994Z\",\"resolved_at\":null,\"is_active\":true},{\"id\":\"7c9d648f-0215-544d-a9c3-adcf74ea68ab\",\"severity\":\"critical\",\"source\":\"api\",\"title\":\"5xx rate above threshold\",\"description\":\"API 5xx rate 3.2% over last 10 minutes.\",\"fired_at\":\"2026-10-10T08:37:13.224090Z\",\"resolved_at\":null,\"is_active\":true},{\"id\":\"c6c4e180-f625-53c2-85c2-2d505fec61e5\",\"severity\":\"warning\",\"source\":\"dlq\",\"title\":\"DLQ backlog growing\",\"description\":\"3 send_email jobs dead-lettered in last hour.\",\"fired_at\":\"2026-10-10T08:30:13.224090Z\",\"resolved_at\":null,\"is_active\":true},{\"id\":\"e33d75bb-3769-594a-9443-57abff0f7580\",\"severity\":\"critical\",\"source\":\"kafka\",\"title\":\"billing-consumer lag exceeds 10k\",\"description\":\"Sustained lag on billing-consumer for 20+ minutes.\",\"fired_at\":\"2026-10-10T08:20:13.224090Z\",\"resolved_at\":null,\"is_active\":true}]}"
+          }
+        ],
+        "is_error": false
+      },
+      "started_at": "2026-10-10T08:46:47.980677+00:00",
+      "completed_at": "2026-10-10T08:46:48.002220+00:00",
+      "duration_ms": 21,
+      "origins": [
+        "recorded-world sweep: every read tool crossed with the resource values this scenario names (plan 02 §181), so a replayed agent that reads more widely than the expected set gets an answer instead of a `not_recorded` miss."
+      ]
+    },
+    {
+      "tool": "search_traces",
+      "arguments": {
+        "job_type": null,
+        "limit": 50,
+        "since_hours": null,
+        "status": null
+      },
+      "key": "search_traces 3a189ce082f91f98d976a60f8eabe08012dcfe7d5dac2a2b87c6ce8be3848735",
+      "result": {
+        "content": [
+          {
+            "type": "text",
+            "text": "{\"matches\":[{\"trace_id\":\"d9cd9c7a-32dd-4323-9ac4-5f8d7b94dd1f\",\"job_id\":\"7904a03c-b86e-4a8c-a09a-1d21a6896d4a\",\"job_type\":\"bulk_api_sync\",\"status\":\"dead_letter\",\"created_at\":\"2026-10-10T08:45:32.510500Z\"},{\"trace_id\":\"ba9694fd-e6a5-470b-9f1e-4d6262864f13\",\"job_id\":\"4506966a-a662-492c-ba4d-cd5d45580ba3\",\"job_type\":\"bulk_api_sync\",\"status\":\"dead_letter\",\"created_at\":\"2026-10-10T08:45:31.748199Z\"},{\"trace_id\":\"70562eef-da35-4e38-82f5-b06ed44bb83f\",\"job_id\":\"21189ff8-2e65-4e64-b075-17df4b8e797f\",\"job_type\":\"bulk_api_sync\",\"status\":\"dead_letter\",\"created_at\":\"2026-10-10T08:45:31.136782Z\"},{\"trace_id\":\"d64f8937-5706-4d61-9d00-8cc144fe9ad0\",\"job_id\":\"777a5596-7e8e-414e-a2fa-58f869477990\",\"job_type\":\"bulk_api_sync\",\"status\":\"dead_letter\",\"created_at\":\"2026-10-10T08:45:30.526229Z\"},{\"trace_id\":\"fa85f1e1-79d0-4c55-ba72-c03e27b3b957\",\"job_id\":\"6b4da0ee-8a58-4727-b5c0-a90b3413d2e7\",\"job_type\":\"bulk_api_sync\",\"status\":\"dead_letter\",\"created_at\":\"2026-10-10T08:45:29.894518Z\"},{\"trace_id\":\"2b20445c-5e67-4cf1-bcae-1e9c034c4d36\",\"job_id\":\"816f3503-b747-487e-84df-ddeb5b92aa03\",\"job_type\":\"bulk_api_sync\",\"status\":\"dead_letter\",\"created_at\":\"2026-10-10T08:45:29.300479Z\"},{\"trace_id\":\"98bb7dbd-2381-4bc7-a380-a3a96d659bae\",\"job_id\":\"6d7acb51-95c2-4259-8c4d-6ce5e614e6af\",\"job_type\":\"bulk_api_sync\",\"status\":\"dead_letter\",\"created_at\":\"2026-10-10T08:45:28.726551Z\"},{\"trace_id\":\"5d715cba-5599-449b-97c4-0f44d88800f7\",\"job_id\":\"f20c81dc-1014-4416-9338-da2de979e074\",\"job_type\":\"bulk_api_sync\",\"status\":\"dead_letter\",\"created_at\":\"2026-10-10T08:45:28.127609Z\"},{\"trace_id\":\"18857796-1bd2-4563-a216-1f9a36a84737\",\"job_id\":\"7ff8d38c-0c0b-4118-aef0-176320cf761c\",\"job_type\":\"bulk_api_sync\",\"status\":\"dead_letter\",\"created_at\":\"2026-10-10T08:45:27.542618Z\"},{\"trace_id\":\"2cc0c70a-2236-447a-a9ce-3193e04b4043\",\"job_id\":\"446398b4-28bd-47ee-a83a-b91146763c53\",\"job_type\":\"bulk_api_sync\",\"status\":\"dead_letter\",\"created_at\":\"2026-10-10T08:45:26.942582Z\"},{\"trace_id\":\"f5a609c1-6259-41c6-8c3d-9b50c876e0ee\",\"job_id\":\"2345f348-f561-4e3e-8f8f-a57c90e578ee\",\"job_type\":\"bulk_api_sync\",\"status\":\"dead_letter\",\"created_at\":\"2026-10-10T08:45:26.336832Z\"},{\"trace_id\":\"d068a648-c22f-4531-8fcc-e2a80bd3c160\",\"job_id\":\"bc24700c-dbd6-45b7-b076-8033e585b3a0\",\"job_type\":\"bulk_api_sync\",\"status\":\"dead_letter\",\"created_at\":\"2026-10-10T08:45:25.745288Z\"},{\"trace_id\":\"366ff795-00fa-45c7-a0e9-9b675718f1d7\",\"job_id\":\"605a574a-96da-4d2b-a4d6-79ccf2801667\",\"job_type\":\"bulk_api_sync\",\"status\":\"dead_letter\",\"created_at\":\"2026-10-10T08:45:25.177770Z\"},{\"trace_id\":\"4eb459ad-c742-4d89-a065-a8f1d321778c\",\"job_id\":\"c600bd21-26e2-4fb4-8a61-f0667f96d2f3\",\"job_type\":\"bulk_api_sync\",\"status\":\"dead_letter\",\"created_at\":\"2026-10-10T08:45:24.518036Z\"},{\"trace_id\":\"9318143e-9aac-487c-9547-8d2f381ee2e7\",\"job_id\":\"7d23d6eb-2ed7-42c2-8463-aa75d313a032\",\"job_type\":\"bulk_api_sync\",\"status\":\"dead_letter\",\"created_at\":\"2026-10-10T08:45:23.938563Z\"},{\"trace_id\":\"5866ad9d-a01c-405e-9a22-7384514b8e8a\",\"job_id\":\"1a1c0b2a-304a-47fd-bd17-4483925e63cc\",\"job_type\":\"bulk_api_sync\",\"status\":\"dead_letter\",\"created_at\":\"2026-10-10T08:45:23.331978Z\"},{\"trace_id\":\"2f00450e-9948-42df-9685-4601e417e326\",\"job_id\":\"b2ab1f30-05de-4347-8aed-629581f61c4f\",\"job_type\":\"bulk_api_sync\",\"status\":\"dead_letter\",\"created_at\":\"2026-10-10T08:45:22.757508Z\"},{\"trace_id\":\"c0c18539-81d2-4c82-9be2-c7ae6adde3c0\",\"job_id\":\"945dd466-e1ff-43c7-b4f1-739eba8fc4b5\",\"job_type\":\"bulk_api_sync\",\"status\":\"dead_letter\",\"created_at\":\"2026-10-10T08:45:22.160987Z\"},{\"trace_id\":\"743bb178-eebd-4d3f-84b7-79fafb51061e\",\"job_id\":\"6fce8d77-ca3c-48cc-8e66-4b25c377ed95\",\"job_type\":\"bulk_api_sync\",\"status\":\"dead_letter\",\"created_at\":\"2026-10-10T08:45:21.438774Z\"},{\"trace_id\":\"a33e8cf1-73c7-413c-9fe8-e3fcabd91f1c\",\"job_id\":\"ab819886-9e98-4c33-9782-4fef45ac20d3\",\"job_type\":\"bulk_api_sync\",\"status\":\"dead_letter\",\"created_at\":\"2026-10-10T08:45:20.858360Z\"},{\"trace_id\":\"09422cf3-338f-5d90-ae47-e7e8455655e7\",\"job_id\":\"b82d8fb4-a936-5cf4-b775-8d1f673a6f38\",\"job_type\":\"bulk_api_sync\",\"status\":\"completed\",\"created_at\":\"2026-10-10T08:39:13.211982Z\"},{\"trace_id\":\"c5ca46c1-f4dd-5021-8be4-130143553096\",\"job_id\":\"fc8d2a03-23b3-5371-9acb-46443c73baa5\",\"job_type\":\"bulk_api_sync\",\"status\":\"dead_letter\",\"created_at\":\"2026-10-10T08:37:13.211982Z\"},{\"trace_id\":\"89609789-fdcb-5a5a-b826-d7d5d5f9cf37\",\"job_id\":\"f030f975-974e-5ce3-aa6b-444136507d86\",\"job_type\":\"csv_upload\",\"status\":\"dead_letter\",\"created_at\":\"2026-10-10T08:33:13.211982Z\"},{\"trace_id\":\"6f76e48d-72c4-5e5a-a5cf-bc29758167cb\",\"job_id\":\"af67d1b1-13f8-5a2c-8c44-66ec5564597d\",\"job_type\":\"bulk_api_sync\",\"status\":\"dead_letter\",\"created_at\":\"2026-10-10T08:20:13.211982Z\"},{\"trace_id\":\"83bbb990-8583-45ce-b0e7-bca17e1aa7d7\",\"job_id\":\"da0cc736-1290-4e0c-ac99-087ac15bf9ff\",\"job_type\":\"bulk_api_sync\",\"status\":\"completed\",\"created_at\":\"2026-10-10T08:19:42.543969Z\"},{\"trace_id\":\"bd129772-1d77-4a1e-995a-acfef2e72934\",\"job_id\":\"23abaa88-7e6b-4d09-a6b0-bfc665742a62\",\"job_type\":\"bulk_api_sync\",\"status\":\"completed\",\"created_at\":\"2026-10-10T08:19:41.478463Z\"},{\"trace_id\":\"421a2958-1357-4e8e-b443-e6d55dd0e5e4\",\"job_id\":\"1bf46c66-7993-42e5-9ea4-ec9e546f2625\",\"job_type\":\"bulk_api_sync\",\"status\":\"completed\",\"created_at\":\"2026-10-10T08:19:40.351991Z\"},{\"trace_id\":\"afe7672a-7794-4853-a916-71ed901f15f2\",\"job_id\":\"4182953a-b3a0-40a4-a6b6-8e55a128bfde\",\"job_type\":\"bulk_api_sync\",\"status\":\"completed\",\"created_at\":\"2026-10-10T08:19:39.260887Z\"},{\"trace_id\":\"9d0fda61-8239-4dbf-a8ff-dc97293bba9a\",\"job_id\":\"ed8eb4d5-8642-46ae-90f3-b98b736e121e\",\"job_type\":\"bulk_api_sync\",\"status\":\"completed\",\"created_at\":\"2026-10-10T08:19:38.224235Z\"},{\"trace_id\":\"edeeb994-56d2-53e6-88fd-8af47e695dbc\",\"job_id\":\"d034fd34-102d-5f61-8d21-a7dbda5ea895\",\"job_type\":\"doc_analysis\",\"status\":\"failed\",\"created_at\":\"2026-10-10T08:15:13.211982Z\"},{\"trace_id\":\"1bfc7482-c957-5217-beae-e8cba48a152d\",\"job_id\":\"97d91272-9774-5b8e-980b-f0d2fa6ed619\",\"job_type\":\"bulk_api_sync\",\"status\":\"dead_letter\",\"created_at\":\"2026-10-10T08:05:13.211982Z\"},{\"trace_id\":\"0e24ca29-1d47-57e9-b898-4d79bb6da981\",\"job_id\":\"5967d510-0290-5627-a9db-4e29e3a38e44\",\"job_type\":\"report_gen\",\"status\":\"failed\",\"created_at\":\"2026-10-10T08:00:13.211982Z\"},{\"trace_id\":\"f26b9af5-0384-4d15-ad8d-47e6afec3ac5\",\"job_id\":\"88baf0d7-6307-4e4f-9081-654a48817639\",\"job_type\":\"bulk_api_sync\",\"status\":\"completed\",\"created_at\":\"2026-10-10T07:31:57.110133Z\"},{\"trace_id\":\"414052eb-2975-4051-b03d-a6b4232802a7\",\"job_id\":\"b4cd71c2-6561-4ec4-b040-34577aed4b9f\",\"job_type\":\"bulk_api_sync\",\"status\":\"completed\",\"created_at\":\"2026-10-10T07:31:56.318130Z\"},{\"trace_id\":\"16073261-5c95-4089-bb04-7430898c13fb\",\"job_id\":\"3cd14f33-693e-4826-9957-ed12de7d2af8\",\"job_type\":\"bulk_api_sync\",\"status\":\"completed\",\"created_at\":\"2026-10-10T07:31:55.536324Z\"},{\"trace_id\":\"0e2b3b27-b758-4bab-8c44-44e723ac378c\",\"job_id\":\"934a5dce-9d7a-479d-a945-ea05c5e43009\",\"job_type\":\"bulk_api_sync\",\"status\":\"completed\",\"created_at\":\"2026-10-10T07:31:54.747111Z\"},{\"trace_id\":\"d993874b-7a09-4d84-a6a5-eb09cd81bfb0\",\"job_id\":\"ba247706-e24d-44d9-9565-e392bc6922e6\",\"job_type\":\"bulk_api_sync\",\"status\":\"completed\",\"created_at\":\"2026-10-10T07:31:53.967479Z\"},{\"trace_id\":\"8d85e108-c76f-49ac-8076-fac2a8fbf833\",\"job_id\":\"97f1740d-0172-4e3d-9448-5a3ed881bd5b\",\"job_type\":\"bulk_api_sync\",\"status\":\"completed\",\"created_at\":\"2026-10-10T07:31:53.194864Z\"},{\"trace_id\":\"0279fc0c-bd41-4d90-8b82-dd506bb4e810\",\"job_id\":\"b2053f2f-1db2-4f94-9942-d24101b25d42\",\"job_type\":\"bulk_api_sync\",\"status\":\"completed\",\"created_at\":\"2026-10-10T07:31:52.408823Z\"},{\"trace_id\":\"2bd71d44-aa35-43e6-a9e1-b3e5be2b9ec3\",\"job_id\":\"a9839dcc-d8ad-4d14-b6d3-abdabfb6c6a6\",\"job_type\":\"bulk_api_sync\",\"status\":\"completed\",\"created_at\":\"2026-10-10T07:31:51.630474Z\"},{\"trace_id\":\"9ff1215b-4569-4c24-868a-3d8826235bf7\",\"job_id\":\"f944a20c-65a9-4b8a-a60e-451610fb97f3\",\"job_type\":\"bulk_api_sync\",\"status\":\"completed\",\"created_at\":\"2026-10-10T07:31:50.852733Z\"},{\"trace_id\":\"c7c4ba4d-e63d-45d7-92ff-a2548c73cfc5\",\"job_id\":\"0be1c41c-2d79-4b17-986e-872ea0d062bb\",\"job_type\":\"bulk_api_sync\",\"status\":\"completed\",\"created_at\":\"2026-10-10T07:31:50.066721Z\"},{\"trace_id\":\"dec46225-2855-419c-9207-ca39b5435524\",\"job_id\":\"0d2ff936-e748-4bf3-be36-c620aebc87ca\",\"job_type\":\"bulk_api_sync\",\"status\":\"completed\",\"created_at\":\"2026-10-10T07:31:49.285591Z\"},{\"trace_id\":\"cbb40270-0eaa-4a0e-83d2-4d8e9da9385f\",\"job_id\":\"d99fa90d-d4f9-4019-b512-1aff7f945691\",\"job_type\":\"bulk_api_sync\",\"status\":\"completed\",\"created_at\":\"2026-10-10T07:31:48.495152Z\"},{\"trace_id\":\"02e660ec-2ad1-4b14-a9c5-a8de91d9dc62\",\"job_id\":\"d57e4571-3ffb-4c49-8efd-caf628ca4011\",\"job_type\":\"bulk_api_sync\",\"status\":\"completed\",\"created_at\":\"2026-10-10T07:31:47.717562Z\"},{\"trace_id\":\"3df4677b-735a-48f7-91f9-6a946b81faaa\",\"job_id\":\"f313b59e-7eec-4a1a-b5d0-0068e8fbc7b8\",\"job_type\":\"bulk_api_sync\",\"status\":\"completed\",\"created_at\":\"2026-10-10T07:31:46.934554Z\"},{\"trace_id\":\"715d66fe-9899-43e4-a200-bf3db16c517b\",\"job_id\":\"83ae97ea-c42f-4c78-b15a-2ea73676c3d9\",\"job_type\":\"bulk_api_sync\",\"status\":\"completed\",\"created_at\":\"2026-10-10T07:31:46.140338Z\"},{\"trace_id\":\"48bfd67c-655c-4ac8-bac5-ec786d25307d\",\"job_id\":\"a96a00b1-d072-4e47-a4d5-425c23972da7\",\"job_type\":\"bulk_api_sync\",\"status\":\"completed\",\"created_at\":\"2026-10-10T07:31:45.369898Z\"},{\"trace_id\":\"e6fbce6c-7bf8-4017-ad13-43168114a4e1\",\"job_id\":\"419056ce-d639-4e7c-8f3d-2e7718314bdc\",\"job_type\":\"bulk_api_sync\",\"status\":\"completed\",\"created_at\":\"2026-10-10T07:31:44.590411Z\"},{\"trace_id\":\"17d0a880-81b3-4687-a580-1eac55c1f5c7\",\"job_id\":\"12d7c564-15bc-451b-a0d4-3c2f717d0e79\",\"job_type\":\"bulk_api_sync\",\"status\":\"completed\",\"created_at\":\"2026-10-10T07:31:43.803365Z\"}]}"
+          }
+        ],
+        "is_error": false
+      },
+      "started_at": "2026-10-10T08:46:48.002281+00:00",
+      "completed_at": "2026-10-10T08:46:48.029388+00:00",
+      "duration_ms": 27,
+      "origins": [
+        "recorded-world sweep: every read tool crossed with the resource values this scenario names (plan 02 §181), so a replayed agent that reads more widely than the expected set gets an answer instead of a `not_recorded` miss."
+      ]
+    }
+  ],
+  "failures": [],
+  "notes": [
+    "The alert names no resource in ALERT_SUBJECT_PROBES, so there is no subject probe to derive. Legitimate and common — a DLQ-depth alert names a condition, not a resource (see `alert_subject`).",
+    "The scenario declares no `expected_action_tools`, so no source-row read and no verify probe are derivable. Read-only and escalate-only scenarios look like this.",
+    "The recorded-world sweep could not fill an argument for `get_cache_key_info`, `get_consumer_lag`, `get_dag_state`, `get_incident`, `get_trace` — this scenario names no resource of the kind those tools require, so they are NOT recorded and a replayed agent calling one gets a `not_recorded` miss. Expected for tools irrelevant to the scenario; give the scenario the value it grades on if one of them is not."
+  ],
+  "findings": [
+    {
+      "kind": "unclassified error text",
+      "subject": "DLQ row `7904a03c-b86e-4a8c-a09a-1d21a6896d4a` (seen in list_dlq_messages(job_type=None, limit=50, offset=0, remediation_hint=None))",
+      "detail": "hint None; the lint's table matched no family in 'bulk api sync failed: all 5 endpoint calls failed (0 of 5 endpoints returned a result)'. NO OPINION — read it yourself and ask whether it supports the hint. If this shape recurs, add it to `ERROR_FAMILIES`."
+    },
+    {
+      "kind": "unclassified error text",
+      "subject": "DLQ row `4506966a-a662-492c-ba4d-cd5d45580ba3` (seen in list_dlq_messages(job_type=None, limit=50, offset=0, remediation_hint=None))",
+      "detail": "hint None; the lint's table matched no family in 'bulk api sync failed: all 5 endpoint calls failed (0 of 5 endpoints returned a result)'. NO OPINION — read it yourself and ask whether it supports the hint. If this shape recurs, add it to `ERROR_FAMILIES`."
+    },
+    {
+      "kind": "unclassified error text",
+      "subject": "DLQ row `21189ff8-2e65-4e64-b075-17df4b8e797f` (seen in list_dlq_messages(job_type=None, limit=50, offset=0, remediation_hint=None))",
+      "detail": "hint None; the lint's table matched no family in 'bulk api sync failed: all 5 endpoint calls failed (0 of 5 endpoints returned a result)'. NO OPINION — read it yourself and ask whether it supports the hint. If this shape recurs, add it to `ERROR_FAMILIES`."
+    },
+    {
+      "kind": "unclassified error text",
+      "subject": "DLQ row `777a5596-7e8e-414e-a2fa-58f869477990` (seen in list_dlq_messages(job_type=None, limit=50, offset=0, remediation_hint=None))",
+      "detail": "hint None; the lint's table matched no family in 'bulk api sync failed: all 5 endpoint calls failed (0 of 5 endpoints returned a result)'. NO OPINION — read it yourself and ask whether it supports the hint. If this shape recurs, add it to `ERROR_FAMILIES`."
+    },
+    {
+      "kind": "unclassified error text",
+      "subject": "DLQ row `6b4da0ee-8a58-4727-b5c0-a90b3413d2e7` (seen in list_dlq_messages(job_type=None, limit=50, offset=0, remediation_hint=None))",
+      "detail": "hint None; the lint's table matched no family in 'bulk api sync failed: all 5 endpoint calls failed (0 of 5 endpoints returned a result)'. NO OPINION — read it yourself and ask whether it supports the hint. If this shape recurs, add it to `ERROR_FAMILIES`."
+    },
+    {
+      "kind": "unclassified error text",
+      "subject": "DLQ row `816f3503-b747-487e-84df-ddeb5b92aa03` (seen in list_dlq_messages(job_type=None, limit=50, offset=0, remediation_hint=None))",
+      "detail": "hint None; the lint's table matched no family in 'bulk api sync failed: all 5 endpoint calls failed (0 of 5 endpoints returned a result)'. NO OPINION — read it yourself and ask whether it supports the hint. If this shape recurs, add it to `ERROR_FAMILIES`."
+    },
+    {
+      "kind": "unclassified error text",
+      "subject": "DLQ row `6d7acb51-95c2-4259-8c4d-6ce5e614e6af` (seen in list_dlq_messages(job_type=None, limit=50, offset=0, remediation_hint=None))",
+      "detail": "hint None; the lint's table matched no family in 'bulk api sync failed: all 5 endpoint calls failed (0 of 5 endpoints returned a result)'. NO OPINION — read it yourself and ask whether it supports the hint. If this shape recurs, add it to `ERROR_FAMILIES`."
+    },
+    {
+      "kind": "unclassified error text",
+      "subject": "DLQ row `f20c81dc-1014-4416-9338-da2de979e074` (seen in list_dlq_messages(job_type=None, limit=50, offset=0, remediation_hint=None))",
+      "detail": "hint None; the lint's table matched no family in 'bulk api sync failed: all 5 endpoint calls failed (0 of 5 endpoints returned a result)'. NO OPINION — read it yourself and ask whether it supports the hint. If this shape recurs, add it to `ERROR_FAMILIES`."
+    },
+    {
+      "kind": "unclassified error text",
+      "subject": "DLQ row `7ff8d38c-0c0b-4118-aef0-176320cf761c` (seen in list_dlq_messages(job_type=None, limit=50, offset=0, remediation_hint=None))",
+      "detail": "hint None; the lint's table matched no family in 'bulk api sync failed: all 5 endpoint calls failed (0 of 5 endpoints returned a result)'. NO OPINION — read it yourself and ask whether it supports the hint. If this shape recurs, add it to `ERROR_FAMILIES`."
+    },
+    {
+      "kind": "unclassified error text",
+      "subject": "DLQ row `446398b4-28bd-47ee-a83a-b91146763c53` (seen in list_dlq_messages(job_type=None, limit=50, offset=0, remediation_hint=None))",
+      "detail": "hint None; the lint's table matched no family in 'bulk api sync failed: all 5 endpoint calls failed (0 of 5 endpoints returned a result)'. NO OPINION — read it yourself and ask whether it supports the hint. If this shape recurs, add it to `ERROR_FAMILIES`."
+    },
+    {
+      "kind": "unclassified error text",
+      "subject": "DLQ row `2345f348-f561-4e3e-8f8f-a57c90e578ee` (seen in list_dlq_messages(job_type=None, limit=50, offset=0, remediation_hint=None))",
+      "detail": "hint None; the lint's table matched no family in 'bulk api sync failed: all 5 endpoint calls failed (0 of 5 endpoints returned a result)'. NO OPINION — read it yourself and ask whether it supports the hint. If this shape recurs, add it to `ERROR_FAMILIES`."
+    },
+    {
+      "kind": "unclassified error text",
+      "subject": "DLQ row `bc24700c-dbd6-45b7-b076-8033e585b3a0` (seen in list_dlq_messages(job_type=None, limit=50, offset=0, remediation_hint=None))",
+      "detail": "hint None; the lint's table matched no family in 'bulk api sync failed: all 5 endpoint calls failed (0 of 5 endpoints returned a result)'. NO OPINION — read it yourself and ask whether it supports the hint. If this shape recurs, add it to `ERROR_FAMILIES`."
+    },
+    {
+      "kind": "unclassified error text",
+      "subject": "DLQ row `605a574a-96da-4d2b-a4d6-79ccf2801667` (seen in list_dlq_messages(job_type=None, limit=50, offset=0, remediation_hint=None))",
+      "detail": "hint None; the lint's table matched no family in 'bulk api sync failed: all 5 endpoint calls failed (0 of 5 endpoints returned a result)'. NO OPINION — read it yourself and ask whether it supports the hint. If this shape recurs, add it to `ERROR_FAMILIES`."
+    },
+    {
+      "kind": "unclassified error text",
+      "subject": "DLQ row `c600bd21-26e2-4fb4-8a61-f0667f96d2f3` (seen in list_dlq_messages(job_type=None, limit=50, offset=0, remediation_hint=None))",
+      "detail": "hint None; the lint's table matched no family in 'bulk api sync failed: all 5 endpoint calls failed (0 of 5 endpoints returned a result)'. NO OPINION — read it yourself and ask whether it supports the hint. If this shape recurs, add it to `ERROR_FAMILIES`."
+    },
+    {
+      "kind": "unclassified error text",
+      "subject": "DLQ row `1a1c0b2a-304a-47fd-bd17-4483925e63cc` (seen in list_dlq_messages(job_type=None, limit=50, offset=0, remediation_hint=None))",
+      "detail": "hint None; the lint's table matched no family in 'bulk api sync failed: all 5 endpoint calls failed (0 of 5 endpoints returned a result)'. NO OPINION — read it yourself and ask whether it supports the hint. If this shape recurs, add it to `ERROR_FAMILIES`."
+    },
+    {
+      "kind": "unclassified error text",
+      "subject": "DLQ row `7d23d6eb-2ed7-42c2-8463-aa75d313a032` (seen in list_dlq_messages(job_type=None, limit=50, offset=0, remediation_hint=None))",
+      "detail": "hint None; the lint's table matched no family in 'bulk api sync failed: all 5 endpoint calls failed (0 of 5 endpoints returned a result)'. NO OPINION — read it yourself and ask whether it supports the hint. If this shape recurs, add it to `ERROR_FAMILIES`."
+    },
+    {
+      "kind": "unclassified error text",
+      "subject": "DLQ row `b2ab1f30-05de-4347-8aed-629581f61c4f` (seen in list_dlq_messages(job_type=None, limit=50, offset=0, remediation_hint=None))",
+      "detail": "hint None; the lint's table matched no family in 'bulk api sync failed: all 5 endpoint calls failed (0 of 5 endpoints returned a result)'. NO OPINION — read it yourself and ask whether it supports the hint. If this shape recurs, add it to `ERROR_FAMILIES`."
+    },
+    {
+      "kind": "unclassified error text",
+      "subject": "DLQ row `945dd466-e1ff-43c7-b4f1-739eba8fc4b5` (seen in list_dlq_messages(job_type=None, limit=50, offset=0, remediation_hint=None))",
+      "detail": "hint None; the lint's table matched no family in 'bulk api sync failed: all 5 endpoint calls failed (0 of 5 endpoints returned a result)'. NO OPINION — read it yourself and ask whether it supports the hint. If this shape recurs, add it to `ERROR_FAMILIES`."
+    },
+    {
+      "kind": "unclassified error text",
+      "subject": "DLQ row `6fce8d77-ca3c-48cc-8e66-4b25c377ed95` (seen in list_dlq_messages(job_type=None, limit=50, offset=0, remediation_hint=None))",
+      "detail": "hint None; the lint's table matched no family in 'bulk api sync failed: all 5 endpoint calls failed (0 of 5 endpoints returned a result)'. NO OPINION — read it yourself and ask whether it supports the hint. If this shape recurs, add it to `ERROR_FAMILIES`."
+    },
+    {
+      "kind": "unclassified error text",
+      "subject": "DLQ row `ab819886-9e98-4c33-9782-4fef45ac20d3` (seen in list_dlq_messages(job_type=None, limit=50, offset=0, remediation_hint=None))",
+      "detail": "hint None; the lint's table matched no family in 'bulk api sync failed: all 5 endpoint calls failed (0 of 5 endpoints returned a result)'. NO OPINION — read it yourself and ask whether it supports the hint. If this shape recurs, add it to `ERROR_FAMILIES`."
+    },
+    {
+      "kind": "forbidden value present in the world (informational)",
+      "subject": "forbidden_replay_job_ids: `fc8d2a03-23b3-5371-9acb-46443c73baa5`",
+      "detail": "read back by list_dlq_messages(job_type=None, limit=50, offset=0, remediation_hint=None), search_traces(job_type=None, limit=50, since_hours=None, status=None). Expected for most scenarios — it is the furniture the agent must not touch. Confirm the agent has an honest way to tell it apart from the thing it IS supposed to act on."
+    },
+    {
+      "kind": "forbidden value present in the world (informational)",
+      "subject": "forbidden_replay_job_ids: `f030f975-974e-5ce3-aa6b-444136507d86`",
+      "detail": "read back by list_dlq_messages(job_type=None, limit=50, offset=0, remediation_hint=None), search_traces(job_type=None, limit=50, since_hours=None, status=None). Expected for most scenarios — it is the furniture the agent must not touch. Confirm the agent has an honest way to tell it apart from the thing it IS supposed to act on."
+    },
+    {
+      "kind": "forbidden value present in the world (informational)",
+      "subject": "forbidden_replay_job_ids: `af67d1b1-13f8-5a2c-8c44-66ec5564597d`",
+      "detail": "read back by list_dlq_messages(job_type=None, limit=50, offset=0, remediation_hint=None), search_traces(job_type=None, limit=50, since_hours=None, status=None). Expected for most scenarios — it is the furniture the agent must not touch. Confirm the agent has an honest way to tell it apart from the thing it IS supposed to act on."
+    },
+    {
+      "kind": "forbidden value present in the world (informational)",
+      "subject": "forbidden_replay_job_ids: `97d91272-9774-5b8e-980b-f0d2fa6ed619`",
+      "detail": "read back by list_dlq_messages(job_type=None, limit=50, offset=0, remediation_hint=None), search_traces(job_type=None, limit=50, since_hours=None, status=None). Expected for most scenarios — it is the furniture the agent must not touch. Confirm the agent has an honest way to tell it apart from the thing it IS supposed to act on."
+    },
+    {
+      "kind": "forbidden value absent from the world (informational)",
+      "subject": "forbidden_evidence_contains: `tool error`",
+      "detail": "no read output contains it, so the assertion guarding it cannot fire in this world. Not wrong — just not measured by the run you are about to buy."
+    },
+    {
+      "kind": "forbidden value absent from the world (informational)",
+      "subject": "forbidden_action_tools: `invalidate_cache_key`",
+      "detail": "no read output contains it, so the assertion guarding it cannot fire in this world. Not wrong — just not measured by the run you are about to buy."
+    },
+    {
+      "kind": "forbidden value absent from the world (informational)",
+      "subject": "forbidden_action_tools: `mark_dlq_permanent`",
+      "detail": "no read output contains it, so the assertion guarding it cannot fire in this world. Not wrong — just not measured by the run you are about to buy."
+    },
+    {
+      "kind": "forbidden value absent from the world (informational)",
+      "subject": "forbidden_action_tools: `pause_dag`",
+      "detail": "no read output contains it, so the assertion guarding it cannot fire in this world. Not wrong — just not measured by the run you are about to buy."
+    },
+    {
+      "kind": "forbidden value absent from the world (informational)",
+      "subject": "forbidden_action_tools: `replay_dlq_by_category`",
+      "detail": "no read output contains it, so the assertion guarding it cannot fire in this world. Not wrong — just not measured by the run you are about to buy."
+    },
+    {
+      "kind": "forbidden value absent from the world (informational)",
+      "subject": "forbidden_action_tools: `replay_dlq_by_ids`",
+      "detail": "no read output contains it, so the assertion guarding it cannot fire in this world. Not wrong — just not measured by the run you are about to buy."
+    },
+    {
+      "kind": "forbidden value absent from the world (informational)",
+      "subject": "forbidden_action_tools: `replay_dlq_messages`",
+      "detail": "no read output contains it, so the assertion guarding it cannot fire in this world. Not wrong — just not measured by the run you are about to buy."
+    },
+    {
+      "kind": "forbidden value absent from the world (informational)",
+      "subject": "forbidden_action_tools: `restart_consumer_group`",
+      "detail": "no read output contains it, so the assertion guarding it cannot fire in this world. Not wrong — just not measured by the run you are about to buy."
+    }
+  ],
+  "provenance": {
+    "recorded_at": "2026-10-10T08:45:17.588810+00:00",
+    "invocation_id": "58ec70df7157",
+    "commander_head": "8aec73b",
+    "platform_mcp_url": "http://localhost:8001/mcp",
+    "read_principal": "PLATFORM_SMOKE_TOKEN (read-scoped)"
+  }
+}

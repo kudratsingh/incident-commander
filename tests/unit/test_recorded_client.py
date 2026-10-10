@@ -18,7 +18,7 @@ from typing import Any, Final, get_args, get_origin
 import pytest
 from pydantic import BaseModel, ValidationError
 
-from evals import recorded_client, recorder
+from evals import artifacts, recorded_client, recorder
 from evals.fakes import CannedMCPClient
 from evals.recorded_client import (
     NOT_RECORDED,
@@ -46,18 +46,10 @@ _RECORDED_AT: Final[datetime] = datetime(2026, 9, 17, 12, 0, 0, tzinfo=UTC)
 #: point: a recording replayed the same afternoon hides every clock bug.
 _REPLAY_AT: Final[datetime] = datetime(2026, 9, 28, 9, 30, 0, tzinfo=UTC)
 
-#: Output fields a platform pin made REQUIRED after these recordings were taken, per
-#: tool. Only "missing" errors on these names are waived below. Append-only by
-#: construction: a recording is what the platform said at its own pin and invariant 9
-#: keeps every one ever made, so an earlier document is short of the field permanently
-#: and re-recording cannot change that. Each entry names the pin.
-#:
-#: * ``get_postgres_health.slow_query_threshold_ms`` — v0.6.11 (plat #218, WO-R3-217).
-#:   The yardstick for ``active_queries_over_slow_threshold``, declared with no default,
-#:   so required; absent from all twelve recordings this repo carries.
-_FIELDS_A_LATER_PIN_MADE_REQUIRED: Final[Mapping[str, frozenset[str]]] = {
-    "get_postgres_health": frozenset({"slow_query_threshold_ms"}),
-}
+#: Output fields a platform pin made REQUIRED that a scenario's NEWEST recording still lacks, per
+#: tool, each naming the pin. Empty since WO-R3-294 re-recorded all 17 worlds on v0.6.23; older
+#: recordings stay committed and short of v0.6.11's `slow_query_threshold_ms`, superseded.
+_FIELDS_A_LATER_PIN_MADE_REQUIRED: Final[Mapping[str, frozenset[str]]] = {}
 
 
 # --------------------------------------------------------------------------
@@ -179,6 +171,32 @@ def scenarios() -> dict[str, Scenario]:
 
 def _committed() -> list[Path]:
     return sorted(p for p in _RECORDED_WORLDS.rglob("*.json") if not p.name.endswith(".truth.json"))
+
+
+def _newest_per_scenario() -> list[Path]:
+    """Each scenario's newest recording, by the resolver a replay without ``--world`` uses."""
+    found = (
+        artifacts.newest_or_none("recorded_world", folder.name, root=_REPO_ROOT)
+        for folder in sorted(_RECORDED_WORLDS.iterdir())
+        if folder.is_dir()
+    )
+    return [path for path in found if path is not None]
+
+
+def _missing_required_fields(path: Path) -> dict[str, set[str]]:
+    """Per tool, the required output fields this recording's rebased answers lack."""
+    world = recorder.load_recording(path)
+    client = RecordedMCPClient(world, replay_clock=_REPLAY_AT)
+    missing: dict[str, set[str]] = {}
+    for call in world.calls:
+        result = client.call_tool(call.tool, call.arguments)
+        try:
+            TOOL_REGISTRY[call.tool].output_model.model_validate(_payload_of(result))
+        except ValidationError as err:
+            names = {str(e["loc"][0]) for e in err.errors() if e["type"] == "missing" and e["loc"]}
+            assert names, f"{path.name}: {call.tool} no longer parses: {err}"
+            missing.setdefault(call.tool, set()).update(names)
+    return missing
 
 
 # --------------------------------------------------------------------------
@@ -681,60 +699,34 @@ class TestTheCommittedRecordingsAllReplay:
             assert client.degraded is False, path.name
             assert client.answered == len(world.calls), path.name
 
-    def test_every_rebased_result_still_parses_as_the_tools_output(self) -> None:
+    def test_every_newest_recording_still_parses_as_the_tools_output(self) -> None:
         """A re-base that produced an unparseable payload would escalate every run.
 
-        One parse failure is not the re-base's doing and re-recording cannot fix it: a
-        pin that makes a new output field REQUIRED leaves every earlier recording short
-        of it forever, and they all stay committed (invariant 9). v0.6.11 is the first
-        to do that, so ``_FIELDS_A_LATER_PIN_MADE_REQUIRED`` is waived by name and
-        every other parse failure stays a failure.
+        Checked on each scenario's NEWEST recording, the one a replay resolves; a field a later
+        pin made required is waived only through ``_FIELDS_A_LATER_PIN_MADE_REQUIRED``.
         """
-        for path in _committed():
-            world = recorder.load_recording(path)
-            client = RecordedMCPClient(world, replay_clock=_REPLAY_AT)
-            for call in world.calls:
-                result = client.call_tool(call.tool, call.arguments)
-                model = TOOL_REGISTRY[call.tool].output_model
-                try:
-                    model.model_validate(_payload_of(result))
-                except ValidationError as err:
-                    waived = _FIELDS_A_LATER_PIN_MADE_REQUIRED.get(call.tool, frozenset())
-                    missing = {
-                        str(e["loc"][0])
-                        for e in err.errors()
-                        if e["type"] == "missing" and e["loc"]
-                    }
-                    assert missing and missing <= waived, (
-                        f"{path.name}: {call.tool} no longer parses, and not only "
-                        f"because a later pin made a field required: {err}"
-                    )
+        newest = _newest_per_scenario()
+        assert newest, "no committed recording to check"
+        for path in newest:
+            for tool, names in _missing_required_fields(path).items():
+                waived = _FIELDS_A_LATER_PIN_MADE_REQUIRED.get(tool, frozenset())
+                assert names <= waived, f"{path.name}: {tool} lacks required {sorted(names)}"
 
-    def test_the_waiver_is_real_and_is_the_recorded_mode_debt_it_looks_like(self) -> None:
-        """Anti-vacuity, and the finding the waiver must not bury.
+    def test_the_waiver_is_empty(self) -> None:
+        """WO-R3-294's exit condition: every newest recording carries every required field."""
+        assert _FIELDS_A_LATER_PIN_MADE_REQUIRED == {}
 
-        The waiver does NOT make recorded mode work: ``investigation._parse_output``
-        validates every probe result, so a recorded-mode run probing
-        ``get_postgres_health`` on a pre-v0.6.11 world escalates with "output parse
-        failed" — a harness break, not an agent finding. Re-recording is the fix and is
-        a packet of its own. Both halves are asserted so neither rots: the waived field
-        is still required, and still absent from every recording here.
+    def test_a_recording_short_of_a_required_field_is_superseded(self) -> None:
+        """Older recordings stay committed (invariant 9); one that no longer parses is history.
+
+        Its scenario must have a newer recording, which the test above holds to parsing.
+        Anti-vacuity: at least one such recording exists, so the newest-only scope matters.
         """
-        for tool, fields in _FIELDS_A_LATER_PIN_MADE_REQUIRED.items():
-            required = set(TOOL_REGISTRY[tool].output_model.model_json_schema()["required"])
-            assert fields <= required, f"{tool}: {fields - required} are not required any more"
-        affected = {
-            path.parent.name
-            for path in _committed()
-            for call in recorder.load_recording(path).calls
-            if call.tool in _FIELDS_A_LATER_PIN_MADE_REQUIRED
-            and not _FIELDS_A_LATER_PIN_MADE_REQUIRED[call.tool]
-            <= set(json.loads(call.result["content"][0]["text"]))
-        }
-        assert affected, (
-            "no committed recording is short of a waived field — the waiver is "
-            "dead and belongs deleted, not carried"
-        )
+        newest = set(_newest_per_scenario())
+        short = [path for path in _committed() if _missing_required_fields(path)]
+        assert short, "no committed recording is short of a required field"
+        for path in short:
+            assert path not in newest, f"{path.name} is its scenario's newest recording"
 
     def test_the_rebase_moved_something_somewhere(self) -> None:
         """Otherwise every assertion above would hold against a no-op re-base."""

@@ -96,6 +96,21 @@ class TestValueDrift:
         )
         assert _kinds(drifts) == {"type"}
 
+    def test_the_pool_reports_clocks_are_checked_for_type_only(self) -> None:
+        # Each process rewrites its pool record every 10 s, so `written_at` and `reported_age_s`
+        # say when you looked. The gauges beside them stay compared by value.
+        pool = {"process": "mcp", "size": 5, "checked_out": 0, "wait_timeouts_1m": 0}
+        canned = {"ok": True, "pools": [{**pool, "written_at": "T1", "reported_age_s": 9.7}]}
+        live = {"ok": True, "pools": [{**pool, "written_at": "T2", "reported_age_s": 1.4}]}
+        assert compare(_call("get_postgres_health", canned), live) == []
+        moved = {
+            "ok": True,
+            "pools": [{**pool, "size": 6, "written_at": "T2", "reported_age_s": 1.4}],
+        }
+        assert [d.path for d in compare(_call("get_postgres_health", canned), moved)] == [
+            "pools[].size[]"
+        ]
+
     def test_lag_is_deliberately_not_volatile(self) -> None:
         # The value is the whole subject of the lag scenarios. If it were
         # declared volatile the guard would go quiet on its own motivating case.

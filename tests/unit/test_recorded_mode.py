@@ -24,7 +24,7 @@ from evals.graders.deterministic import (
     is_not_applicable_detail,
     is_vacuous_detail,
 )
-from evals.recorded_client import ReplayRefused
+from evals.recorded_client import ReplayRefused, matching_recordings
 from evals.scenarios.loader import load_scenarios
 from evals.scenarios.schema import Scenario
 from incident_commander.agent.factory import start_run
@@ -67,6 +67,13 @@ def _recording(scenario: str) -> Path:
     path = artifacts.newest_or_none("recorded_world", scenario)
     assert path is not None, f"no committed recording for {scenario}"
     return path
+
+
+def _pinned(scenario: str, invocation_id: str) -> Path:
+    """One committed recording by its id, for a measurement taken on that recording."""
+    found = matching_recordings(invocation_id, [scenario])
+    assert scenario in found, f"no committed recording {invocation_id} of {scenario}"
+    return found[scenario]
 
 
 def _run(scenario: Scenario, settings: Settings) -> runner.ScenarioResult:
@@ -816,10 +823,10 @@ class TestHistoryIsNotState:
         """The real measurement, offline: two honest reads of one live stack.
 
         The two scenarios were recorded five minutes apart against the same platform, so their
-        shared calls differ by the 293 reads between.
+        shared calls differ by the 293 reads between. Pinned by id: newer recordings exist.
         """
-        recorded = recorder.load_recording(_recording("remediate_dlq_backlog_success"))
-        later = recorder.load_recording(_recording("dlq_backlog"))
+        recorded = recorder.load_recording(_pinned("remediate_dlq_backlog_success", "204fde20c1f2"))
+        later = recorder.load_recording(_pinned("dlq_backlog", "1800b3ddafb5"))
         shared = set(recorded.keys) & set(later.keys)
         drifts = world_drift.drift_between(
             recorded, [call for call in later.calls if call.key in shared]

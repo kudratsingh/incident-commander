@@ -58,7 +58,11 @@ _VOLATILE: Final[Mapping[str, frozenset[str]]] = {
     # UNSEEDED, i.e. the fifth instance of the class INC-003 is about and
     # WO-R3-266 is filed to fix. It broke the committed re-grade of
     # `0db6fe722f7c` immediately, which is that gap answering for itself.
-    "get_postgres_health": frozenset({"ping_latency_ms", "active_connections"}),
+    # `pools` (plat #227, platform ADR 0033): each process rewrites its record every 10 s, so
+    # `written_at` and `reported_age_s` say when you looked, like the breaker clocks below.
+    "get_postgres_health": frozenset(
+        {"ping_latency_ms", "active_connections", "pools.written_at", "pools.reported_age_s"}
+    ),
     # v0.6.11's breaker reading (plat #218, ADR 0030), first used by WO-R3-221.
     # Two clocks and the two ages derived from them, plus `last_failure_at`, which
     # is stamped by whichever call last failed. `seconds_since_state_change` and

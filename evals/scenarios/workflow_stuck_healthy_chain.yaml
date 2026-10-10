@@ -158,7 +158,8 @@ canned_tool_responses:
   # with age_seconds 2) and no loop is paused, so every place a stuck chain's
   # cause could be reads clean.
   # `polling` true / `poll_interval_seconds` 2.0 (platform v0.6.25) were added at that re-pin,
-  # not recorded (WO-R3-374 re-records this world on v0.6.25).
+  # not recorded; the v0.6.25 recording `…20261010T185517Z.ad5c84e2e49f` (WO-R3-374) reads the
+  # resolver `polling: true`, `poll_interval_seconds` 2.0, and no loop paused — the same verdict.
   get_consumer_lag:
     content:
     - type: text

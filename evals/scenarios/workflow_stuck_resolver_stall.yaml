@@ -202,8 +202,13 @@ canned_tool_responses:
   # before the platform last measured it. The list is consumed in order: the
   # investigation's read, then the two verify polls after the restart.
   # `polling` / `poll_interval_seconds` (platform v0.6.25) were added at that re-pin, not
-  # recorded (WO-R3-374 re-records this world on v0.6.25): false on the read and on verify
-  # poll 1 (18 s and 17 s since the last poll, past 5 x 2.0 s), true on verify poll 2; 2.0.
+  # recorded: false on the read and on verify poll 1 (18 s and 17 s since the last poll,
+  # past 5 x 2.0 s), true on verify poll 2; 2.0. CONFIRMED by the v0.6.25 recording
+  # `…20261010T183856Z.6f030e848a9d` (WO-R3-374), whose pre-action resolver read is the
+  # same reading field for field but the clocks — lag 0, known, live, `age_seconds` 2,
+  # `last_poll_age_seconds` 20, `polling: false`, `poll_interval_seconds` 2.0 — and by the
+  # WO-R3-374 rehearsal `26c28af9321b`'s post-restart polls (false, then true). Left as
+  # they are: re-transcribing would move clocks and nothing a claim reads.
   get_consumer_lag:
   - content:
     - type: text

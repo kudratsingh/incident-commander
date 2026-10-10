@@ -208,7 +208,8 @@ canned_tool_responses:
   # age_seconds 4) and no loop is paused, so the dead-lettered root is the
   # whole story.
   # `polling` true / `poll_interval_seconds` 2.0 (platform v0.6.25) were added at that re-pin,
-  # not recorded (WO-R3-374 re-records this world on v0.6.25).
+  # not recorded; the v0.6.25 recording `…20261010T184637Z.b9fe65835de7` (WO-R3-374) reads the
+  # resolver `polling: true`, `poll_interval_seconds` 2.0, and no loop paused — the same verdict.
   get_consumer_lag:
     content:
     - type: text

@@ -63,7 +63,9 @@ _REFUSAL_RE: Final[re.Pattern[str]] = re.compile(
     r"^DRIFT FAIL \(([^)]+)\): (.*)$(?:\n  - (.*)$)?", re.M
 )
 # An absolute checkout path, so a committed table does not carry one machine's home folder.
-_CHECKOUT_RE: Final[re.Pattern[str]] = re.compile(r"/\S*?/(?:incident-commander|wp\d+)/")
+# Greedy on purpose: CI checks the repo out under a folder of the same name
+# (`…/work/incident-commander/incident-commander/`), and a lazy match stopped at the first one.
+_CHECKOUT_RE: Final[re.Pattern[str]] = re.compile(r"/\S*/(?:incident-commander|wp\d+)/")
 _MAKE_EXIT_RE: Final[re.Pattern[str]] = re.compile(
     r"^make: \*\*\* \[world-drift\] Error (\d+)$", re.M
 )
@@ -119,6 +121,15 @@ class _Tee(io.TextIOBase):
         return len(text)
 
 
+def _strip_checkout(text: str) -> str:
+    """Drop the checkout's absolute prefix so a row reads the same from any clone or worktree.
+
+    This checkout's own root goes first, exactly; the pattern then catches logs written
+    from another checkout (a builder's worktree, a different machine).
+    """
+    return _CHECKOUT_RE.sub("", text.replace(f"{REPO_ROOT}/", ""))
+
+
 def run_all(
     worlds: Sequence[tuple[str, str]],
     *,
@@ -149,8 +160,7 @@ def run_all(
         captured = io.StringIO()
         with contextlib.redirect_stdout(_Tee(sys.stdout, captured)):
             code, report = check(recording)
-        output = _CHECKOUT_RE.sub("", captured.getvalue())
-        rows.append(row_of(scenario, recording, code, report, output))
+        rows.append(row_of(scenario, recording, code, report, _strip_checkout(captured.getvalue())))
     return rows
 
 
@@ -180,7 +190,7 @@ def row_from_log(text: str, *, checked_at: str) -> DriftRow:
     else:
         raise ValueError(f"log for `{world.group(1)}` holds no verdict line")
     code = int(make_exit.group(1)) if make_exit is not None else (1 if verdict == DRIFT else 0)
-    output = _CHECKOUT_RE.sub("", text)
+    output = _strip_checkout(text)
     return DriftRow(
         world.group(1), recording, verdict, code, disagreements, detail, checked_at, output
     )

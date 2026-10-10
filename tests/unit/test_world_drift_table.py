@@ -128,6 +128,18 @@ def test_each_row_keeps_what_the_operator_saw(capsys: pytest.CaptureFixture[str]
     assert row.output.strip() == "DRIFT: recording  evals/recorded_worlds/aaa.json"
 
 
+def test_a_checkout_named_like_its_parent_is_stripped_whole() -> None:
+    # GitHub Actions checks the repo out at …/work/incident-commander/incident-commander/.
+    ci = "/home/runner/work/incident-commander/incident-commander"
+    worktree = "/Users/someone/audit-ws/scratchpad/wp362"
+    for root in (ci, worktree):
+        text = f"DRIFT: recording  {root}/evals/recorded_worlds/aaa.json\n"
+        assert (
+            world_drift_table._strip_checkout(text)
+            == "DRIFT: recording  evals/recorded_worlds/aaa.json\n"
+        )
+
+
 def test_a_refused_check_is_refused_with_its_reason() -> None:
     row = world_drift_table.row_of("s", "aaa", EXIT_PRECONDITION, None, "")
     assert row.verdict == REFUSED

@@ -162,6 +162,20 @@ _VOLATILE: Final[Mapping[str, frozenset[str]]] = {
     "list_audit_events": frozenset({"events.created_at", "events.request_id"}),
     "get_deploy_history": frozenset({"entries.deployed_at"}),
     "get_dag_state": frozenset({"nodes.created_at"}),
+    # v0.6.24's loop reading (plat #243, platform ADR 0041), first held by a recording or a
+    # canned world in WO-R3-372. Two clocks (`measured_at`, `loops.last_run_at`), the age
+    # derived from one, and the pause's countdown, which says how long ago the world was
+    # seeded the way `get_cache_key_info.ttl_seconds` says how long the stack has been up.
+    # DELIBERATELY OUT: `loops.paused` IS the evidence (a seeded pause is ledgered
+    # post-fault, never forgiven), and `tick_interval_seconds`, `name` and `total` are config.
+    "get_control_loops": frozenset(
+        {
+            "measured_at",
+            "loops.last_run_at",
+            "loops.last_run_age_seconds",
+            "loops.paused_expires_in_seconds",
+        }
+    ),
     # `jobs.updated_at` joins the two created_at clocks: the seeder stamps it fresh,
     # and it was already volatile through `list_dlq_messages` — the same field
     # cannot be a clock through one tool and a pinned value through another.

@@ -1,0 +1,25 @@
+# World drift — 17 recording(s) against platform v0.6.24
+
+Checked 2026-10-10T16:18:30.993215+00:00 (read back from 17 `make world-drift` log(s)). 5 CLEAN, 12 NOT RUN.
+
+| scenario | recording | verdict | disagreements | detail |
+|---|---|---|---|---|
+| `api_latency_db_query` | `8c4a32a50d4b` | NOT RUN |  | not checked by WO-R3-372, which re-records and checks the five workflow_stuck worlds only; this world's newest recording `8c4a32a50d4b` was made on v0.6.23 and its last check reads NOT RUN in world_drift_table.20261010T110003Z.aa740648de40 (against v0.6.23); the next full table checks it on v0.6.24 |
+| `api_latency_downstream` | `58ec70df7157` | NOT RUN |  | not checked by WO-R3-372, which re-records and checks the five workflow_stuck worlds only; this world's newest recording `58ec70df7157` was made on v0.6.23 and its last check reads NOT RUN in world_drift_table.20261010T110003Z.aa740648de40 (against v0.6.23); the next full table checks it on v0.6.24 |
+| `api_latency_healthy_control` | `405f296c38d5` | NOT RUN |  | not checked by WO-R3-372, which re-records and checks the five workflow_stuck worlds only; this world's newest recording `405f296c38d5` was made on v0.6.23 and its last check reads NOT RUN in world_drift_table.20261010T110003Z.aa740648de40 (against v0.6.23); the next full table checks it on v0.6.24 |
+| `api_latency_redis` | `a6e62370ef38` | NOT RUN |  | not checked by WO-R3-372, which re-records and checks the five workflow_stuck worlds only; this world's newest recording `a6e62370ef38` was made on v0.6.23 and its last check reads NOT RUN in world_drift_table.20261010T110003Z.aa740648de40 (against v0.6.23); the next full table checks it on v0.6.24 |
+| `dlq_backlog` | `f0ee5ea8d33d` | NOT RUN |  | not checked by WO-R3-372, which re-records and checks the five workflow_stuck worlds only; this world's newest recording `f0ee5ea8d33d` was made on v0.6.23 and its last check reads CLEAN in world_drift_table.20261010T110003Z.aa740648de40 (against v0.6.23); the next full table checks it on v0.6.24 |
+| `dlq_mislabeled_replay_safe` | `e5d407945572` | NOT RUN |  | not checked by WO-R3-372, which re-records and checks the five workflow_stuck worlds only; this world's newest recording `e5d407945572` was made on v0.6.23 and its last check reads CLEAN in world_drift_table.20261010T110003Z.aa740648de40 (against v0.6.23); the next full table checks it on v0.6.24 |
+| `jobs_not_progressing_dispatcher_stall` | `f4d62624c19f` | NOT RUN |  | not checked by WO-R3-372, which re-records and checks the five workflow_stuck worlds only; this world's newest recording `f4d62624c19f` was made on v0.6.23 and its last check reads CLEAN in world_drift_table.20261010T110003Z.aa740648de40 (against v0.6.23); the next full table checks it on v0.6.24 |
+| `jobs_not_progressing_healthy_backlog_spike` | `038a59f3c381` | NOT RUN |  | not checked by WO-R3-372, which re-records and checks the five workflow_stuck worlds only; this world's newest recording `038a59f3c381` was made on v0.6.23 and its last check reads CLEAN in world_drift_table.20261010T110003Z.aa740648de40 (against v0.6.23); the next full table checks it on v0.6.24 |
+| `jobs_not_progressing_outbox_stall` | `9d9d56a0eb69` | NOT RUN |  | not checked by WO-R3-372, which re-records and checks the five workflow_stuck worlds only; this world's newest recording `9d9d56a0eb69` was made on v0.6.23 and its last check reads NOT RUN in world_drift_table.20261010T110003Z.aa740648de40 (against v0.6.23); the next full table checks it on v0.6.24 |
+| `jobs_not_progressing_outbox_stall_deploy_noise` | `84779d386158` | NOT RUN |  | not checked by WO-R3-372, which re-records and checks the five workflow_stuck worlds only; this world's newest recording `84779d386158` was made on v0.6.23 and its last check reads NOT RUN in world_drift_table.20261010T110003Z.aa740648de40 (against v0.6.23); the next full table checks it on v0.6.24 |
+| `remediate_consumer_lag_success` | `20c1ee52bb70` | NOT RUN |  | not checked by WO-R3-372, which re-records and checks the five workflow_stuck worlds only; this world's newest recording `20c1ee52bb70` was made on v0.6.23 and its last check reads NOT RUN in world_drift_table.20261010T110003Z.aa740648de40 (against v0.6.23); the next full table checks it on v0.6.24 |
+| `remediate_dlq_backlog_success` | `6339347eec1f` | NOT RUN |  | not checked by WO-R3-372, which re-records and checks the five workflow_stuck worlds only; this world's newest recording `6339347eec1f` was made on v0.6.23 and its last check reads CLEAN in world_drift_table.20261010T110003Z.aa740648de40 (against v0.6.23); the next full table checks it on v0.6.24 |
+| `workflow_stuck_dead_lettered_root` | `9a5f9c4260f2` | CLEAN | 0 |  |
+| `workflow_stuck_downstream_child_failed` | `7d1f2d80470b` | CLEAN | 0 |  |
+| `workflow_stuck_healthy_chain` | `3ea8323971b8` | CLEAN | 0 |  |
+| `workflow_stuck_paused_dag` | `35c7dada96b9` | CLEAN | 0 |  |
+| `workflow_stuck_resolver_stall` | `01a38eead451` | CLEAN | 0 |  |
+
+DRIFT and REFUSED both mean: no recorded result from that world may be reported (ADR 0047) until it is re-recorded or the reason is established.

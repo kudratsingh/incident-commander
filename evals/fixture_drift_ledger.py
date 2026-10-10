@@ -592,6 +592,20 @@ _JUSTIFIED: Final[dict[tuple[object, ...], tuple[str, str]]] = {
         "create_stuck_dag stamps step-2's trace_id from the same namespace and chain_name, "
         "so it appears and disappears with the row itself",
     ),
+    # WO-R3-372 (O-49, ADR 00XX): the stranded world's loop reading. The other ten loops read
+    # `paused: false` live and in the canned reading alike; only this row cannot match.
+    (
+        "workflow_stuck_resolver_stall",
+        "get_control_loops",
+        "loops[].paused[]",
+        "not_live_reachable",
+    ): (
+        POST_FAULT,
+        "pause_control_loop('resume_unblocked_waiting') holds the sweep that backstops the "
+        "resolver, so the canned reading carries one loop with `paused: true`; an un-faulted "
+        "world runs every loop and its reading offers only `false`, and no lab state but the "
+        "seeded pause can produce the canned value",
+    ),
     (
         "workflow_stuck_resolver_stall",
         "search_traces",

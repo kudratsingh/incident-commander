@@ -222,6 +222,23 @@ canned_tool_responses:
     - type: text
       text: '{"job_id":"7fb11dea-d182-5033-a4d0-2d2a645eb1df","previous_hint":"human_required","remediation_hint":"human_required","already_marked":true,"fenced_at":"2026-09-20T06:04:11.512430Z"}'
     is_error: false
+  # THE FAMILY'S TWO OTHER READS (ADR 0078, ADR 00XX, WO-R3-372): the resolver
+  # that promotes the chain's waiting children, by name, and the background
+  # loops. Transcribed verbatim from the v0.6.24 recording
+  # `…20261010T161020Z.7d1f2d80470b`. Here both rule the outside-the-chain
+  # stall OUT: the resolver is polling (last_poll_age_seconds 4, level with
+  # age_seconds 4) and no loop is paused, so the dead-lettered descendant is
+  # the whole story.
+  get_consumer_lag:
+    content:
+    - type: text
+      text: '{"consumer_group":"dependency-resolver","lag":0,"lag_known":true,"source":"live","cache_key":"kafka:consumer_lag:dependency-resolver","measured_at":"2026-10-10T16:10:20.403624Z","age_seconds":4,"recent_samples":[{"lag":0,"measured_at":"2026-10-10T16:10:20.403624Z"},{"lag":0,"measured_at":"2026-10-10T16:10:15.225962Z"},{"lag":0,"measured_at":"2026-10-10T16:10:09.961820Z"},{"lag":0,"measured_at":"2026-10-10T16:10:04.711722Z"},{"lag":0,"measured_at":"2026-10-10T16:09:59.477828Z"},{"lag":0,"measured_at":"2026-10-10T16:09:54.230571Z"},{"lag":0,"measured_at":"2026-10-10T16:09:49.042341Z"},{"lag":0,"measured_at":"2026-10-10T16:09:43.857671Z"},{"lag":0,"measured_at":"2026-10-10T16:09:38.627674Z"},{"lag":0,"measured_at":"2026-10-10T16:09:33.396917Z"},{"lag":0,"measured_at":"2026-10-10T16:09:28.196356Z"},{"lag":0,"measured_at":"2026-10-10T16:09:23.006916Z"},{"lag":0,"measured_at":"2026-10-10T16:09:17.819618Z"},{"lag":0,"measured_at":"2026-10-10T16:09:12.685708Z"},{"lag":0,"measured_at":"2026-10-10T16:09:07.499035Z"}],"last_poll_at":"2026-10-10T16:10:20.396538Z","last_poll_age_seconds":4}'
+    is_error: false
+  get_control_loops:
+    content:
+    - type: text
+      text: '{"measured_at":"2026-10-10T16:10:25.316440Z","loops":[{"name":"outbox_relay","paused":false,"paused_expires_in_seconds":null,"tick_interval_seconds":1.0,"last_run_at":"2026-10-10T16:10:24.537636Z","last_run_age_seconds":0.8},{"name":"delayed_retry_promote","paused":false,"paused_expires_in_seconds":null,"tick_interval_seconds":0.5,"last_run_at":"2026-10-10T16:10:25.054940Z","last_run_age_seconds":0.3},{"name":"dlq_replay_promote","paused":false,"paused_expires_in_seconds":null,"tick_interval_seconds":0.5,"last_run_at":"2026-10-10T16:10:25.056675Z","last_run_age_seconds":0.3},{"name":"resume_unblocked_waiting","paused":false,"paused_expires_in_seconds":null,"tick_interval_seconds":10.0,"last_run_at":"2026-10-10T16:10:24.554186Z","last_run_age_seconds":0.8},{"name":"stale_pending_backstop","paused":false,"paused_expires_in_seconds":null,"tick_interval_seconds":60.0,"last_run_at":"2026-10-10T16:09:55.284320Z","last_run_age_seconds":30.0},{"name":"stale_running_sweep","paused":false,"paused_expires_in_seconds":null,"tick_interval_seconds":60.0,"last_run_at":"2026-10-10T16:09:55.284575Z","last_run_age_seconds":30.0},{"name":"lease_renewal","paused":false,"paused_expires_in_seconds":null,"tick_interval_seconds":20.0,"last_run_at":"2026-10-10T16:10:15.299669Z","last_run_age_seconds":10.0},{"name":"slo_evaluation","paused":false,"paused_expires_in_seconds":null,"tick_interval_seconds":300.0,"last_run_at":"2026-10-10T16:05:53.676534Z","last_run_age_seconds":271.6},{"name":"metrics","paused":false,"paused_expires_in_seconds":null,"tick_interval_seconds":5.0,"last_run_at":"2026-10-10T16:10:20.419628Z","last_run_age_seconds":4.9},{"name":"digest","paused":false,"paused_expires_in_seconds":null,"tick_interval_seconds":86400.0,"last_run_at":null,"last_run_age_seconds":null},{"name":"idempotency_reaper","paused":false,"paused_expires_in_seconds":null,"tick_interval_seconds":3600.0,"last_run_at":"2026-10-10T15:40:53.191044Z","last_run_age_seconds":1772.1}],"total":11,"unknown_reason":null}'
+    is_error: false
 
 canned_llm_responses:
   investigation_planner:
@@ -258,6 +275,35 @@ canned_llm_responses:
     next_action:
       kind: probe
       tool_name: list_dlq_messages
+      arguments: {}
+  # THE FAMILY'S OTHER TWO READS before any verdict (ADR 0078, ADR 00XX): the
+  # loop refuses a conclusion about this chain until both are in the evidence.
+  - hypotheses:
+    - category: poison_message
+      name: a job in the chain cannot succeed as stored
+      confidence: 0.7
+      reasoning: >
+        The dead-lettered descendant's own row is in the queue and classified.
+        Before concluding, read the resolver that promotes the chain's waiting
+        children: a stopped resolver would be a second reason the chain cannot
+        drain.
+    next_action:
+      kind: probe
+      tool_name: get_consumer_lag
+      arguments:
+        consumer_group: dependency-resolver
+  - hypotheses:
+    - category: poison_message
+      name: a job in the chain cannot succeed as stored
+      confidence: 0.75
+      reasoning: >
+        dependency-resolver is polling: last_poll_age_seconds 4, level with its
+        age_seconds, so the dead descendant is what holds the chain. Read the
+        background loops too, so the handoff can say nothing outside the chain is
+        holding it.
+    next_action:
+      kind: probe
+      tool_name: get_control_loops
       arguments: {}
   - hypotheses:
     - category: poison_message

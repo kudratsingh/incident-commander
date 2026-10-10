@@ -63,6 +63,7 @@ _NON_SETTINGS_TOKENS: Final[frozenset[str]] = frozenset(
         "PLATFORM_SERVICE",  # the compose service `make eval-reset` execs into
         "PURGE_IDEMPOTENCY",  # `make eval-reset` opt-in purge flag
         "SMOKE_ONLY",  # `make eval-smoke` scenario-list override
+        "FROM_LOGS",  # `make world-drift-all` reads saved logs instead of the stack
         "UNTIL_LAG",  # `make traffic` stop-at-this-backlog flag (scripts/traffic_loop.py)
         "YES_SPEND",  # `make judge-calibration` second flag a paid LIVE=1 run requires
         # Platform-side metrics-pass interval, a SETTING since platform v0.6.18 / ADR 0039

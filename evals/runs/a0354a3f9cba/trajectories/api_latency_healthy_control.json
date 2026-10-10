@@ -1,0 +1,179 @@
+{
+  "scenario": "api_latency_healthy_control",
+  "incident_id": "0ab4a177-6f53-445c-a8e5-550584d9c7c3",
+  "checkpoints": [
+    {
+      "schema_version": 3,
+      "incident_id": "0ab4a177-6f53-445c-a8e5-550584d9c7c3",
+      "state": "triage",
+      "alert": {
+        "source": "monitoring.slo",
+        "severity": "critical",
+        "fingerprint": "job_dispatch_latency_above_objective",
+        "group": null,
+        "remediation_hint": null,
+        "dlq_scope": null,
+        "summary": "an external monitor reports the job dispatch latency objective above budget; jobs are being accepted but the share dispatched inside 30 seconds is reported below target"
+      },
+      "budget": {
+        "max_tool_calls": 10,
+        "tool_calls_used": 0,
+        "max_tokens": 200000,
+        "tokens_used": 0,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.0,
+        "max_usd": "1.00",
+        "usd_used": "0"
+      },
+      "evidence": [],
+      "hypotheses": [],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-10-08T15:43:49.573720Z",
+      "updated_at": "2026-10-08T15:43:49.573720Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "0ab4a177-6f53-445c-a8e5-550584d9c7c3",
+      "state": "investigating",
+      "alert": {
+        "source": "monitoring.slo",
+        "severity": "critical",
+        "fingerprint": "job_dispatch_latency_above_objective",
+        "group": null,
+        "remediation_hint": null,
+        "dlq_scope": null,
+        "summary": "an external monitor reports the job dispatch latency objective above budget; jobs are being accepted but the share dispatched inside 30 seconds is reported below target"
+      },
+      "budget": {
+        "max_tool_calls": 10,
+        "tool_calls_used": 0,
+        "max_tokens": 200000,
+        "tokens_used": 0,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.092902,
+        "max_usd": "1.00",
+        "usd_used": "0"
+      },
+      "evidence": [
+        {
+          "evidence_id": "787cd140-b273-4396-a11a-19076bca245e",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "critical",
+            "dedup_key": "9f284aacac6f975bf6a39142946c818b"
+          },
+          "result_summary": "severity=critical classified as investigating",
+          "timestamp": "2026-10-08T15:43:49.666622Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-10-08T15:43:49.573720Z",
+      "updated_at": "2026-10-08T15:43:49.666622Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "0ab4a177-6f53-445c-a8e5-550584d9c7c3",
+      "state": "escalated",
+      "alert": {
+        "source": "monitoring.slo",
+        "severity": "critical",
+        "fingerprint": "job_dispatch_latency_above_objective",
+        "group": null,
+        "remediation_hint": null,
+        "dlq_scope": null,
+        "summary": "an external monitor reports the job dispatch latency objective above budget; jobs are being accepted but the share dispatched inside 30 seconds is reported below target"
+      },
+      "budget": {
+        "max_tool_calls": 10,
+        "tool_calls_used": 3,
+        "max_tokens": 200000,
+        "tokens_used": 63530,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 40.620036,
+        "max_usd": "1.00",
+        "usd_used": "0.161506"
+      },
+      "evidence": [
+        {
+          "evidence_id": "787cd140-b273-4396-a11a-19076bca245e",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "critical",
+            "dedup_key": "9f284aacac6f975bf6a39142946c818b"
+          },
+          "result_summary": "severity=critical classified as investigating",
+          "timestamp": "2026-10-08T15:43:49.666622Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "5035b835-f024-41aa-80e0-c2d517f81072",
+          "tool_name": "get_consumer_lag",
+          "arguments": {
+            "consumer_group": "worker-dispatcher"
+          },
+          "result_summary": "{\"consumer_group\":\"worker-dispatcher\",\"lag\":0,\"lag_known\":true,\"source\":\"live\",\"cache_key\":\"kafka:consumer_lag:worker-dispatcher\",\"measured_at\":\"2026-10-08T15:43:57.989236Z\",\"age_seconds\":2,\"recent_samples\":[{\"lag\":0,\"measured_at\":\"2026-10-08T15:43:57.989236Z\"},{\"lag\":0,\"measured_at\":\"2026-10-08T15:43:52.727151Z\"},{\"lag\":0,\"measured_at\":\"2026-10-08T15:43:47.481701Z\"},{\"lag\":0,\"measured_at\":\"2026-10-08T15:43:42.314450Z\"},{\"lag\":0,\"measured_at\":\"2026-10-08T15:43:37.044465Z\"},{\"lag\":0,\"measured_at\":\"2026-10-08T15:43:31.749499Z\"},{\"lag\":0,\"measured_at\":\"2026-10-08T15:43:26.681165Z\"},{\"lag\":0,\"measured_at\":\"2026-10-08T15:43:21.570768Z\"},{\"lag\":0,\"measured_at\":\"2026-10-08T15:43:16.460542Z\"},{\"lag\":0,\"measured_at\":\"2026-10-08T15:43:11.312273Z\"},{\"lag\":0,\"measured_at\":\"2026-10-08T15:43:06.145777Z\"},{\"lag\":0,\"measured_at\":\"2026-10-08T15:43:00.990882Z\"},{\"lag\":0,\"measured_at\":\"2026-10-08T15:42:55.834893Z\"},{\"lag\":0,\"measured_at\":\"2026-10-08T15:42:50.644173Z\"},{\"lag\":0,\"measured_at\":\"2026-10-08T15:42:45.516879Z\"}]}",
+          "timestamp": "2026-10-08T15:43:49.666638Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "051ec173-c37f-4f3c-a0af-9af81e9c0eb3",
+          "tool_name": "get_slo_status",
+          "arguments": {},
+          "result_summary": "{\"measured_at\":\"2026-10-08T15:44:10.087636Z\",\"objectives\":[{\"id\":\"job_completion_rate\",\"name\":\"Job completion rate\",\"description\":\"Share of jobs that reach COMPLETED rather than DEAD_LETTER. Cancelled jobs are excluded from the denominator.\",\"target\":0.99,\"window_hours\":24,\"total\":611,\"failed\":0,\"current_success_rate\":1.0,\"budget_remaining_pct\":100.0,\"burn_rate\":0.0,\"healthy\":true,\"fast_burn\":false},{\"id\":\"job_dispatch_latency\",\"name\":\"Job dispatch latency\",\"description\":\"Share of dispatched jobs that left PENDING within 30 seconds of creation. Waiting jobs (held by the DAG) and cancelled jobs (saga rollback, or a stranded dependency parent) are excluded — a job nobody decided to dispatch has no dispatch latency.\",\"target\":0.95,\"window_hours\":24,\"total\":611,\"failed\":0,\"current_success_rate\":1.0,\"budget_remaining_pct\":100.0,\"burn_rate\":0.0,\"healthy\":true,\"fast_burn\":false}],\"total\":2,\"fast_burn_threshold\":14.4}",
+          "timestamp": "2026-10-08T15:43:49.666638Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "439dcdaa-5c77-49b5-bcb8-c02c5e9eee24",
+          "tool_name": "get_outbox_status",
+          "arguments": {},
+          "result_summary": "{\"measured_at\":\"2026-10-08T15:44:18.674645Z\",\"unpublished_count\":0,\"oldest_unpublished_at\":null,\"oldest_unpublished_age_s\":null,\"newest_unpublished_at\":null,\"newest_unpublished_age_s\":null,\"unpublished_past_attempt_limit\":0,\"last_publish_at\":\"2026-10-08T15:44:18.501823Z\",\"seconds_since_last_publish\":0.173,\"relay_last_tick_at\":\"2026-10-08T15:44:18.499231Z\",\"relay_heartbeat_age_s\":0.175,\"relay_heartbeat_known\":true,\"relay_heartbeat_unknown_reason\":null,\"relay_tick_interval_s\":1.0}",
+          "timestamp": "2026-10-08T15:43:49.666638Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "928966e7-1241-4842-a905-fbf645ce76f8",
+          "tool_name": "_planner_stop",
+          "arguments": {
+            "reason": "All evidence points to a false positive or self-resolved condition: the job_dispatch_latency SLO shows 100% success rate, 100% budget remaining, and 0.0 burn rate on 611 total jobs in the 24-hour window. Consumer lag for worker-dispatcher is 0 across 15 consecutive samples. The outbox is fully drained with zero unpublished events. The alert was raised by an external monitor but internal readings show no fault present. Since the alerted signal (dispatch latency above budget) is not corroborated by any internal reading, and the SLO itself reports healthy, this appears to be a false positive from the external monitor or a transient condition that cleared. A human should review the external monitor's methodology and whether its threshold/window aligns with the platform's declared SLO. No Tier-1 remediation action is warranted."
+          },
+          "result_summary": "planner stop: All evidence points to a false positive or self-resolved condition: the job_dispatch_latency SLO shows 100% success rate, 100% budget remaining, and 0.0 burn rate on 611 total jobs in the 24-hour window. Consumer lag for worker-dispatcher is 0 across 15 consecutive samples. The outbox is fully drained with zero unpublished events. The alert was raised by an external monitor but internal readings show no fault present. Since the alerted signal (dispatch latency above budget) is not corroborated by any internal reading, and the SLO itself reports healthy, this appears to be a false positive from the external monitor or a transient condition that cleared. A human should review the external monitor's methodology and whether its threshold/window aligns with the platform's declared SLO. No Tier-1 remediation action is warranted.",
+          "timestamp": "2026-10-08T15:44:30.193756Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [
+        {
+          "category": "no_fault",
+          "name": "slo-healthy-false-positive-alert",
+          "confidence": 0.85,
+          "reasoning": "The SLO status shows job_dispatch_latency at 100% success rate with 100% budget remaining and burn_rate=0.0, and consumer lag is 0 across all 15 recent samples — all readings are healthy, suggesting the alert was a false positive."
+        },
+        {
+          "category": "transient_dependency",
+          "name": "external-monitor-latency-spike-recovered",
+          "confidence": 0.1,
+          "reasoning": "The alert originated from an external monitor which may have observed a transient spike that has since recovered, while internal SLO reads now show healthy."
+        },
+        {
+          "category": "deploy_regression",
+          "name": "recent-deploy-caused-transient-dispatch-latency",
+          "confidence": 0.05,
+          "reasoning": "A recent deploy could have caused a brief dispatch latency spike that self-resolved before probes were taken."
+        }
+      ],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-10-08T15:43:49.573720Z",
+      "updated_at": "2026-10-08T15:44:30.193756Z"
+    }
+  ],
+  "invocation_id": "a0354a3f9cba"
+}

@@ -33,7 +33,13 @@ _VOLATILE: Final[Mapping[str, frozenset[str]]] = {
     # key-set diff still reports a fixture that was never re-recorded. v0.6.24 (plat #243)
     # adds `last_poll_at` and `last_poll_age_seconds`: a clock and an age, like the two
     # above, and frozen-or-fresh is the canned world's story, not something a reset
-    # stack can match.
+    # stack can match. v0.6.25 (plat #244) adds `polling` and `poll_interval_seconds`,
+    # and DELIBERATELY NEITHER joins: `polling` is the platform's verdict on those two
+    # clocks and the evidence a stopped-consumer world rests on, so it is guarded like
+    # `lag` (a seeded stop reads `false` against the un-faulted world's `true` and is
+    # ledgered post-fault); `poll_interval_seconds` is a code constant (2.0 on the two
+    # measured groups, null elsewhere), the same on every stack, so a canned value can be
+    # right everywhere.
     "get_consumer_lag": frozenset(
         {
             "lag_known",

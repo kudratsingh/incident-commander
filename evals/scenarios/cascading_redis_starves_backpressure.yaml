@@ -132,10 +132,12 @@ canned_tool_responses:
   # `cache_key`); only the three freshness fields and the value carry this world's fault.
   # `last_poll_at` / `last_poll_age_seconds` (platform v0.6.24) were added at that re-pin:
   # null, because the pass writes the poll time to the same Redis under the same TTL.
+  # `polling` / `poll_interval_seconds` (platform v0.6.25) likewise: `polling` null (no poll
+  # time on record is unknown), `poll_interval_seconds` 2.0 (a constant of the measured group).
   get_consumer_lag:
     content:
     - type: text
-      text: '{"consumer_group":"worker-dispatcher","lag":null,"lag_known":false,"source":"live","cache_key":"kafka:consumer_lag:worker-dispatcher","measured_at":null,"age_seconds":null,"recent_samples":[],"last_poll_at":null,"last_poll_age_seconds":null}'
+      text: '{"consumer_group":"worker-dispatcher","lag":null,"lag_known":false,"source":"live","cache_key":"kafka:consumer_lag:worker-dispatcher","measured_at":null,"age_seconds":null,"recent_samples":[],"last_poll_at":null,"last_poll_age_seconds":null,"polling":null,"poll_interval_seconds":2.0}'
     is_error: false
   # THE NEIGHBOUR THIS WORLD IS NOT, read rather than assumed. A missing lag reading
   # under an accepted-but-late alert has one other obvious explanation — work is not

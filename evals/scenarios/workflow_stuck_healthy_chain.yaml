@@ -157,10 +157,12 @@ canned_tool_responses:
   # are meant to be: the resolver is polling (last_poll_age_seconds 2, level
   # with age_seconds 2) and no loop is paused, so every place a stuck chain's
   # cause could be reads clean.
+  # `polling` true / `poll_interval_seconds` 2.0 (platform v0.6.25) were added at that re-pin,
+  # not recorded (WO-R3-374 re-records this world on v0.6.25).
   get_consumer_lag:
     content:
     - type: text
-      text: '{"consumer_group":"dependency-resolver","lag":0,"lag_known":true,"source":"live","cache_key":"kafka:consumer_lag:dependency-resolver","measured_at":"2026-10-10T16:14:20.893857Z","age_seconds":2,"recent_samples":[{"lag":0,"measured_at":"2026-10-10T16:14:20.893857Z"},{"lag":0,"measured_at":"2026-10-10T16:14:15.530559Z"},{"lag":0,"measured_at":"2026-10-10T16:14:10.037046Z"},{"lag":0,"measured_at":"2026-10-10T16:14:04.726752Z"},{"lag":0,"measured_at":"2026-10-10T16:13:59.181024Z"},{"lag":0,"measured_at":"2026-10-10T16:13:54.021618Z"},{"lag":0,"measured_at":"2026-10-10T16:13:48.443058Z"},{"lag":0,"measured_at":"2026-10-10T16:13:43.256383Z"},{"lag":0,"measured_at":"2026-10-10T16:13:38.105017Z"},{"lag":0,"measured_at":"2026-10-10T16:13:32.907640Z"},{"lag":0,"measured_at":"2026-10-10T16:13:27.726354Z"},{"lag":0,"measured_at":"2026-10-10T16:13:22.531608Z"},{"lag":0,"measured_at":"2026-10-10T16:13:17.325508Z"},{"lag":0,"measured_at":"2026-10-10T16:13:12.113436Z"},{"lag":0,"measured_at":"2026-10-10T16:13:06.789837Z"}],"last_poll_at":"2026-10-10T16:14:20.882123Z","last_poll_age_seconds":2}'
+      text: '{"consumer_group":"dependency-resolver","lag":0,"lag_known":true,"source":"live","cache_key":"kafka:consumer_lag:dependency-resolver","measured_at":"2026-10-10T16:14:20.893857Z","age_seconds":2,"recent_samples":[{"lag":0,"measured_at":"2026-10-10T16:14:20.893857Z"},{"lag":0,"measured_at":"2026-10-10T16:14:15.530559Z"},{"lag":0,"measured_at":"2026-10-10T16:14:10.037046Z"},{"lag":0,"measured_at":"2026-10-10T16:14:04.726752Z"},{"lag":0,"measured_at":"2026-10-10T16:13:59.181024Z"},{"lag":0,"measured_at":"2026-10-10T16:13:54.021618Z"},{"lag":0,"measured_at":"2026-10-10T16:13:48.443058Z"},{"lag":0,"measured_at":"2026-10-10T16:13:43.256383Z"},{"lag":0,"measured_at":"2026-10-10T16:13:38.105017Z"},{"lag":0,"measured_at":"2026-10-10T16:13:32.907640Z"},{"lag":0,"measured_at":"2026-10-10T16:13:27.726354Z"},{"lag":0,"measured_at":"2026-10-10T16:13:22.531608Z"},{"lag":0,"measured_at":"2026-10-10T16:13:17.325508Z"},{"lag":0,"measured_at":"2026-10-10T16:13:12.113436Z"},{"lag":0,"measured_at":"2026-10-10T16:13:06.789837Z"}],"last_poll_at":"2026-10-10T16:14:20.882123Z","last_poll_age_seconds":2,"polling":true,"poll_interval_seconds":2.0}'
     is_error: false
   get_control_loops:
     content:

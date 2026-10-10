@@ -91,10 +91,11 @@ canned_tool_responses:
   # distinction `consumer_lag_null_unknown_state` exists for.
   # `last_poll_at` / `last_poll_age_seconds` (platform v0.6.24) were added at that re-pin, not
   # recorded: the dispatcher is running, so one second before the reading.
+  # `polling` / `poll_interval_seconds` (platform v0.6.25) likewise: true, 2.0.
   get_consumer_lag:
     content:
     - type: text
-      text: '{"consumer_group":"worker-dispatcher","lag":0,"lag_known":true,"source":"live","cache_key":"kafka:consumer_lag:worker-dispatcher","measured_at":"2026-09-17T20:59:03.139724Z","age_seconds":5,"recent_samples":[{"lag":0,"measured_at":"2026-09-17T20:59:03.139724Z"},{"lag":0,"measured_at":"2026-09-17T20:58:03.024536Z"},{"lag":0,"measured_at":"2026-09-17T20:57:02.837499Z"}],"last_poll_at":"2026-09-17T20:59:02.139724Z","last_poll_age_seconds":6}'
+      text: '{"consumer_group":"worker-dispatcher","lag":0,"lag_known":true,"source":"live","cache_key":"kafka:consumer_lag:worker-dispatcher","measured_at":"2026-09-17T20:59:03.139724Z","age_seconds":5,"recent_samples":[{"lag":0,"measured_at":"2026-09-17T20:59:03.139724Z"},{"lag":0,"measured_at":"2026-09-17T20:58:03.024536Z"},{"lag":0,"measured_at":"2026-09-17T20:57:02.837499Z"}],"last_poll_at":"2026-09-17T20:59:02.139724Z","last_poll_age_seconds":6,"polling":true,"poll_interval_seconds":2.0}'
     is_error: false
   # The control's whole trap, and the reason it is not simply
   # `no_fault_healthy_cache` with a different alert. Three facts, and the first

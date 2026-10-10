@@ -63,11 +63,11 @@ canned_tool_responses:
   get_consumer_lag:
   - content:
     - type: text
-      text: '{"consumer_group":"worker-dispatcher","lag":33400,"lag_known":true,"source":"live","cache_key":"kafka:consumer_lag:worker-dispatcher","measured_at":"2026-07-28T10:07:30Z","age_seconds":14,"recent_samples":[{"lag":33400,"measured_at":"2026-07-28T10:07:30Z"},{"lag":25200,"measured_at":"2026-07-28T10:06:30Z"},{"lag":17300,"measured_at":"2026-07-28T10:05:30Z"},{"lag":9100,"measured_at":"2026-07-28T10:04:30Z"},{"lag":2200,"measured_at":"2026-07-28T10:03:30Z"}],"last_poll_at":"2026-07-28T10:03:10Z","last_poll_age_seconds":274}'
+      text: '{"consumer_group":"worker-dispatcher","lag":33400,"lag_known":true,"source":"live","cache_key":"kafka:consumer_lag:worker-dispatcher","measured_at":"2026-07-28T10:07:30Z","age_seconds":14,"recent_samples":[{"lag":33400,"measured_at":"2026-07-28T10:07:30Z"},{"lag":25200,"measured_at":"2026-07-28T10:06:30Z"},{"lag":17300,"measured_at":"2026-07-28T10:05:30Z"},{"lag":9100,"measured_at":"2026-07-28T10:04:30Z"},{"lag":2200,"measured_at":"2026-07-28T10:03:30Z"}],"last_poll_at":"2026-07-28T10:03:10Z","last_poll_age_seconds":274,"polling":false,"poll_interval_seconds":2.0}'
     is_error: false
   - content:
     - type: text
-      text: '{"consumer_group":"worker-dispatcher","lag":120,"lag_known":true,"source":"live","cache_key":"kafka:consumer_lag:worker-dispatcher","measured_at":"2026-07-28T10:08:40Z","age_seconds":4,"recent_samples":[{"lag":120,"measured_at":"2026-07-28T10:08:40Z"},{"lag":8300,"measured_at":"2026-07-28T10:08:20Z"},{"lag":33400,"measured_at":"2026-07-28T10:07:30Z"},{"lag":25200,"measured_at":"2026-07-28T10:06:30Z"},{"lag":17300,"measured_at":"2026-07-28T10:05:30Z"}],"last_poll_at":"2026-07-28T10:08:39Z","last_poll_age_seconds":5}'
+      text: '{"consumer_group":"worker-dispatcher","lag":120,"lag_known":true,"source":"live","cache_key":"kafka:consumer_lag:worker-dispatcher","measured_at":"2026-07-28T10:08:40Z","age_seconds":4,"recent_samples":[{"lag":120,"measured_at":"2026-07-28T10:08:40Z"},{"lag":8300,"measured_at":"2026-07-28T10:08:20Z"},{"lag":33400,"measured_at":"2026-07-28T10:07:30Z"},{"lag":25200,"measured_at":"2026-07-28T10:06:30Z"},{"lag":17300,"measured_at":"2026-07-28T10:05:30Z"}],"last_poll_at":"2026-07-28T10:08:39Z","last_poll_age_seconds":5,"polling":true,"poll_interval_seconds":2.0}'
     is_error: false
   # The seeded deploy_markers table, copied entry for entry from `deploy_correlation` — six
   # markers, five prod and one staging, with the annotated v0.4.2 among them and v0.4.3 shipped

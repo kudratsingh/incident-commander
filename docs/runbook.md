@@ -1363,7 +1363,9 @@ first pin where the new setting changes how fast the DEMO can build its fault;
 v0.6.21, the second console-only release, and v0.6.22, a backend fix with no contract
 change, needed no new step — item 12 covers both; v0.6.24, one new read tool and two new
 output fields on a tool the canned fixtures already hold, needed none either — items 3, 4
-and 5 cover it, and item 4 says how its fixtures were brought up to date):
+and 5 cover it, and item 4 says how its fixtures were brought up to date; v0.6.25, two more
+output fields on that tool, one of them a VERDICT the walk compares exactly, needed none
+either — item 4 says why that one moved the ledger and item 5 why the block shrank):
 
 1. Update `demo/compose.yml` — **all THREE platform-code services**
    (`migrate`, `platform`, `api`) and the prose that names the version:
@@ -1643,6 +1645,33 @@ and 5 cover it, and item 4 says how its fixtures were brought up to date):
    and keep `name`, `paused`, `tick_interval_seconds`, `total` and `unknown_reason`
    guarded.
 
+   **v0.6.25 (WO-R3-373, platform ADR 0041 amendment) is the v0.6.8 case: a new field
+   whose VALUE the un-faulted world does not have, so it moved the ledger, by design.**
+   `get_consumer_lag` gained `polling` (the platform's verdict: did the consumer poll
+   within 5 poll intervals when the pass looked — true / false / null) and
+   `poll_interval_seconds` (2.0 on `worker-dispatcher` and `dependency-resolver`, null
+   on every other group; a code constant, the same on every stack). Both were written
+   into all 47 canned readings in 31 scenarios in one dedicated commit, by the platform's
+   own rule (`polling_verdict`: true when `measured_at − last_poll_at ≤ 10 s`, false
+   beyond, null with no poll time on record; `tests/unit/test_consumer_polling_verdict.py`
+   re-derives every reading's pair): both null on the 17 static or unknown-group readings,
+   `polling` null with the interval 2.0 on the cascade's unmeasured reading, true on the
+   13 readings of a running dispatcher or resolver, **false on the 16 readings of a
+   stopped one** (14 dispatcher, 2 resolver). **Neither field is `_VOLATILE`**:
+   `polling` is the evidence a stopped-consumer world rests on — INC-008's addendum is
+   what a bare number cost — so it is guarded like `lag`, and the interval can be right
+   everywhere. The consequence is the field's "second appearance" from the v0.6.8 note
+   above: `make fixture-drift` read **17 new `value` rows on `polling` and nothing else**,
+   each a stopped consumer's `false` (or the cascade's `null`) against the un-faulted
+   world's `true`. They went into `_JUSTIFIED` under the context each scenario's `lag`
+   row already carries — 6 `post-fault`, 4 `canned-only`, 1 `warm-stack` (11 keys; the
+   ledger has no element index) — and into the JSON ledger in the committed generic form
+   (184 → 195 rows, prior rows byte-identical, nothing blessed). After that `make
+   fixture-drift` read `new: 0` with the same single local-volume STALE row as v0.6.24
+   (INC-007's `failed: 28`). **The rule to carry forward: a field the walk compares
+   exactly and a hook drives moves the ledger on every fixture that holds the faulted
+   value — decide that BEFORE the brief says "no ledger rows".**
+
 5. Re-pin the planner's tool listing, which is the OTHER prompt the agent
    reads:
    ```bash
@@ -1712,6 +1741,13 @@ and 5 cover it, and item 4 says how its fixtures were brought up to date):
    gained: 3,687 + 1,124 + 4 = 4,815. Its two new output fields are not in the block,
    by the v0.6.18 rule (item 10).
 
+   v0.6.25 (WO-R3-373) SHRINKS the block, for one cause, and the arithmetic closes:
+   34,267 → 32,496 characters, −1,771. `get_consumer_lag`'s description was trimmed
+   4,852 → 3,093 (−1,759) and went from 10 lines to 7, so three fewer lines carry the
+   block's 4 characters of indentation (−12): −1,759 − 12 = −1,771. Read surface still 17.
+   Its two new output fields and its two rewritten output-field texts are not in the
+   block, by the same rule.
+
    The lab-vocabulary assertion in that file is the one part to write
    carefully, and v0.6.11 is the example. Its two hooks are `saturate_db_pool`
    and `degrade_downstream`, and a filter on their word stems went red
@@ -1744,6 +1780,11 @@ and 5 cover it, and item 4 says how its fixtures were brought up to date):
    recordings still parse and the waiver stays empty. They will still drift
    against a v0.6.24 stack, because every recorded `get_consumer_lag` reading
    lacks the two fields; re-recording them is WO-R3-372's job, not the pin's.
+   v0.6.25's two (`polling`, `poll_interval_seconds`) are optional as well, so every
+   recording still parses and the waiver stays empty; every recorded
+   `get_consumer_lag` reading lacks them, so the recordings drift against a v0.6.25
+   stack by design. Re-recording the five `workflow_stuck` worlds is WO-R3-374's job,
+   and `make world-drift-all` was not run at the pin.
 
    `make world-drift` on all twelve committed recordings after this pin is
    the cleanest possible reading of it: the eight whose premise a reset quiet

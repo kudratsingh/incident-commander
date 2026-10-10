@@ -20,7 +20,7 @@ canned_tool_responses:
   get_consumer_lag:
     content:
       - type: text
-        text: '{"consumer_group":"billing-consumer","lag":42,"last_poll_at":null,"last_poll_age_seconds":null}'
+        text: '{"consumer_group":"billing-consumer","lag":42,"last_poll_at":null,"last_poll_age_seconds":null,"polling":null,"poll_interval_seconds":null}'
     is_error: false
 
 canned_llm_responses:

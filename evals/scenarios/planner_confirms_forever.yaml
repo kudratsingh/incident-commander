@@ -47,15 +47,15 @@ canned_tool_responses:
   get_consumer_lag:
   - content:
     - type: text
-      text: '{"consumer_group":"worker-dispatcher","lag":20,"lag_known":true,"source":"live","cache_key":"kafka:consumer_lag:worker-dispatcher","measured_at":"2026-09-20T12:39:06Z","age_seconds":55,"recent_samples":[{"lag":20,"measured_at":"2026-09-20T12:39:06Z"},{"lag":0,"measured_at":"2026-09-20T12:38:05Z"}],"last_poll_at":"2026-09-20T12:38:10Z","last_poll_age_seconds":111}'
+      text: '{"consumer_group":"worker-dispatcher","lag":20,"lag_known":true,"source":"live","cache_key":"kafka:consumer_lag:worker-dispatcher","measured_at":"2026-09-20T12:39:06Z","age_seconds":55,"recent_samples":[{"lag":20,"measured_at":"2026-09-20T12:39:06Z"},{"lag":0,"measured_at":"2026-09-20T12:38:05Z"}],"last_poll_at":"2026-09-20T12:38:10Z","last_poll_age_seconds":111,"polling":false,"poll_interval_seconds":2.0}'
     is_error: false
   - content:
     - type: text
-      text: '{"consumer_group":"worker-dispatcher","lag":39,"lag_known":true,"source":"live","cache_key":"kafka:consumer_lag:worker-dispatcher","measured_at":"2026-09-20T12:40:06Z","age_seconds":3,"recent_samples":[{"lag":39,"measured_at":"2026-09-20T12:40:06Z"},{"lag":20,"measured_at":"2026-09-20T12:39:06Z"},{"lag":0,"measured_at":"2026-09-20T12:38:05Z"}],"last_poll_at":"2026-09-20T12:38:10Z","last_poll_age_seconds":119}'
+      text: '{"consumer_group":"worker-dispatcher","lag":39,"lag_known":true,"source":"live","cache_key":"kafka:consumer_lag:worker-dispatcher","measured_at":"2026-09-20T12:40:06Z","age_seconds":3,"recent_samples":[{"lag":39,"measured_at":"2026-09-20T12:40:06Z"},{"lag":20,"measured_at":"2026-09-20T12:39:06Z"},{"lag":0,"measured_at":"2026-09-20T12:38:05Z"}],"last_poll_at":"2026-09-20T12:38:10Z","last_poll_age_seconds":119,"polling":false,"poll_interval_seconds":2.0}'
     is_error: false
   - content:
     - type: text
-      text: '{"consumer_group":"worker-dispatcher","lag":39,"lag_known":true,"source":"live","cache_key":"kafka:consumer_lag:worker-dispatcher","measured_at":"2026-09-20T12:40:06Z","age_seconds":11,"recent_samples":[{"lag":39,"measured_at":"2026-09-20T12:40:06Z"},{"lag":20,"measured_at":"2026-09-20T12:39:06Z"},{"lag":0,"measured_at":"2026-09-20T12:38:05Z"}],"last_poll_at":"2026-09-20T12:38:10Z","last_poll_age_seconds":127}'
+      text: '{"consumer_group":"worker-dispatcher","lag":39,"lag_known":true,"source":"live","cache_key":"kafka:consumer_lag:worker-dispatcher","measured_at":"2026-09-20T12:40:06Z","age_seconds":11,"recent_samples":[{"lag":39,"measured_at":"2026-09-20T12:40:06Z"},{"lag":20,"measured_at":"2026-09-20T12:39:06Z"},{"lag":0,"measured_at":"2026-09-20T12:38:05Z"}],"last_poll_at":"2026-09-20T12:38:10Z","last_poll_age_seconds":127,"polling":false,"poll_interval_seconds":2.0}'
     is_error: false
 canned_llm_responses:
   # Five steps, five reads of the same group, and the confidences are the live run's own

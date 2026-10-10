@@ -32,8 +32,8 @@ pytestmark = pytest.mark.skipif(
     shutil.which("grep") is None, reason="the leak hunt shells out to grep"
 )
 
-#: Every phase this assembler declares; protocol tests run over all of them.
-PHASES: list[int] = sorted(close.SCOPES)
+#: Every phase closed by the seven-section protocol; these tests run over all of them.
+PHASES: list[int] = sorted(close.PROTOCOL_SCOPES)
 
 
 def _document_cases() -> list[tuple[close.PhaseScope, Path, Path]]:
@@ -147,14 +147,15 @@ def test_the_phase_close_report_resolves_through_the_artifact_resolver() -> None
 @pytest.mark.parametrize("phase", PHASES)
 def test_each_phase_resolves_its_own_artifact_by_its_own_sweep(phase: int) -> None:
     """Two phases share one kind, so "newest" stopped meaning "mine"."""
-    scope = close.SCOPES[phase]
+    scope = close.PROTOCOL_SCOPES[phase]
     for path in close.committed(phase):
         assert path.is_file()
         assert scope.canned_sweep in path.name
     assert json.loads(close.committed(phase)[0].read_text())["phase"] == phase
-    # The newest version of the kind is the latest phase, which is what a
-    # reader following `artifacts.newest` should get.
-    assert artifacts.newest("phase_close_report") == close.committed(max(PHASES))[0]
+    # The newest version of the kind is the newest phase document, which is
+    # what a reader following `artifacts.newest` should get.
+    newest = artifacts.newest("phase_close_report")
+    assert newest == close.committed(json.loads(newest.read_text())["phase"])[0]
 
 
 def test_every_committed_document_has_a_declared_scope_and_vice_versa() -> None:
@@ -171,7 +172,7 @@ def test_every_committed_document_has_a_declared_scope_and_vice_versa() -> None:
     assert draft_json != final_json
     assert close.committed(2)[0] == final_json
     assert close.COMMITTED_SCOPES[1] is close.PHASE2_DRAFT
-    assert close.COMMITTED_SCOPES[2] is close.PHASE2 is close.SCOPES[2]
+    assert close.COMMITTED_SCOPES[2] is close.PHASE2 is close.PROTOCOL_SCOPES[2]
 
 
 def test_a_committed_version_with_no_declared_scope_is_refused(
@@ -201,7 +202,7 @@ def test_the_new_kind_does_not_adopt_or_get_adopted_by_its_neighbours(tmp_path: 
 
 def test_writing_twice_refuses_rather_than_replacing(tmp_path: Path) -> None:
     """Invariant 9 at the filesystem: a second write raises, never overwrites."""
-    scope = close.SCOPES[max(PHASES)]
+    scope = close.PROTOCOL_SCOPES[max(PHASES)]
     document = _committed(scope.phase)
     first = close.write(document, scope, root=tmp_path)
     assert all(path.is_file() for path in first)
@@ -293,7 +294,7 @@ def test_a_run_that_predates_model_roles_is_also_non_closing() -> None:
 
 @pytest.mark.parametrize("phase", PHASES)
 def test_the_committed_report_is_closing_and_says_why(phase: int) -> None:
-    scope = close.SCOPES[phase]
+    scope = close.PROTOCOL_SCOPES[phase]
     document = _committed(phase)
     assert document["closing"] is True
     assert document["closing_reason"].strip()
@@ -391,7 +392,7 @@ def test_the_terms_are_derived_from_the_corpus_not_typed_out() -> None:
 def test_the_sweep_section_matches_the_committed_archives(
     phase: int, live_total: int, live_passed: int
 ) -> None:
-    scope = close.SCOPES[phase]
+    scope = close.PROTOCOL_SCOPES[phase]
     sweep = _committed(phase)["sections"]["sweep_results"]
     raw = json.loads(
         (close.archive_dir(close.REPO_ROOT, scope.canned_sweep) / "report.json").read_text()
@@ -488,7 +489,7 @@ def test_the_budget_section_reports_counts_and_says_why_the_diff_is_null(phase: 
     assert budget["diff"] == "null"
     assert "O-14" in budget["why_null"]
     assert budget["budget_trips"] == []
-    assert len(budget["per_run"]) == len(close.SCOPES[phase].live_legs)
+    assert len(budget["per_run"]) == len(close.PROTOCOL_SCOPES[phase].live_legs)
     for row in budget["per_run"]:
         assert row["llm_calls_total"] == sum(row["llm_calls_by_role"].values())
         assert row["agent_tool_calls_billed"] <= row["max_tool_calls"]
@@ -520,9 +521,7 @@ def test_the_per_role_split_appears_only_once_the_records_exist() -> None:
 
 
 def test_no_judge_calibration_was_owed_and_the_prompts_are_hashed() -> None:
-    judge = json.loads(artifacts.newest("phase_close_report").read_text())["sections"][
-        "judge_calibration"
-    ]
+    judge = json.loads(close.committed(max(PHASES))[0].read_text())["sections"]["judge_calibration"]
     assert judge["reruns_required"] == 0
     assert set(judge["judge_prompts_unchanged"]) == {"briefing_judge.md", "verification_judge.md"}
     assert judge["judge_model"] == "claude-haiku-4-5"
@@ -534,7 +533,9 @@ def test_the_baseline_delta_cites_the_phase_0_artifact_by_id_and_blocks_on_nothi
     phase: int,
 ) -> None:
     delta = _committed(phase)["sections"]["baseline_delta"]
-    assert delta["phase0_baseline_cited_by_id"] == close.SCOPES[phase].phase0_baseline_cited
+    assert (
+        delta["phase0_baseline_cited_by_id"] == close.PROTOCOL_SCOPES[phase].phase0_baseline_cited
+    )
     assert (
         delta["phase0_baseline_resolved_by_artifacts_newest"]
         == artifacts.newest("baseline_report").name

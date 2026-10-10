@@ -1,0 +1,42 @@
+{
+  "incident_id": "e2f308b7-1989-4a2b-ba57-875d12a6d88a",
+  "final_state": "escalated",
+  "alert_summary": "source=platform.dag severity=critical fingerprint=workflow_not_advancing",
+  "escalation_reason": "planner stop: The DAG is deliberately paused: get_dag_state shows paused=true, paused_by=4a30546f-d3c5-549f-a772-633c0b26219d (the root job itself), with 890 seconds until automatic expiry. Node 7fb11dea-d182-5033-a4d0-2d2a645eb1df is 'waiting' as expected while the pause is active. No node is dead-lettered. The chain will self-resume when the pause expires (~14 minutes). There is no un-pause tool available and nothing is broken — this is dag_paused, which has no Tier-1 fix. Escalating to human so they can verify the pause intent and decide whether to wait or intervene manually.",
+  "attempted_action": null,
+  "incidents": {
+    "primary": {
+      "category": "dag_paused",
+      "name": "dag-paused-by-ancestor-890s-remaining",
+      "confidence": 0.95,
+      "addressed": false
+    },
+    "secondary": [],
+    "unresolved_extra": [
+      {
+        "category": "dag_paused",
+        "name": "dag-paused-by-ancestor-890s-remaining",
+        "confidence": 0.95,
+        "addressed": false
+      }
+    ]
+  },
+  "attribution": null,
+  "investigation_trail": [
+    {
+      "tool": "get_dag_state",
+      "summary": "{\"seed_id\":\"4a30546f-d3c5-549f-a772-633c0b26219d\",\"nodes\":[{\"id\":\"4a30546f-d3c5-549f-a772-633c0b26219d\",\"type\":\"bulk_api_sync\",\"status\":\"completed\",\"retry_count\":0,\"created_at\":\"2026-10-08T15:06:12.972373Z\"},{\"id\":\"404c3151-cdc6-511e-8532-471693d5cfe1\",\"type\":\"bulk_api_sync\",\"status\":\"completed\",\"retry_count\":0,\"created_at\":\"2026-10-08T15:06:12.972373Z\"},{\"id\":\"7fb11dea-d182-5033-a4d0-2d2a645eb1df\",\"type\":\"bulk_api_sync\",\"status\":\"waiting\",\"retry_count\":0,\"created_at\":\"2026-10-08T15:06:12.972373Z\"}],\"edges\":[{\"from_id\":\"4a30546f-d3c5-549f-a772-633c0b26219d\",\"to_id\":\"404c3151-cdc6-511e-8532-471693d5cfe1\"},{\"from_id\":\"7fb11dea-d182-5033-a4d0-2d2a645eb1df\",\"to_id\":\"4a30546f-d3c5-549f-a772-633c0b26219d\"}],\"paused\":true,\"paused_expires_in_seconds\":890,\"paused_by\":\"4a30546f-d3c5-549f-a772-633c0b26219d\"}",
+      "arguments": {
+        "job_id": "4a30546f-d3c5-549f-a772-633c0b26219d"
+      }
+    }
+  ],
+  "findings": "The DAG (root job 4a30546f-d3c5-549f-a772-633c0b26219d) is deliberately paused by the root job itself, with node 7fb11dea-d182-5033-a4d0-2d2a645eb1df in 'waiting' status as expected; no nodes are dead-lettered, and the pause was set to auto-expire in approximately 890 seconds (~14 minutes from detection). The dag_paused cause remains open — no Tier-1 action exists to address it and none was attempted.",
+  "recommendation": "Verify with the owning team whether this self-imposed pause was intentional (e.g., a scheduled throttle or rate-limit back-off), then decide whether to wait for the automatic expiry or intervene manually to clear the pause.",
+  "budget_used": {
+    "tool_calls": 1,
+    "tokens": 30908,
+    "wall_seconds": 19.207365,
+    "usd": "0.063978"
+  }
+}

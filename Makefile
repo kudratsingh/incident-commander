@@ -49,7 +49,9 @@ help:
 	@echo "                   reads only, spends nothing, writes nothing. FORMAT: --format"
 	@echo "  phase-close-report  assemble the phase-close report (plan 03 section 14) from the"
 	@echo "                   committed archives; reads only, spends nothing. PHASE=<n> picks"
-	@echo "                   the phase (default: the latest declared). WRITE=1 persists it"
+	@echo "                   the phase, 1-15 (default: the first not yet closed). Phases 3+"
+	@echo "                   print what the close reads and what is not yet measured."
+	@echo "                   WRITE=1 persists it"
 	@echo "  research-report  assemble the aggregate research report (plan 03 section 15) from the"
 	@echo "                   committed archives: one leaderboard per model, grouped by the seven"
 	@echo "                   WP-2.5 keys, every difference beside its paired-trial count."
@@ -77,6 +79,9 @@ help:
 	@echo "                   live one; WORLD=<recording id|scenario> REQUIRED. Re-reads the"
 	@echo "                   recording's own calls and diffs them with the fixture-drift"
 	@echo "                   walk. Run it before reporting any recorded result. Exit 1 = drift"
+	@echo "  world-drift-all  FREE (zero-LLM) world-drift on every recording, a reset before"
+	@echo "                   each, then one table. WRITE=1 persists it for the phase close;"
+	@echo "                   FROM_LOGS=<dir> reads earlier world-drift logs instead"
 	@echo "  trace-report     render evals/traces/*.jsonl → readable txt files"
 	@echo "  training-export  FREE (reads only) JSONL export of traced trajectories for a"
 	@echo "                   later training stage; TRACE_DIR= picks the trace store,"
@@ -114,9 +119,9 @@ world-audit:
 baseline-report:
 	uv run python -m evals.baseline_report
 
-# PHASE= selects which phase's scope to assemble; it defaults to the latest one
-# declared in evals/phase_close_report.py::SCOPES, which is the phase being
-# closed. WRITE=1 persists the versioned JSON + Markdown pair — and because the
+# PHASE= selects which phase's scope to assemble; it defaults to the first phase
+# in evals/phase_close_report.py::SCOPES not yet closed by the protocol, which is
+# the phase being closed. Phases 3-15 print an acceptance status (WO-R3-362). WRITE=1 persists the versioned JSON + Markdown pair — and because the
 # filename carries the newest archive in scope, adding a pending re-run's
 # archive to that scope writes the final version BESIDE the draft rather than
 # over it (invariant 9).
@@ -441,6 +446,14 @@ else
 world-drift:
 	PLATFORM_COMPOSE="$(PLATFORM_COMPOSE)" uv run python -m evals.world_drift --world $(WORLD)
 endif
+
+# Every recording's drift check, a reset before each (a check seeds its fault and the
+# next refuses a dirty world). Touches the shared world, like world-drift. WO-R3-362.
+# FROM_LOGS=<dir> reads earlier world-drift logs; WRITE=1 keeps the table a phase close reads.
+.PHONY: world-drift-all
+world-drift-all:
+	PLATFORM_COMPOSE="$(PLATFORM_COMPOSE)" uv run python -m evals.world_drift_table \
+		$(if $(FROM_LOGS),--from-logs $(FROM_LOGS),--all) $(if $(WRITE),--write,)
 
 # Renders what is not yet rendered (WO-R3-257): a scenario whose newest
 # traced attempt no existing report covers. `make trace-report ARGS=--force`

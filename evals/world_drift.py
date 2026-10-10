@@ -552,29 +552,14 @@ def _reset_and_audit(client: MCPClientProtocol) -> tuple[int, bool]:
     return reset_code, clean
 
 
-def main(argv: Sequence[str] | None = None) -> int:
-    """Re-read one recorded world live and report every way it has moved."""
-    parser = argparse.ArgumentParser(
-        prog="python -m evals.world_drift",
-        description=(
-            "Compare a recorded world against the live platform. Zero LLM calls; "
-            "seeds and resets the shared eval world when the recording is of a "
-            "seeded one."
-        ),
-    )
-    parser.add_argument(
-        "--world",
-        default=None,
-        help="a recording's invocation id, or a scenario's full name for its newest",
-    )
-    args = parser.parse_args(list(argv) if argv is not None else None)
-
+def check_world(world: str | None) -> tuple[int, DriftReport | None]:
+    """One drift check, printed as it goes; the report is ``None`` when the check was refused."""
     scenarios = load_scenarios(_SCENARIOS_DIR)
-    recording_path, refusal, code = _select(args.world, scenarios)
+    recording_path, refusal, code = _select(world, scenarios)
     if recording_path is None:
         print(refusal)
         print("nothing was seeded")
-        return code
+        return code, None
     recording = load_recording(recording_path)
     scenario = next((s for s in scenarios if s.name == recording.scenario), None)
 
@@ -586,7 +571,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         print(f"DRIFT FAIL (env): invalid or missing settings — {fields}")
         print("nothing was seeded")
-        return EXIT_PREFLIGHT
+        return EXIT_PREFLIGHT, None
 
     # The read principal, the recorder's reason: a credential that cannot write makes
     # "checking is safe" a property of the token, not of this file staying correct.
@@ -599,7 +584,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             "write token."
         )
         print("nothing was seeded")
-        return EXIT_PREFLIGHT
+        return EXIT_PREFLIGHT, None
 
     # The RECORDING's own label decides whether to seed, not today's scenario file: a
     # scenario that has gained or lost a hook since must not change what this
@@ -614,13 +599,13 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "be manufactured to compare against."
             )
             print("nothing was seeded")
-            return EXIT_SELECTION
+            return EXIT_SELECTION, None
         try:
             chaos_token = settings.require_chaos_token()
         except ChaosTokenNotConfigured as err:
             print(f"DRIFT FAIL (env): {err}")
             print("nothing was seeded")
-            return EXIT_PREFLIGHT
+            return EXIT_PREFLIGHT, None
 
     read_client = make_client(settings, token=settings.platform_smoke_token.get_secret_value())
     try:
@@ -630,7 +615,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(f"DRIFT FAIL (stack): the platform did not answer a read — {detail}")
             print("refusing to seed into a stack that cannot be read")
             print("nothing was seeded")
-            return EXIT_PREFLIGHT
+            return EXIT_PREFLIGHT, None
 
         if seeding_needed and scenario is not None:
             seeded = seed_chaos(scenario, str(settings.platform_mcp_url), chaos_token)
@@ -638,7 +623,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 print("DRIFT FAIL (seeding): a chaos hook was refused — see the reply above.")
                 print("nothing was compared; putting the world back")
                 _reset_and_audit(read_client)
-                return EXIT_SEEDING
+                return EXIT_SEEDING, None
             preconditions = establish_preconditions(read_client, scenario)
             unmet = [entry for entry in preconditions if not entry.met]
             if unmet:
@@ -651,7 +636,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                     "to compare: everything would read as drift."
                 )
                 _reset_and_audit(read_client)
-                return EXIT_PRECONDITION
+                return EXIT_PRECONDITION, None
         else:
             preconditions = []
 
@@ -673,7 +658,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             )
         ]
         report = build_report(
-            world=str(args.world),
+            world=str(world),
             recording_path=recording_path,
             recording=recording,
             live_world=live_world,
@@ -695,10 +680,30 @@ def main(argv: Sequence[str] | None = None) -> int:
             close()
 
     if reset_code != 0:
-        return EXIT_RESET
+        return EXIT_RESET, report
     if not baseline_clean:
-        return EXIT_BASELINE_DIRTY
-    return EXIT_OK if report.clean else 1
+        return EXIT_BASELINE_DIRTY, report
+    return (EXIT_OK if report.clean else 1), report
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    """Re-read one recorded world live and report every way it has moved."""
+    parser = argparse.ArgumentParser(
+        prog="python -m evals.world_drift",
+        description=(
+            "Compare a recorded world against the live platform. Zero LLM calls; "
+            "seeds and resets the shared eval world when the recording is of a "
+            "seeded one."
+        ),
+    )
+    parser.add_argument(
+        "--world",
+        default=None,
+        help="a recording's invocation id, or a scenario's full name for its newest",
+    )
+    args = parser.parse_args(list(argv) if argv is not None else None)
+    code, _report = check_world(args.world)
+    return code
 
 
 if __name__ == "__main__":  # pragma: no cover - thin CLI wrapper

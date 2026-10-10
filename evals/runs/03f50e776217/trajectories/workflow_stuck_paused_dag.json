@@ -1,0 +1,154 @@
+{
+  "scenario": "workflow_stuck_paused_dag",
+  "incident_id": "33735a39-87a1-4661-869d-ccc46450900d",
+  "checkpoints": [
+    {
+      "schema_version": 3,
+      "incident_id": "33735a39-87a1-4661-869d-ccc46450900d",
+      "state": "triage",
+      "alert": {
+        "source": "platform.dag",
+        "severity": "critical",
+        "fingerprint": "workflow_not_advancing",
+        "group": null,
+        "remediation_hint": null,
+        "dlq_scope": null,
+        "job_id": "4a30546f-d3c5-549f-a772-633c0b26219d",
+        "summary": "a workflow is not advancing; the dependency chain rooted at this job has a descendant that has not run"
+      },
+      "budget": {
+        "max_tool_calls": 8,
+        "tool_calls_used": 0,
+        "max_tokens": 200000,
+        "tokens_used": 0,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.0,
+        "max_usd": "1.00",
+        "usd_used": "0"
+      },
+      "evidence": [],
+      "hypotheses": [],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-10-08T15:53:47.621058Z",
+      "updated_at": "2026-10-08T15:53:47.621058Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "33735a39-87a1-4661-869d-ccc46450900d",
+      "state": "investigating",
+      "alert": {
+        "source": "platform.dag",
+        "severity": "critical",
+        "fingerprint": "workflow_not_advancing",
+        "group": null,
+        "remediation_hint": null,
+        "dlq_scope": null,
+        "job_id": "4a30546f-d3c5-549f-a772-633c0b26219d",
+        "summary": "a workflow is not advancing; the dependency chain rooted at this job has a descendant that has not run"
+      },
+      "budget": {
+        "max_tool_calls": 8,
+        "tool_calls_used": 0,
+        "max_tokens": 200000,
+        "tokens_used": 0,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 3.178828,
+        "max_usd": "1.00",
+        "usd_used": "0"
+      },
+      "evidence": [
+        {
+          "evidence_id": "5c5dea97-96c4-4c9d-a2fe-91599cb7bc97",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "critical",
+            "dedup_key": "9c341d086ad7a8025a768d1dec53676b"
+          },
+          "result_summary": "severity=critical classified as investigating",
+          "timestamp": "2026-10-08T15:53:50.799886Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-10-08T15:53:47.621058Z",
+      "updated_at": "2026-10-08T15:53:50.799886Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "33735a39-87a1-4661-869d-ccc46450900d",
+      "state": "escalated",
+      "alert": {
+        "source": "platform.dag",
+        "severity": "critical",
+        "fingerprint": "workflow_not_advancing",
+        "group": null,
+        "remediation_hint": null,
+        "dlq_scope": null,
+        "job_id": "4a30546f-d3c5-549f-a772-633c0b26219d",
+        "summary": "a workflow is not advancing; the dependency chain rooted at this job has a descendant that has not run"
+      },
+      "budget": {
+        "max_tool_calls": 8,
+        "tool_calls_used": 1,
+        "max_tokens": 200000,
+        "tokens_used": 30940,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 21.373177,
+        "max_usd": "1.00",
+        "usd_used": "0.064458"
+      },
+      "evidence": [
+        {
+          "evidence_id": "5c5dea97-96c4-4c9d-a2fe-91599cb7bc97",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "critical",
+            "dedup_key": "9c341d086ad7a8025a768d1dec53676b"
+          },
+          "result_summary": "severity=critical classified as investigating",
+          "timestamp": "2026-10-08T15:53:50.799886Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "dba0eb03-b08e-45f7-bff6-ea6871c901b7",
+          "tool_name": "get_dag_state",
+          "arguments": {
+            "job_id": "4a30546f-d3c5-549f-a772-633c0b26219d"
+          },
+          "result_summary": "{\"seed_id\":\"4a30546f-d3c5-549f-a772-633c0b26219d\",\"nodes\":[{\"id\":\"4a30546f-d3c5-549f-a772-633c0b26219d\",\"type\":\"bulk_api_sync\",\"status\":\"completed\",\"retry_count\":0,\"created_at\":\"2026-10-08T15:06:47.635968Z\"},{\"id\":\"404c3151-cdc6-511e-8532-471693d5cfe1\",\"type\":\"bulk_api_sync\",\"status\":\"completed\",\"retry_count\":0,\"created_at\":\"2026-10-08T15:06:47.635968Z\"},{\"id\":\"7fb11dea-d182-5033-a4d0-2d2a645eb1df\",\"type\":\"bulk_api_sync\",\"status\":\"waiting\",\"retry_count\":0,\"created_at\":\"2026-10-08T15:06:47.635968Z\"}],\"edges\":[{\"from_id\":\"4a30546f-d3c5-549f-a772-633c0b26219d\",\"to_id\":\"404c3151-cdc6-511e-8532-471693d5cfe1\"},{\"from_id\":\"7fb11dea-d182-5033-a4d0-2d2a645eb1df\",\"to_id\":\"4a30546f-d3c5-549f-a772-633c0b26219d\"}],\"paused\":true,\"paused_expires_in_seconds\":889,\"paused_by\":\"4a30546f-d3c5-549f-a772-633c0b26219d\"}",
+          "timestamp": "2026-10-08T15:53:50.799904Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "7df8b4f6-6e90-4a31-8353-b90b8ca71eba",
+          "tool_name": "_planner_stop",
+          "arguments": {
+            "reason": "The dependency chain rooted at job 4a30546f-d3c5-549f-a772-633c0b26219d is deliberately paused (paused=true, paused_by=4a30546f-d3c5-549f-a772-633c0b26219d, expires in 889 seconds). The chain has two completed nodes and one descendant (7fb11dea-d182-5033-a4d0-2d2a645eb1df) in 'waiting' status. No node is dead-lettered. The pause will auto-expire, and the waiting descendant should promote automatically when it lifts. There is no un-pause tool available, and no Tier-1 fix applies to dag_paused. Escalating to human for awareness; no action required unless the pause does not lift after ~15 minutes."
+          },
+          "result_summary": "planner stop: The dependency chain rooted at job 4a30546f-d3c5-549f-a772-633c0b26219d is deliberately paused (paused=true, paused_by=4a30546f-d3c5-549f-a772-633c0b26219d, expires in 889 seconds). The chain has two completed nodes and one descendant (7fb11dea-d182-5033-a4d0-2d2a645eb1df) in 'waiting' status. No node is dead-lettered. The pause will auto-expire, and the waiting descendant should promote automatically when it lifts. There is no un-pause tool available, and no Tier-1 fix applies to dag_paused. Escalating to human for awareness; no action required unless the pause does not lift after ~15 minutes.",
+          "timestamp": "2026-10-08T15:54:08.994235Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [
+        {
+          "category": "dag_paused",
+          "name": "dag-paused-by-root-job-with-889s-remaining",
+          "confidence": 0.95,
+          "reasoning": "The DAG state shows paused=true, paused_expires_in_seconds=889, paused_by=the alerted root job, with a descendant in 'waiting' status — this is a deliberate pause holding the chain, not a dead-lettered node."
+        }
+      ],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-10-08T15:53:47.621058Z",
+      "updated_at": "2026-10-08T15:54:08.994235Z"
+    }
+  ],
+  "invocation_id": "03f50e776217"
+}

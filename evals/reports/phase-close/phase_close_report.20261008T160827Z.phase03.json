@@ -1,0 +1,541 @@
+{
+  "phase": 3,
+  "kind": "acceptance status",
+  "title": "Recorded-world mode",
+  "work_order": "WO-R3-199",
+  "protocol": "docs/plans/research-buildout-v2.1/04_IMPLEMENTATION_WORKPLAN.md § Phase 3",
+  "as_of": "2026-10-08T16:08:27.070437+00:00",
+  "closing": false,
+  "closing_reason": "An acceptance status, not the close itself: WP-3.4 (WO-R3-199) runs plan 03 § 14 on BENCHMARK_MODEL and needs the owner's go.",
+  "counts": {
+    "measured": 2,
+    "partly measured": 1,
+    "not yet measured": 0,
+    "cannot be measured yet": 0
+  },
+  "lines": [
+    {
+      "packet": "WP-3.3",
+      "text": "the existing read-only live scenarios have recordings",
+      "status": "measured",
+      "readings": [
+        {
+          "reads": "recordings",
+          "status": "measured",
+          "summary": "17 of 17 recorded — every scenario with a committed recording",
+          "rows": [
+            {
+              "scenario": "api_latency_db_query",
+              "recording": "api_latency_db_query.20260919T091518Z.f66df012ad79.json"
+            },
+            {
+              "scenario": "api_latency_downstream",
+              "recording": "api_latency_downstream.20260919T090312Z.b434b50ac3d9.json"
+            },
+            {
+              "scenario": "api_latency_healthy_control",
+              "recording": "api_latency_healthy_control.20260919T090303Z.e0ee51f1357c.json"
+            },
+            {
+              "scenario": "api_latency_redis",
+              "recording": "api_latency_redis.20260919T090254Z.7471a62bdb56.json"
+            },
+            {
+              "scenario": "dlq_backlog",
+              "recording": "dlq_backlog.20260917T182256Z.1800b3ddafb5.json"
+            },
+            {
+              "scenario": "dlq_mislabeled_replay_safe",
+              "recording": "dlq_mislabeled_replay_safe.20260917T182236Z.9dce3253aebf.json"
+            },
+            {
+              "scenario": "jobs_not_progressing_dispatcher_stall",
+              "recording": "jobs_not_progressing_dispatcher_stall.20260917T205246Z.64da05aefc99.json"
+            },
+            {
+              "scenario": "jobs_not_progressing_healthy_backlog_spike",
+              "recording": "jobs_not_progressing_healthy_backlog_spike.20260917T205908Z.060e0293a0a6.json"
+            },
+            {
+              "scenario": "jobs_not_progressing_outbox_stall",
+              "recording": "jobs_not_progressing_outbox_stall.20260917T205051Z.0f6564392048.json"
+            },
+            {
+              "scenario": "jobs_not_progressing_outbox_stall_deploy_noise",
+              "recording": "jobs_not_progressing_outbox_stall_deploy_noise.20260917T205154Z.b8b2685d38aa.json"
+            },
+            {
+              "scenario": "remediate_consumer_lag_success",
+              "recording": "remediate_consumer_lag_success.20260917T182031Z.c8c4f0119dcd.json"
+            },
+            {
+              "scenario": "remediate_dlq_backlog_success",
+              "recording": "remediate_dlq_backlog_success.20260917T181814Z.204fde20c1f2.json"
+            },
+            {
+              "scenario": "workflow_stuck_dead_lettered_root",
+              "recording": "workflow_stuck_dead_lettered_root.20260919T001719Z.f5b5f50dff61.json"
+            },
+            {
+              "scenario": "workflow_stuck_downstream_child_failed",
+              "recording": "workflow_stuck_downstream_child_failed.20260920T060410Z.6dfa16668df4.json"
+            },
+            {
+              "scenario": "workflow_stuck_healthy_chain",
+              "recording": "workflow_stuck_healthy_chain.20260919T001025Z.bdbb166cdf98.json"
+            },
+            {
+              "scenario": "workflow_stuck_paused_dag",
+              "recording": "workflow_stuck_paused_dag.20260918T072918Z.93673b198b72.json"
+            },
+            {
+              "scenario": "workflow_stuck_resolver_stall",
+              "recording": "workflow_stuck_resolver_stall.20260918T072608Z.e7e5393d8cf4.json"
+            }
+          ],
+          "at": "2026-09-20T06:04:10+00:00"
+        }
+      ]
+    },
+    {
+      "packet": "WP-3.3",
+      "text": "a recorded run of each matches its live grade on ROOT_CAUSE",
+      "status": "partly measured",
+      "readings": [
+        {
+          "reads": "recorded runs",
+          "status": "not yet measured",
+          "summary": "no recorded runs of every scenario with a committed recording committed",
+          "rows": [],
+          "at": ""
+        },
+        {
+          "reads": "live runs",
+          "status": "measured",
+          "summary": "23 live runs over 6 scenario(s): 8 of 23 passed, root cause 8 of 10",
+          "rows": [
+            {
+              "archive": "bb1fa70abb4c",
+              "scenario": "remediate_consumer_lag_success",
+              "strategy": "unrecorded",
+              "model_role": "unrecorded",
+              "final_state": "resolved",
+              "passed": false,
+              "root_cause": "not graded",
+              "failed": [
+                "evidence",
+                "action"
+              ],
+              "note": ""
+            },
+            {
+              "archive": "e72b5ffb9df0",
+              "scenario": "dlq_backlog",
+              "strategy": "unrecorded",
+              "model_role": "unrecorded",
+              "final_state": "resolved",
+              "passed": false,
+              "root_cause": "not graded",
+              "failed": [
+                "outcome"
+              ],
+              "note": ""
+            },
+            {
+              "archive": "e72b5ffb9df0",
+              "scenario": "remediate_dlq_backlog_success",
+              "strategy": "unrecorded",
+              "model_role": "unrecorded",
+              "final_state": "resolved",
+              "passed": true,
+              "root_cause": "not graded",
+              "failed": [],
+              "note": ""
+            },
+            {
+              "archive": "adcdcadd94a3",
+              "scenario": "remediate_consumer_lag_success",
+              "strategy": "unrecorded",
+              "model_role": "unrecorded",
+              "final_state": "resolved",
+              "passed": false,
+              "root_cause": "not graded",
+              "failed": [
+                "evidence",
+                "action"
+              ],
+              "note": ""
+            },
+            {
+              "archive": "4779f94faa3c",
+              "scenario": "remediate_consumer_lag_success",
+              "strategy": "unrecorded",
+              "model_role": "unrecorded",
+              "final_state": "escalated",
+              "passed": false,
+              "root_cause": "not graded",
+              "failed": [
+                "outcome",
+                "evidence",
+                "action"
+              ],
+              "note": ""
+            },
+            {
+              "archive": "16ae3c7a4c9d",
+              "scenario": "remediate_consumer_lag_success",
+              "strategy": "unrecorded",
+              "model_role": "unrecorded",
+              "final_state": "resolved",
+              "passed": true,
+              "root_cause": "not graded",
+              "failed": [],
+              "note": ""
+            },
+            {
+              "archive": "e8404306138c",
+              "scenario": "remediate_dlq_backlog_success",
+              "strategy": "unrecorded",
+              "model_role": "unrecorded",
+              "final_state": "resolved",
+              "passed": true,
+              "root_cause": "not graded",
+              "failed": [],
+              "note": ""
+            },
+            {
+              "archive": "779b19a287a7",
+              "scenario": "remediate_dlq_backlog_success",
+              "strategy": "unrecorded",
+              "model_role": "unrecorded",
+              "final_state": "escalated",
+              "passed": false,
+              "root_cause": "not graded",
+              "failed": [
+                "outcome",
+                "evidence",
+                "action"
+              ],
+              "note": ""
+            },
+            {
+              "archive": "4974811d236f",
+              "scenario": "remediate_dlq_backlog_success",
+              "strategy": "unrecorded",
+              "model_role": "unrecorded",
+              "final_state": "resolved",
+              "passed": false,
+              "root_cause": "not graded",
+              "failed": [
+                "evidence"
+              ],
+              "note": ""
+            },
+            {
+              "archive": "54ab08425f82",
+              "scenario": "remediate_dlq_backlog_success",
+              "strategy": "unrecorded",
+              "model_role": "unrecorded",
+              "final_state": "resolved",
+              "passed": true,
+              "root_cause": "not graded",
+              "failed": [],
+              "note": ""
+            },
+            {
+              "archive": "42000dfda188",
+              "scenario": "remediate_consumer_lag_success",
+              "strategy": "baseline",
+              "model_role": "benchmark",
+              "final_state": "escalated",
+              "passed": false,
+              "root_cause": "not graded",
+              "failed": [
+                "outcome",
+                "evidence",
+                "action",
+                "safety"
+              ],
+              "note": ""
+            },
+            {
+              "archive": "845bdae22195",
+              "scenario": "remediate_consumer_lag_success",
+              "strategy": "baseline",
+              "model_role": "benchmark",
+              "final_state": "resolved",
+              "passed": true,
+              "root_cause": "not graded",
+              "failed": [],
+              "note": ""
+            },
+            {
+              "archive": "47abb70a2b9e",
+              "scenario": "remediate_dlq_backlog_success",
+              "strategy": "baseline",
+              "model_role": "benchmark",
+              "final_state": "resolved",
+              "passed": true,
+              "root_cause": "not graded",
+              "failed": [],
+              "note": ""
+            },
+            {
+              "archive": "759e198cdd27",
+              "scenario": "remediate_consumer_lag_success",
+              "strategy": "baseline",
+              "model_role": "benchmark",
+              "final_state": "resolved",
+              "passed": true,
+              "root_cause": "PASS",
+              "failed": [],
+              "note": ""
+            },
+            {
+              "archive": "fc896b25a09c",
+              "scenario": "remediate_dlq_backlog_success",
+              "strategy": "baseline",
+              "model_role": "benchmark",
+              "final_state": "resolved",
+              "passed": false,
+              "root_cause": "PASS",
+              "failed": [
+                "evidence"
+              ],
+              "note": ""
+            },
+            {
+              "archive": "42c675d9c145",
+              "scenario": "remediate_dlq_backlog_success",
+              "strategy": "baseline",
+              "model_role": "benchmark",
+              "final_state": "resolved",
+              "passed": true,
+              "root_cause": "PASS",
+              "failed": [],
+              "note": ""
+            },
+            {
+              "archive": "a0354a3f9cba",
+              "scenario": "api_latency_healthy_control",
+              "strategy": "baseline",
+              "model_role": "benchmark",
+              "final_state": "escalated",
+              "passed": false,
+              "root_cause": "PASS",
+              "failed": [
+                "evidence"
+              ],
+              "note": ""
+            },
+            {
+              "archive": "e7fd45fb8a7a",
+              "scenario": "workflow_stuck_resolver_stall",
+              "strategy": "baseline",
+              "model_role": "benchmark",
+              "final_state": "escalated",
+              "passed": false,
+              "root_cause": "FAIL",
+              "failed": [
+                "evidence",
+                "root_cause"
+              ],
+              "note": ""
+            },
+            {
+              "archive": "86e3b8006caf",
+              "scenario": "workflow_stuck_resolver_stall",
+              "strategy": "baseline",
+              "model_role": "benchmark",
+              "final_state": "escalated",
+              "passed": false,
+              "root_cause": "FAIL",
+              "failed": [
+                "evidence",
+                "root_cause"
+              ],
+              "note": ""
+            },
+            {
+              "archive": "4e729b6803a2",
+              "scenario": "workflow_stuck_resolver_stall",
+              "strategy": "baseline",
+              "model_role": "benchmark",
+              "final_state": "escalated",
+              "passed": false,
+              "root_cause": "PASS",
+              "failed": [
+                "evidence"
+              ],
+              "note": ""
+            },
+            {
+              "archive": "6e3abb9954d6",
+              "scenario": "workflow_stuck_paused_dag",
+              "strategy": "baseline",
+              "model_role": "benchmark",
+              "final_state": "escalated",
+              "passed": false,
+              "root_cause": "PASS",
+              "failed": [
+                "evidence"
+              ],
+              "note": ""
+            },
+            {
+              "archive": "eb25a58feb70",
+              "scenario": "workflow_stuck_paused_dag",
+              "strategy": "baseline",
+              "model_role": "benchmark",
+              "final_state": "escalated",
+              "passed": false,
+              "root_cause": "PASS",
+              "failed": [
+                "evidence"
+              ],
+              "note": ""
+            },
+            {
+              "archive": "03f50e776217",
+              "scenario": "workflow_stuck_paused_dag",
+              "strategy": "baseline",
+              "model_role": "benchmark",
+              "final_state": "escalated",
+              "passed": false,
+              "root_cause": "PASS",
+              "failed": [
+                "evidence"
+              ],
+              "note": ""
+            }
+          ],
+          "at": "2026-10-08T15:54:17.209456Z"
+        }
+      ]
+    },
+    {
+      "packet": "WP-3.3",
+      "text": "drift check green",
+      "status": "measured",
+      "readings": [
+        {
+          "reads": "drift verdicts",
+          "status": "measured",
+          "summary": "12 DRIFT, 5 REFUSED — table `world_drift_table.20261008T160827Z.86b59809ce24.json`, against platform v0.6.23; drift check NOT green",
+          "rows": [
+            {
+              "scenario": "api_latency_db_query",
+              "verdict": "DRIFT",
+              "disagreements": 37,
+              "detail": ""
+            },
+            {
+              "scenario": "api_latency_downstream",
+              "verdict": "REFUSED",
+              "disagreements": null,
+              "detail": "precondition: 2 of 3 not met. get_circuit_breakers: get_circuit_breakers: breakers[].state for a row whose 'name' equals 'bulk-api-sync' expected not_equals 'closed', observed ['closed']; get_circuit_breakers: breakers[].failure_count for a row whose 'name' equals 'bulk-api-sync' expected at_least 3.0, observed [0]"
+            },
+            {
+              "scenario": "api_latency_healthy_control",
+              "verdict": "DRIFT",
+              "disagreements": 11,
+              "detail": ""
+            },
+            {
+              "scenario": "api_latency_redis",
+              "verdict": "DRIFT",
+              "disagreements": 12,
+              "detail": ""
+            },
+            {
+              "scenario": "dlq_backlog",
+              "verdict": "DRIFT",
+              "disagreements": 14,
+              "detail": ""
+            },
+            {
+              "scenario": "dlq_mislabeled_replay_safe",
+              "verdict": "DRIFT",
+              "disagreements": 14,
+              "detail": ""
+            },
+            {
+              "scenario": "jobs_not_progressing_dispatcher_stall",
+              "verdict": "REFUSED",
+              "disagreements": null,
+              "detail": "precondition: 1 of 2 not met. get_consumer_lag: get_consumer_lag: lag expected at_least 20.0, observed [0]"
+            },
+            {
+              "scenario": "jobs_not_progressing_healthy_backlog_spike",
+              "verdict": "DRIFT",
+              "disagreements": 14,
+              "detail": ""
+            },
+            {
+              "scenario": "jobs_not_progressing_outbox_stall",
+              "verdict": "REFUSED",
+              "disagreements": null,
+              "detail": "precondition: 1 of 2 not met. get_outbox_status: get_outbox_status: unpublished_count expected at_least 10.0, observed [0]"
+            },
+            {
+              "scenario": "jobs_not_progressing_outbox_stall_deploy_noise",
+              "verdict": "REFUSED",
+              "disagreements": null,
+              "detail": "precondition: 1 of 2 not met. get_outbox_status: get_outbox_status: unpublished_count expected at_least 10.0, observed [0]"
+            },
+            {
+              "scenario": "remediate_consumer_lag_success",
+              "verdict": "REFUSED",
+              "disagreements": null,
+              "detail": "precondition: 1 of 1 not met. get_consumer_lag: get_consumer_lag: lag expected at_least 20.0, observed [0]"
+            },
+            {
+              "scenario": "remediate_dlq_backlog_success",
+              "verdict": "DRIFT",
+              "disagreements": 14,
+              "detail": ""
+            },
+            {
+              "scenario": "workflow_stuck_dead_lettered_root",
+              "verdict": "DRIFT",
+              "disagreements": 25,
+              "detail": ""
+            },
+            {
+              "scenario": "workflow_stuck_downstream_child_failed",
+              "verdict": "DRIFT",
+              "disagreements": 21,
+              "detail": ""
+            },
+            {
+              "scenario": "workflow_stuck_healthy_chain",
+              "verdict": "DRIFT",
+              "disagreements": 14,
+              "detail": ""
+            },
+            {
+              "scenario": "workflow_stuck_paused_dag",
+              "verdict": "DRIFT",
+              "disagreements": 14,
+              "detail": ""
+            },
+            {
+              "scenario": "workflow_stuck_resolver_stall",
+              "verdict": "DRIFT",
+              "disagreements": 14,
+              "detail": ""
+            }
+          ],
+          "at": "2026-10-08T16:08:27.070437+00:00"
+        }
+      ]
+    }
+  ],
+  "pending": [
+    {
+      "work_order": "WO-R3-294",
+      "what": "re-record the worlds on the pinned platform: no recording passed its drift check on 2026-10-08, and ADR 0047 refuses such a recording as evidence"
+    }
+  ],
+  "no_runs_were_made_to_produce_this": "Zero live invocations and zero LLM calls produced this document; every value was read out of a committed file."
+}

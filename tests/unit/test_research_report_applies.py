@@ -209,6 +209,15 @@ class TestAnUnseededRecordingIsExcluded:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         monkeypatch.setattr(research, "CALIBRATION_REPORTS", MappingProxyType({_ARM: "cal-1234"}))
+        # A registered id opens the gate only with its report, made on the runs' model (WO-R3-364).
+        artifacts.write_versioned(
+            "judge_calibration",
+            "candidate_selector",
+            content=json.dumps({"model": "claude-sonnet-4-6"}),
+            timestamp=_AT,
+            invocation_id="cal-1234",
+            root=tmp_path,
+        )
         section = _sections(_root(tmp_path))["oracle_gap"]
         assert section["measurable"] is True
         worlds = {entry["group"]: entry for entry in section["value"]["by_world"]}

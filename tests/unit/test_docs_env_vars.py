@@ -71,6 +71,9 @@ _NON_SETTINGS_TOKENS: Final[frozenset[str]] = frozenset(
         "FROM_LOGS",  # `make world-drift-all` reads saved logs instead of the stack
         "UNTIL_LAG",  # `make traffic` stop-at-this-backlog flag (scripts/traffic_loop.py)
         "YES_SPEND",  # `make judge-calibration` second flag a paid LIVE=1 run requires
+        # Read by make, passed as `--model-role` to the runner and (when given) to
+        # `make judge-calibration`'s selector leg (WO-R3-364); `.env.example` documents it.
+        "MODEL_ROLE",
         # Platform-side metrics-pass interval, a SETTING since platform v0.6.18 / ADR 0039
         # and set to 5 on both platform-code services in demo/compose.yml (owner decision
         # O-35). Not a commander setting and deliberately not mirrored as one: the agent

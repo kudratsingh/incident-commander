@@ -7,6 +7,8 @@ report a real run would and says on every summary line that it is not a measurem
 paid leg and BOTH flags are required, because readiness is not authorization. The paid
 leg is DEFERRED (O-22): proved against the fake, costed in
 ``.coordination/DEFERRED-PAID-RUNS.md``. ``--scan`` shows what the free legs can see.
+``--model-role`` asks the selector leg on that run role's model, the one an arm's selector
+is called on; the judge legs keep ``JUDGE_MODEL`` (WO-R3-364).
 """
 
 from __future__ import annotations
@@ -25,11 +27,20 @@ from evals.judge_calibration.harness import (
     SELF_AGREEMENT_REPS,
     CalibrationReport,
     calibrate,
+    leg_model,
+    leg_role,
+    model_setting,
     write_report,
 )
 from evals.judge_calibration.label_leg import NoLabelsError
-from evals.judge_calibration.roles import ABSENT_ROLES, BRIEFING_JUDGE, CALIBRATED_ROLES
+from evals.judge_calibration.roles import (
+    ABSENT_ROLES,
+    BRIEFING_JUDGE,
+    CALIBRATED_ROLES,
+    CANDIDATE_SELECTOR,
+)
 from evals.judge_calibration.traps import traps_for
+from incident_commander.config import ModelRole
 
 #: The imperfection the fake judge is scripted with, deliberately: a fake that agreed
 #: with every trap would exercise the accuracy numerator and nothing else, so the
@@ -46,6 +57,9 @@ _SCRIPTED_UNSTABLE: Final[dict[str, dict[str, str]]] = {
     "candidate_selector": {"cs-03-near-duplicates-one-correct": "probe_more"},
 }
 
+#: The model id the free path records: a script answered, and the report says so.
+_FAKE_MODEL: Final[str] = "fake-judge"
+
 _NOT_A_MEASUREMENT: Final[str] = (
     "SCRIPTED FAKE JUDGE — this is a proof that the harness runs, not a "
     "calibration. Nothing here may be quoted, and this report id must not be "
@@ -59,6 +73,7 @@ def _summarize(report: CalibrationReport) -> list[str]:
     ground = report.ground_truth_agreement
     lines = [
         f"{report.judge}  (report {report.report_id}, client {report.judge_client})",
+        *_model_lines(report),
         f"  rubric      {report.rubric['prompt']}.md  sha256 {report.rubric['sha256'][:12]}  "
         f"{report.rubric['lines']} lines",
         f"  traps       {traps['agreed']}/{traps['answered']} agreed"
@@ -95,6 +110,23 @@ def _summarize(report: CalibrationReport) -> list[str]:
         lines.append(f"    ERRORED    {entry['case_id']}: {entry['error']}")
     if report.label_agreement is not None:
         lines.extend(_summarize_labels(report.label_agreement["value"]))
+    return lines
+
+
+def _model_lines(report: CalibrationReport) -> list[str]:
+    """Which model answered and where it came from; a selector on the judge's pin is flagged."""
+    role = report.model_role
+    source = model_setting(role) + ("" if role is None else f", role {role.value}")
+    if report.is_a_measurement:
+        lines = [f"  model       {report.model}  from {source}"]
+    else:
+        lines = [f"  model       {report.model}  (scripted; a live run asks {source})"]
+    if report.judge == CANDIDATE_SELECTOR and role is None:
+        lines.append(
+            "    NOTE       a run's selector is called on the run's own model, not JUDGE_MODEL: "
+            "the register accepts this report only for an arm that ran on this model. "
+            "MODEL_ROLE=benchmark asks BENCHMARK_MODEL."
+        )
     return lines
 
 
@@ -174,6 +206,15 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     parser.add_argument("--scan", action="store_true", help="what the free legs see; asks nothing.")
     parser.add_argument(
+        "--model-role",
+        choices=[r.value for r in ModelRole],
+        help=(
+            f"{CANDIDATE_SELECTOR} only: ask the selector on the model this run role resolves "
+            "to (BENCHMARK_MODEL for benchmark), the one an arm of that role calls it on. "
+            "Default: JUDGE_MODEL. The judge legs always keep JUDGE_MODEL."
+        ),
+    )
+    parser.add_argument(
         "--labels",
         nargs="?",
         const=labels.LABELS_FILE,
@@ -202,6 +243,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         return 2
 
+    model_role = None if args.model_role is None else ModelRole(args.model_role)
     if args.live:
         # Imported here, not at module scope: Settings refuses to start without a
         # priced JUDGE_MODEL, which a fake-path run has no business requiring.
@@ -212,14 +254,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         # The key is read from Settings and handed straight to the SDK; it is
         # never printed, logged or put in the report.
         client: object = LLMClient(api_key=settings.anthropic_api_key.get_secret_value())
-        model = settings.judge_model
         client_kind = LIVE_CLIENT
     else:
-        model = "fake-judge"
         client_kind = FAKE_CLIENT
 
     exit_code = 0
     for judge in judges:
+        model = leg_model(judge, settings, model_role) if args.live else _FAKE_MODEL
         if not args.live:
             script = answers_for(
                 judge,
@@ -238,6 +279,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 reps=args.reps,
                 client_kind=client_kind,
                 labels=args.labels,
+                model_role=leg_role(judge, model_role),
             )
         except NoLabelsError as err:
             print(str(err), file=sys.stderr)

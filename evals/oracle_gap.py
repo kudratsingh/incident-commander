@@ -496,34 +496,6 @@ def limits(document: Mapping[str, Any]) -> list[str]:
     ]
 
 
-#: The judge-calibration family the selector's reports are filed under (``judge_calibration``).
-_SELECTOR_ROLE: Final[str] = "candidate_selector"
-
-
-def calibration_gate(arm: str, agent_model: str, *, root: Path = REPO_ROOT) -> dict[str, Any]:
-    """Whether the arm's registered calibration report may release selector numbers.
-
-    It must exist and must have measured the model the selector ran on: the harness asks
-    ``JUDGE_MODEL``, while a run's selector is called on the agent's model.
-    """
-    report_id = research_report.calibration_report_for(arm)
-    gate: dict[str, Any] = {"report_id": report_id, "model": None, "opens": False, "why_not": ""}
-    if report_id is None:
-        gate["why_not"] = f"no calibration report is registered for {arm} (plan 02:243)"
-        return gate
-    for path in artifacts.versions("judge_calibration", _SELECTOR_ROLE, root=root):
-        if path.name.endswith(f".{report_id}.json"):
-            gate["model"] = json.loads(path.read_text(encoding="utf-8")).get("model")
-    if gate["model"] != agent_model:
-        gate["why_not"] = (
-            f"calibration report {report_id} measured {gate['model'] or 'no model it names'}, "
-            f"and this arm's selector ran on {agent_model}"
-        )
-        return gate
-    gate["opens"] = True
-    return gate
-
-
 def assemble(
     archives: Sequence[str], plan: SamplePlan, *, root: Path = REPO_ROOT
 ) -> dict[str, Any]:
@@ -547,7 +519,7 @@ def assemble(
     # 3. Selector numbers are withheld until the arm has a calibration report made on the model
     #    the selector ran on (plan 02:243); the generation half is never withheld.
     agent_model = models[0] if models else "none scored"
-    calibration = calibration_gate(plan.arm, agent_model, root=root)
+    calibration = research_report.calibration_gate(plan.arm, agent_model, root=root)
     summary = summarise(rows, headline_k=plan.n)
     document: dict[str, Any] = {
         "study": plan.study,

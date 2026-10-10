@@ -20,6 +20,10 @@
 # their formatting is unaffected either way.
 -include .env
 
+# MODEL_ROLE as the caller gave it (command line, environment or .env), read
+# BEFORE the eval targets' fallback below: `judge-calibration` passes a role only
+# when one was asked for, and otherwise asks every leg JUDGE_MODEL (WO-R3-364).
+MODEL_ROLE_GIVEN := $(MODEL_ROLE)
 MODEL_ROLE ?= development
 
 help:
@@ -70,6 +74,9 @@ help:
 	@echo "                   JUDGE=<role> picks one; WRITE=1 persists; SCAN=1 asks nothing."
 	@echo "                   LIVE=1 asks the real JUDGE_MODEL and SPENDS MONEY: it also"
 	@echo "                   needs YES_SPEND=1 and the owner's explicit yes for that run"
+	@echo "                   MODEL_ROLE=benchmark asks the candidate_selector leg on"
+	@echo "                   BENCHMARK_MODEL (the model the arm's selector runs on);"
+	@echo "                   the judge legs keep JUDGE_MODEL"
 	@echo "                   LABELS=1 (with JUDGE=briefing_judge) adds the owner-label leg"
 	@echo "  label-packet     FREE: write the briefing labelling packet from committed archives;"
 	@echo "                   IMPORT=<filled packet> appends its labels (append-only)"
@@ -144,13 +151,16 @@ research-report:
 # the scripted fake judge, which proves the harness end to end and spends
 # nothing. LIVE=1 asks the real pinned JUDGE_MODEL and needs YES_SPEND=1 as well
 # — the module refuses one flag on its own, because PROTOCOL step 0 is that
-# readiness is not authorization.
+# readiness is not authorization. MODEL_ROLE=<role> (only when given, never the
+# development fallback) asks the candidate_selector leg on that role's model, the
+# one a run's selector is called on; the judge legs keep JUDGE_MODEL (WO-R3-364).
 judge-calibration:
 	uv run python -m evals.judge_calibration \
 		$(if $(SCAN),--scan,) $(if $(JUDGE),--judge $(JUDGE),) \
 		$(if $(REPS),--reps $(REPS),) $(if $(WRITE),--write,) \
 		$(if $(LIVE),--live,) $(if $(YES_SPEND),--yes-spend,) \
-		$(if $(LABELS),--labels $(filter-out 1,$(LABELS)),)
+		$(if $(LABELS),--labels $(filter-out 1,$(LABELS)),) \
+		$(if $(MODEL_ROLE_GIVEN),--model-role $(MODEL_ROLE_GIVEN),)
 
 # The oracle-gap sample (WO-R3-347, evals/oracle_gap.py). FREE by default: it checks the
 # committed sample plan and prints the exact recorded-mode command one batch runs, then

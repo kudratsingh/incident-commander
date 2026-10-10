@@ -15,7 +15,8 @@ fraction, because absorbing it would put a harness event into a measurement of
 judgement. Every report carries the sha256 and line count of the prompt bytes it
 calibrated, which is what makes § 110's one-line-at-a-time rubric rule checkable.
 Writing is a separate act: ``write_report`` is versioned and exclusive-create, because
-two calibrations of one rubric are two facts (invariant 9).
+two calibrations of one rubric are two facts (invariant 9). Every leg asks ``JUDGE_MODEL``
+except the selector's, which may ask a run role's model (``leg_model``, WO-R3-364).
 """
 
 from __future__ import annotations
@@ -26,6 +27,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
+from types import MappingProxyType
 from typing import Any, Final
 from uuid import uuid4
 
@@ -35,12 +37,14 @@ from evals.judge_calibration.roles import (
     ABSENT_ROLES,
     BRIEFING_JUDGE,
     CALIBRATED_ROLES,
+    CANDIDATE_SELECTOR,
     is_approval,
     role,
     rubric_of,
 )
 from evals.judge_calibration.track_record import ground_truth_agreement
 from evals.judge_calibration.traps import MINIMUM_TRAPS_PER_JUDGE, TrapCase, traps_for
+from incident_commander.config import ModelRole, Settings
 from incident_commander.llm.client import LLMClientProtocol, LLMError
 
 #: The artifact family a calibration report is filed under, read by the writer, the
@@ -57,6 +61,35 @@ SELF_AGREEMENT_REPS: Final[int] = 5
 #: to know which ids are real to tell a script from a measurement.
 FAKE_CLIENT: Final[str] = "fake"
 LIVE_CLIENT: Final[str] = "live"
+
+#: The setting a live leg reads its model from. A judge grades a run from outside it, so it
+#: asks ``JUDGE_MODEL``; a run's selector is called on the run's own model (``ctx.model``),
+#: so its leg may ask the model a run role resolves to instead (WO-R3-364, ADR 0079).
+JUDGE_MODEL_SETTING: Final[str] = "JUDGE_MODEL"
+ROLE_MODEL_SETTINGS: Final[Mapping[ModelRole, str]] = MappingProxyType(
+    {ModelRole.DEVELOPMENT: "DEVELOPMENT_MODEL", ModelRole.BENCHMARK: "BENCHMARK_MODEL"}
+)
+
+
+def model_setting(model_role: ModelRole | None) -> str:
+    """The setting a leg's model comes from: ``JUDGE_MODEL``, or the role's own pin."""
+    return JUDGE_MODEL_SETTING if model_role is None else ROLE_MODEL_SETTINGS[model_role]
+
+
+def leg_role(judge: str, model_role: ModelRole | None) -> ModelRole | None:
+    """The run role a leg takes its model from: the asked one for the selector, none for a judge."""
+    return model_role if judge == CANDIDATE_SELECTOR else None
+
+
+def leg_model(judge: str, settings: Settings, model_role: ModelRole | None) -> str:
+    """The model id one leg is asked on, on the live path.
+
+    ``Settings.model_for_role`` is the lookup the runner makes for ``--model-role``, so the
+    selector is calibrated on the id an arm of that role calls it on. The judge legs keep
+    ``JUDGE_MODEL`` whatever role is asked for.
+    """
+    asked = leg_role(judge, model_role)
+    return settings.judge_model if asked is None else settings.model_for_role(asked)
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -106,6 +139,8 @@ class CalibrationReport:
     outcomes: tuple[TrapOutcome, ...] = field(default_factory=tuple)
     # The owner-label leg (WO-R3-278); ``None`` unless asked for with ``labels``.
     label_agreement: Mapping[str, Any] | None = None
+    # The run role ``model`` was resolved from; ``None`` means ``JUDGE_MODEL`` (WO-R3-364).
+    model_role: ModelRole | None = None
 
     def to_dict(self) -> dict[str, Any]:
         payload: dict[str, Any] = {
@@ -114,6 +149,10 @@ class CalibrationReport:
             "what_it_decides": role(self.judge).what_it_decides,
             "generated_at": self.generated_at.isoformat(),
             "model": self.model,
+            # Where ``model`` came from: the role asked for (selector leg only) and the
+            # setting a live run of this leg reads. The register compares ``model`` alone.
+            "model_role": None if self.model_role is None else self.model_role.value,
+            "model_setting": model_setting(self.model_role),
             "judge_client": self.judge_client,
             "reps": self.reps,
             "protocol": PROTOCOL,
@@ -324,14 +363,21 @@ def calibrate(
     now: datetime | None = None,
     report_id: str | None = None,
     labels: Path | None = None,
+    model_role: ModelRole | None = None,
 ) -> CalibrationReport:
     """Calibrate one judge and return its report. Writes nothing.
 
     ``client_kind`` is declared by the caller, not sniffed; ``reps`` below 1 is refused.
     ``labels`` (``briefing_judge`` only) adds the owner-label leg; zero labels refuses.
+    ``model_role`` (``candidate_selector`` only) records the run role ``model`` came from.
     """
     if reps < 1:
         raise ValueError(f"reps must be at least 1; got {reps}")
+    if model_role is not None and judge != CANDIDATE_SELECTOR:
+        raise ValueError(
+            f"{judge} is asked on JUDGE_MODEL: a run role names the model a run's "
+            f"{CANDIDATE_SELECTOR} is called on, and a judge is not part of the run"
+        )
     if labels is not None and judge != BRIEFING_JUDGE:
         raise ValueError(f"owner labels exist for {BRIEFING_JUDGE} only, not {judge}")
     labelled = (
@@ -361,6 +407,7 @@ def calibrate(
         ground_truth_agreement=ground_truth_agreement(judge, root=root),
         outcomes=outcomes,
         label_agreement=labelled,
+        model_role=model_role,
     )
 
 

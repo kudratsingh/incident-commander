@@ -123,6 +123,10 @@ FIX_MAP: Final[dict[HypothesisCategory, str]] = {
     # A stuck chain is fixed by replaying its dead-lettered root job, never by `pause_dag`:
     # pausing leaves the chain stuck and blocks the replay. The root's own row picks the tool.
     HypothesisCategory.RUNAWAY_SAGA: "replay_dlq_by_ids",
+    # The first category promoted out of WP-1.6's escalate-only set (O-49, ADR 00XX): since
+    # platform v0.6.24 a stopped resolver is READABLE (`last_poll_age_seconds`), so restarting it
+    # is a Tier-1 fix a scenario grades, aimed at `CHAIN_RESOLVER_GROUP` and nothing else.
+    HypothesisCategory.RESOLVER_STALL: "restart_consumer_group",
 }
 
 
@@ -564,7 +568,7 @@ def make_llm_investigate(
         # earned another look at the world (ADR 0073's rule).
         settled_steps = 0
         # The required reads a refused verdict still owes (ADR 0078), and the refusals spent.
-        owed: tuple[str, ...] = ()
+        owed: tuple[RequiredReading, ...] = ()
         verdict_refusals_spent = 0
         limit_refused = False
         free_steps = 0
@@ -635,7 +639,7 @@ def make_llm_investigate(
                         # context; no strategy decides it for itself.
                         offer_probe=withdrawn is None,
                         # After a refused verdict, only the reads it still owes (ADR 0078).
-                        required_probes=owed,
+                        required_probes=_owed_tools(owed),
                     ),
                 )
             except (ValueError, ValidationError, LLMError) as err:
@@ -1403,16 +1407,24 @@ def _condition_holds(
     return subject is not None and subject.tool_name == _CHAIN_READ_TOOL
 
 
-def required_read_made(run_state: RunState, tool: str) -> bool:
-    """Whether this run's evidence holds a read of ``tool`` that counts as a required read.
+def _counts_as(requirement: RequiredReading, tool: str, arguments: Mapping[str, Any]) -> bool:
+    """Whether one call of ``tool`` with these (wired) arguments makes ``requirement``'s read.
 
-    A listing in ``_UNNARROWED_READS`` counts only unfiltered, as in ADR 0041; paging is fine.
+    A listing in ``_UNNARROWED_READS`` counts only unfiltered, as in ADR 0041 (paging is fine), and
+    a read pinned to a resource counts only on that resource (ADR 00XX).
     """
+    if tool != str(requirement.tool):
+        return False
     filters = _UNNARROWED_READS.get(tool, frozenset())
+    if any(_narrowed_on(arguments, field) for field in filters):
+        return False
+    return requirement.made_with(arguments)
+
+
+def required_read_made(run_state: RunState, requirement: RequiredReading) -> bool:
+    """Whether this run's evidence holds a read that counts as ``requirement`` (ADR 0078)."""
     return any(
-        entry.tool_name == tool
-        and not any(_narrowed_on(entry.arguments, field) for field in filters)
-        for entry in run_state.evidence
+        _counts_as(requirement, entry.tool_name, entry.arguments) for entry in run_state.evidence
     )
 
 
@@ -1421,28 +1433,35 @@ def _missing_required_reads(
     requirements: Sequence[RequiredReading],
     hypotheses: Sequence[Hypothesis],
     subject: AlertSubject | None,
-) -> tuple[str, ...]:
+) -> tuple[RequiredReading, ...]:
     """The required reads this verdict applies to and this run has not made, in declared order."""
     top = hypotheses[0] if hypotheses else None
-    missing: list[str] = []
+    missing: list[RequiredReading] = []
     for requirement in requirements:
-        tool = str(requirement.tool)
-        if tool in missing or not _condition_holds(requirement.when, top, subject):
+        if requirement in missing or not _condition_holds(requirement.when, top, subject):
             continue
-        if not required_read_made(run_state, tool):
-            missing.append(tool)
+        if not required_read_made(run_state, requirement):
+            missing.append(requirement)
     return tuple(missing)
 
 
-def _still_owed(run_state: RunState, owed: tuple[str, ...]) -> tuple[str, ...]:
+def _still_owed(
+    run_state: RunState, owed: tuple[RequiredReading, ...]
+) -> tuple[RequiredReading, ...]:
     """The owed reads this run has still not made."""
-    return tuple(tool for tool in owed if not required_read_made(run_state, tool))
+    return tuple(reading for reading in owed if not required_read_made(run_state, reading))
 
 
-def _pays_an_owed_read(action: ProbeAction, owed: tuple[str, ...]) -> bool:
+def _owed_tools(owed: Sequence[RequiredReading]) -> tuple[str, ...]:
+    """The tools the narrowed step may name: each owed read's tool, once, in owed order.
+
+    The schema can only bind the tool; a pinned argument is checked by ``_pays_an_owed_read``.
+    """
+    return tuple(dict.fromkeys(str(reading.tool) for reading in owed))
+
+
+def _pays_an_owed_read(action: ProbeAction, owed: Sequence[RequiredReading]) -> bool:
     """Whether this probe, as it would go on the wire, makes one of the owed reads."""
-    if action.tool_name not in owed:
-        return False
     spec = TOOL_REGISTRY.get(action.tool_name)
     if spec is None:
         return False
@@ -1450,12 +1469,11 @@ def _pays_an_owed_read(action: ProbeAction, owed: tuple[str, ...]) -> bool:
         arguments = wire_arguments(spec, action.arguments)
     except ValidationError:
         return False
-    filters = _UNNARROWED_READS.get(action.tool_name, frozenset())
-    return not any(_narrowed_on(arguments, field) for field in filters)
+    return any(_counts_as(reading, action.tool_name, arguments) for reading in owed)
 
 
-def _listed(tools: Sequence[str]) -> str:
-    return ", ".join(tools)
+def _listed(readings: Sequence[RequiredReading]) -> str:
+    return ", ".join(reading.rendered() for reading in readings)
 
 
 def _record_verdict_refusal(
@@ -1463,7 +1481,7 @@ def _record_verdict_refusal(
     at: datetime,
     planner_log: PlannerLog | None,
     refused: str,
-    missing: tuple[str, ...],
+    missing: tuple[RequiredReading, ...],
     refusals_spent: int,
 ) -> RunState:
     """Refuse a move made before the required reads, as a ledger row and a console row.
@@ -1472,11 +1490,21 @@ def _record_verdict_refusal(
     names each read, and what makes a listing count, because "read more" alone steers nowhere.
     """
     whole = [
-        f"{tool} counts only with no {' and no '.join(sorted(_UNNARROWED_READS[tool]))} filter "
+        f"{reading.tool} counts only with no "
+        f"{' and no '.join(sorted(_UNNARROWED_READS[str(reading.tool)]))} filter "
         f"(paging with limit/offset is fine)"
-        for tool in missing
-        if tool in _UNNARROWED_READS
+        for reading in missing
+        if str(reading.tool) in _UNNARROWED_READS
     ]
+    # A read pinned to one resource says which, because the same tool answers for others too.
+    pinned = [
+        f"{reading.rendered()} counts only with exactly "
+        f"{' and '.join(f'{name}={value!r}' for name, value in sorted(reading.arguments.items()))}"
+        f" — a read of another {next(iter(sorted(reading.arguments)))} is not this read"
+        for reading in missing
+        if reading.arguments
+    ]
+    whole += pinned
     reason = (
         f"{refused} refused: this incident's alert requires these reads before that verdict, "
         f"and this run has not made them: {_listed(missing)}. A conclusion about this alert has "
@@ -1489,7 +1517,7 @@ def _record_verdict_refusal(
         tool_name=VERDICT_REFUSED_MARKER,
         arguments={
             "refused": refused,
-            "missing_reads": list(missing),
+            "missing_reads": [reading.rendered() for reading in missing],
             "offered": ["probe"],
             "refusals_spent": refusals_spent,
         },
@@ -1498,12 +1526,17 @@ def _record_verdict_refusal(
     )
     if planner_log is not None:
         planner_log.refusal(
-            hypotheses=run_state.hypotheses, refused=refused, missing=missing, reason=reason
+            hypotheses=run_state.hypotheses,
+            refused=refused,
+            missing=tuple(reading.rendered() for reading in missing),
+            reason=reason,
         )
     return run_state.model_copy(update={"evidence": (*run_state.evidence, entry), "updated_at": at})
 
 
-def _verdict_refusals_exhausted_reason(missing: tuple[str, ...], refusals_spent: int) -> str:
+def _verdict_refusals_exhausted_reason(
+    missing: tuple[RequiredReading, ...], refusals_spent: int
+) -> str:
     """Why a run that kept concluding without the required reads is handed off instead."""
     return (
         f"planner concluded or probed elsewhere {refusals_spent + 1} times without making the "
@@ -1512,7 +1545,9 @@ def _verdict_refusals_exhausted_reason(missing: tuple[str, ...], refusals_spent:
     )
 
 
-def _reads_unaffordable_reason(refused: str, missing: tuple[str, ...], remaining: int) -> str:
+def _reads_unaffordable_reason(
+    refused: str, missing: tuple[RequiredReading, ...], remaining: int
+) -> str:
     """Why a refused verdict escalates at once: the budget cannot pay for the reads it owes."""
     return (
         f"{refused} refused and not recoverable: this alert requires {_listed(missing)} before "

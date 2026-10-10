@@ -49,6 +49,7 @@ from incident_commander.agent.post_action import (
     judge_view,
     metric_expectation,
 )
+from incident_commander.agent.required_reads import CHAIN_RESOLVER_GROUP
 from incident_commander.agent.state import (
     EvidenceEntry,
     IncidentState,
@@ -693,7 +694,9 @@ def _plan_once(
     malformed = _malformed_resource_args(plan)
     if malformed:
         return run_state, _argument_refusal(plan, run_state, "malformed", malformed)
-    unsourced = _unsourced_resource_args(plan, _evidence_value_corpus(run_state))
+    unsourced = _unsourced_resource_args(
+        plan, _evidence_value_corpus(run_state) | _declared_services_read(run_state)
+    )
     if unsourced:
         return run_state, _argument_refusal(plan, run_state, "unsourced", unsourced)
     # 6. Escalate if the verify call names a different resource than the action does: reading
@@ -1250,6 +1253,103 @@ def _graph_nodes_in_evidence(
     return frozenset(nodes)
 
 
+class ChainService(NamedTuple):
+    """A resource OUTSIDE a chain's own reading that the chain's progress depends on (ADR 00XX).
+
+    The chain view lists jobs, never the consumer that promotes them, so a node-only admission
+    (ADR 0070) can never reach it. Named here, one row per service, rather than inferred.
+    """
+
+    action_tool: str
+    """The Tier-1 tool that may act on the service."""
+    action_field: str
+    """The argument of that tool that names the service."""
+    read_tool: str
+    """The read that observes the service — this run must hold one before acting on it."""
+    read_field: str
+    """The argument of that read that names the service."""
+    value: str
+    """The service's name, the same on both sides."""
+
+
+# Which services a chain alert's action may name besides the chain's own nodes. Keyed, like
+# ``GRAPH_VIEW_FOR_SUBJECT``, on the subject's own read, so no other alert is affected.
+CHAIN_SERVICES_FOR_SUBJECT: Final[dict[str, tuple[ChainService, ...]]] = {
+    "get_dag_state": (
+        ChainService(
+            "restart_consumer_group",
+            "consumer_group",
+            "get_consumer_lag",
+            "consumer_group",
+            CHAIN_RESOLVER_GROUP,
+        ),
+    ),
+}
+
+
+def _chain_services_read(
+    plan: RemediationPlan, run_state: RunState, subject: AlertSubject
+) -> frozenset[str]:
+    """The services this plan names that a chain alert admits, each one this run has READ.
+
+    Empty means "no licence". The action must name the service on its own field with its own tool,
+    and the run must hold a reading of exactly that service: a restart nobody looked at first is
+    still refused, which is what keeps this from being an allow-list of tools.
+    """
+    admitted: set[str] = set()
+    for service in CHAIN_SERVICES_FOR_SUBJECT.get(subject.tool_name, ()):
+        if plan.action_tool != service.action_tool:
+            continue
+        if _scope_value(plan.action_arguments, service.action_field) != service.value:
+            continue
+        if any(
+            entry.tool_name == service.read_tool
+            and _scope_value(entry.arguments, service.read_field) == service.value
+            for entry in run_state.evidence
+        ):
+            admitted.add(service.value)
+    return frozenset(admitted)
+
+
+def _declared_services_read(run_state: RunState) -> frozenset[str]:
+    """The chain services this run has read, as values a plan may name (ADR 00XX).
+
+    ``_evidence_value_corpus`` drops a reading's echo of its own argument (B-08: a typed probe
+    argument must not launder itself into a source), and the resolver's name reaches a run ONLY
+    as such an echo — no alert or listing carries it. The name here is not typed by any model:
+    it is the commander's own declaration (``CHAIN_SERVICES_FOR_SUBJECT``), so admitting it
+    launders nothing, and only once this run has read that service.
+    """
+    subject = alert_subject(run_state.alert)
+    if subject is None:
+        return frozenset()
+    return frozenset(
+        service.value
+        for service in CHAIN_SERVICES_FOR_SUBJECT.get(subject.tool_name, ())
+        if any(
+            entry.tool_name == service.read_tool
+            and _scope_value(entry.arguments, service.read_field) == service.value
+            for entry in run_state.evidence
+        )
+    )
+
+
+def _chain_service_route(subject: AlertSubject) -> str:
+    """The refusal's sentence naming the services a chain action may also name, or ""."""
+    services = CHAIN_SERVICES_FOR_SUBJECT.get(subject.tool_name, ())
+    if not services:
+        return ""
+    named = "; ".join(
+        f"{service.action_tool}({service.action_field}={service.value!r}), once this run has "
+        f"read it with {service.read_tool}({service.read_field}={service.value!r})"
+        for service in services
+    )
+    return (
+        f" Outside the chain's own nodes, the one service that promotes its waiting children "
+        f"may be named: {named}."
+    )
+
+
 def _subject_action_field(plan: RemediationPlan, subject: AlertSubject) -> str | None:
     """The action argument that narrows on the subject's own dimension, if any.
 
@@ -1286,9 +1386,11 @@ def _unaddressed_alert_subject(plan: RemediationPlan, run_state: RunState) -> Su
         if subject.value in acted:
             return None
         # 3. It is also fine if the action names a node beneath that resource in a reading THIS
-        #    run holds (ADR 0070's rule); a node of some other chain is still refused.
+        #    run holds (ADR 0070's rule); a node of some other chain is still refused. Or the one
+        #    service that promotes the chain, read by this run first (ADR 00XX's rule).
         nodes = _graph_nodes_in_evidence(run_state.evidence, subject)
-        off_graph = sorted(acted - nodes)
+        services = _chain_services_read(plan, run_state, subject)
+        off_graph = sorted(acted - nodes - services)
         if acted and not off_graph:
             return None
         names = (
@@ -1315,6 +1417,7 @@ def _unaddressed_alert_subject(plan: RemediationPlan, run_state: RunState) -> Su
                     else ""
                 )
                 + "."
+                + _chain_service_route(subject)
             )
         )
         return SubjectMiss(

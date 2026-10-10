@@ -25,7 +25,11 @@ from evals.graders.deterministic import (
     where_path_errors,
 )
 from incident_commander.agent.hypothesis import HypothesisCategory
-from incident_commander.agent.required_reads import RequiredReading, VerdictCondition
+from incident_commander.agent.required_reads import (
+    CHAIN_RESOLVER_GROUP,
+    RequiredReading,
+    VerdictCondition,
+)
 from incident_commander.api.schemas import AlertPayload
 from incident_commander.config import polling_window_seconds
 from incident_commander.tools.mcp_client import ToolResult
@@ -716,9 +720,19 @@ FAMILY_REQUIRED_BEFORE_VERDICT: Final[Mapping[ScenarioFamily, tuple[RequiredRead
                 "get_circuit_breakers",
             ),
             # One chain under five faults: any verdict about it lists the whole dead-letter
-            # queue first (README-workflow-stuck.md, ADR 0041's unfiltered read).
-            ScenarioFamily.WORKFLOW_STUCK: _sweep(
-                VerdictCondition.STUCK_CHAIN, "list_dlq_messages"
+            # queue first (README-workflow-stuck.md, ADR 0041's unfiltered read), and reads the
+            # two things outside the chain that hold its waiting children (O-49, ADR 00XX): the
+            # resolver that promotes them, by name, and the background loops that backstop it.
+            ScenarioFamily.WORKFLOW_STUCK: (
+                *_sweep(VerdictCondition.STUCK_CHAIN, "list_dlq_messages"),
+                RequiredReading.model_validate(
+                    {
+                        "tool": "get_consumer_lag",
+                        "when": VerdictCondition.STUCK_CHAIN,
+                        "arguments": {"consumer_group": CHAIN_RESOLVER_GROUP},
+                    }
+                ),
+                *_sweep(VerdictCondition.STUCK_CHAIN, "get_control_loops"),
             ),
         }
     )

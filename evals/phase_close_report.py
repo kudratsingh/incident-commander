@@ -237,6 +237,10 @@ class PhaseScope:
     #: (invariant 9), so it lands forward rather than retroactively. NOT the value —
     #: see ``draft_status``.
     reports_status: bool = False
+    #: The routing this phase's runs were made under, when it is not today's ``FIX_MAP``. A
+    #: close audits runs that already happened, so the map it quotes and tests each planner
+    #: step against is the one in force THEN; ``None`` means today's map (WO-R3-372).
+    fix_map_of_record: frozenset[str] | None = None
 
     @property
     def document_id(self) -> str:
@@ -677,7 +681,23 @@ def leak_hunt(root: Path, scope: PhaseScope) -> dict[str, Any]:
 # --------------------------------------------------------------------------
 
 
-def _planner_steps(records: Sequence[dict[str, Any]]) -> list[dict[str, Any]]:
+def _routing(scope: PhaseScope) -> frozenset[str]:
+    """The FIX_MAP keys this scope's runs were made under: its record, else today's map."""
+    if scope.fix_map_of_record is not None:
+        return scope.fix_map_of_record
+    return frozenset(category.value for category in FIX_MAP)
+
+
+#: FIX_MAP's keys from WP-1.6 until WO-R3-372 promoted `resolver_stall` (O-49, ADR 00XX): the
+#: routing every Phase 1 and Phase 2 run was made under, so those closes keep quoting it.
+FIX_MAP_BEFORE_O49: Final[frozenset[str]] = frozenset(
+    {"consumer_saturation", "poison_message", "runaway_saga", "stale_cache"}
+)
+
+
+def _planner_steps(
+    records: Sequence[dict[str, Any]], routing: frozenset[str]
+) -> list[dict[str, Any]]:
     steps: list[dict[str, Any]] = []
     for record in records:
         if record["kind"] != "llm" or record["role"] != "investigation_planner":
@@ -690,7 +710,7 @@ def _planner_steps(records: Sequence[dict[str, Any]]) -> list[dict[str, Any]]:
                 "top_hypothesis": top["name"],
                 "category": top["category"],
                 "confidence": top["confidence"],
-                "in_fix_map": top["category"] in {c.value for c in FIX_MAP},
+                "in_fix_map": top["category"] in routing,
                 "meets_bar": top["confidence"] >= REMEDIATE_BAR,
                 "emitted": output["next_action"]["kind"],
             }
@@ -698,7 +718,7 @@ def _planner_steps(records: Sequence[dict[str, Any]]) -> list[dict[str, Any]]:
     return steps
 
 
-def _gate_crossings(root: Path, leg: LiveLeg) -> dict[str, Any]:
+def _gate_crossings(root: Path, leg: LiveLeg, routing: frozenset[str]) -> dict[str, Any]:
     """One live run's every ``remediate`` handoff and its escalation, if any."""
     records = _trace_records(root, leg.archive_id, leg.scenario)
     rows = _evidence_rows(_trajectory(root, leg.archive_id, leg.scenario))
@@ -707,7 +727,7 @@ def _gate_crossings(root: Path, leg: LiveLeg) -> dict[str, Any]:
         for row in rows
         if row["tool_name"] in {"_handoff_refused", "_planner_remediate", "_planner_escalate"}
     ]
-    steps = _planner_steps(records)
+    steps = _planner_steps(records, routing)
     pending = list(decisions)
     for step in steps:
         if step["emitted"] != "remediate":
@@ -1574,6 +1594,8 @@ _PHASE1_FOLLOW_UPS: Final[tuple[dict[str, str], ...]] = (
 
 
 PHASE1: Final[PhaseScope] = PhaseScope(
+    # Audited before WO-R3-372 promoted `resolver_stall`: quote the map these runs met.
+    fix_map_of_record=FIX_MAP_BEFORE_O49,
     phase=1,
     work_order="WO-R3-189 (WP-1.7)",
     scope="REDUCED close, owner decisions O-14 (benchmark model) and O-15 (scope)",
@@ -1957,6 +1979,8 @@ FOLLOW_UP_ADDENDA: Final[tuple[dict[str, str], ...]] = (
 #: merged-but-unmeasured fixes. Committed and therefore evidence, so it stays declared
 #: as written and stays regenerable; ``PHASE2`` is this scope plus the two re-runs.
 PHASE2_DRAFT: Final[PhaseScope] = PhaseScope(
+    # Audited before WO-R3-372 promoted `resolver_stall`: quote the map these runs met.
+    fix_map_of_record=FIX_MAP_BEFORE_O49,
     phase=2,
     work_order="WO-R3-195 (WP-2.6)",
     scope=(
@@ -2976,7 +3000,7 @@ def assemble(root: Path, scope: PhaseScope) -> dict[str, Any]:
     corpus = {s.name: s for s in load_scenarios(root / "evals/scenarios")}
     audits = []
     for leg in scope.live_legs:
-        audit = _gate_crossings(root, leg)
+        audit = _gate_crossings(root, leg, _routing(scope))
         expected = corpus[leg.scenario].expectation.expected_terminal_state.value
         audit["expected_terminal_state"] = expected
         audit["escalation_verdict"] = _escalation_verdict(audit, expected, leg.escalation_note)
@@ -2984,7 +3008,7 @@ def assemble(root: Path, scope: PhaseScope) -> dict[str, Any]:
 
     gate_audit: dict[str, Any] = {
         "bar": REMEDIATE_BAR,
-        "fix_map": sorted(category.value for category in FIX_MAP),
+        "fix_map": sorted(_routing(scope)),
         "gates": (
             "Three structural gates stand between a planner's `remediate` step and a Tier-1 "
             "call: the category must be a key in FIX_MAP, the top confidence must be at or "

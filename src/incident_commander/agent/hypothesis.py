@@ -49,8 +49,10 @@ class HypothesisCategory(StrEnum):
     """LLM couldn't classify the root cause into any known category.
     Escalate with the full evidence chain in the briefing."""
 
-    # Nine labels added for newer fault families, none of them with an automatic fix. Added at
-    # the end rather than in place, because old run archives are read back against this enum.
+    # Nine labels added for newer fault families, none of them with an automatic fix when they
+    # landed. One has since been promoted: RESOLVER_STALL routes to `restart_consumer_group`
+    # (O-49, ADR 00XX). Added at the end rather than in place, because old run archives are read
+    # back against this enum.
 
     NO_FAULT = "no_fault"
     """Nothing is wrong. Every reading the agent took is healthy, so the
@@ -65,11 +67,34 @@ class HypothesisCategory(StrEnum):
 
     RESOLVER_STALL = "resolver_stall"
     """A resolver stopped making progress on work it had already claimed;
-    the queue is not the problem, the consumer of it has stopped."""
+    the queue is not the problem, the consumer of it has stopped.
+
+    On a stuck chain this is the `dependency-resolver` consumer group, which
+    promotes a waiting child once every parent has completed, and since
+    platform v0.6.24 one reading PROVES it (INC-008, platform ADR 0041):
+    `get_consumer_lag(consumer_group="dependency-resolver")` with
+    `last_poll_age_seconds` far above `age_seconds` — the platform measured
+    the group seconds ago and the consumer had stopped asking long before.
+    Its lag is no help: a dead resolver over a chain where nothing completes
+    reads lag 0, known and fresh, exactly like a healthy idle one. The fix is
+    `restart_consumer_group` on that group (FIX_MAP, ADR 00XX), verified by
+    `last_poll_age_seconds` falling back to a few seconds. The paused
+    `resume_unblocked_waiting` sweep that usually backstops promotion is read
+    with `get_control_loops`; no tool lifts it, so it is named with its expiry
+    and left to run out."""
 
     SAGA_COORDINATOR_STALL = "saga_coordinator_stall"
     """The coordinator that advances a multi-step workflow has stopped
-    stepping it — distinct from RUNAWAY_SAGA, where it steps too much."""
+    stepping it — distinct from RUNAWAY_SAGA, where it steps too much.
+
+    No reading shows the coordinator today: `saga-coordinator` is not a
+    group `get_consumer_lag` measures and has no poll time (platform ADR
+    0041 names it as not built). So this label is asserted only by ruling
+    the resolver OUT — `dependency-resolver` read with `last_poll_age_seconds`
+    near its `age_seconds` (polling) and the `resume_unblocked_waiting`
+    sweep read not paused — and never on the chain view alone, which looks
+    the same for both. Escalate-only: with no reading of the coordinator, a
+    restart of it could not be verified, so it stays outside FIX_MAP."""
 
     DB_QUERY_LATENCY = "db_query_latency"
     """Query time on the platform's database has degraded; the work is

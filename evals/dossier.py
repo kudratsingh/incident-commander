@@ -170,9 +170,10 @@ def _unfiltered_subject(alert: Mapping[str, Any]) -> tuple[str, SubjectProbe] | 
 def _value_pool(scenario: Scenario) -> dict[str, list[str]]:
     """Resource values this scenario states, grouped by kind of resource.
 
-    Three places the scenario has ALREADY written the value down, so nothing is invented: the
-    alert payload via ``ALERT_SUBJECT_PROBES``, the ``expected_precondition`` arguments, and
-    ``expected_action_arguments``' ``equals`` values.
+    Four places the scenario has ALREADY written the value down, so nothing is invented: the
+    alert payload via ``ALERT_SUBJECT_PROBES``, the ``expected_precondition`` arguments,
+    ``expected_action_arguments``' ``equals`` values, and the arguments a required read is pinned
+    to (``required_before_verdict``, ADR 00XX) — the resolver every chain verdict must read.
     """
     pool: dict[str, list[str]] = {}
 
@@ -194,6 +195,9 @@ def _value_pool(scenario: Scenario) -> dict[str, list[str]]:
         # of the job_ids list"), so take the first segment, which is the argument itself.
         base = expectation.argument.split("[")[0].split(".")[0]
         add(base, expectation.equals)
+    for reading in scenario.required_before_verdict:
+        for name, value in reading.arguments.items():
+            add(name, value)
     return pool
 
 
@@ -236,8 +240,9 @@ def derive_probes(scenario: Scenario) -> tuple[list[Probe], list[str]]:
 
     Numbered below, in the agent's own order, from ``ALERT_SUBJECT_PROBES`` (cmd #177),
     ``SOURCE_ROW_FOR_ACTION`` (ADR 0027, where the rem-4 contradiction lived),
-    ``SOURCE_LISTING_FOR_ACTION`` (ADR 0028), ``VERIFY_PROBE_FOR_ACTION`` (ADR 0025) and the
-    evidence claims themselves. A note is a finding about the SCENARIO, not about the world.
+    ``SOURCE_LISTING_FOR_ACTION`` (ADR 0028), ``VERIFY_PROBE_FOR_ACTION`` (ADR 0025), the
+    reads required before a verdict (ADR 0078) and the evidence claims themselves. A note is a
+    finding about the SCENARIO, not about the world.
     """
     pool = _value_pool(scenario)
     probes: list[Probe] = []
@@ -382,7 +387,20 @@ def derive_probes(scenario: Scenario) -> tuple[list[Probe], list[str]]:
                     )
                 )
 
-    # 6. Finally, for every read tool an evidence claim names, add one call per resource value the
+    # 6. Add every read the alert requires before a verdict (ADR 0078), with the arguments it is
+    #    pinned to (ADR 00XX): the loop refuses a verdict without them, so the agent makes them.
+    for reading in scenario.required_before_verdict:
+        probes.append(
+            _probe(
+                str(reading.tool),
+                dict(reading.arguments),
+                f"required_before_verdict: `{reading.rendered()}` when {reading.when.value} — "
+                "the loop refuses a verdict on this alert until this read is in the run's "
+                "evidence (ADR 0078), so every run that concludes has made it.",
+            )
+        )
+
+    # 7. Finally, for every read tool an evidence claim names, add one call per resource value the
     #    scenario states, or a note saying which argument nothing could fill.
     for claim in leaf_claims(scenario.expectation.expected_evidence_fields):
         for tool in claim.tools:

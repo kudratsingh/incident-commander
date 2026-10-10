@@ -18,8 +18,13 @@ Task: produce a structured `RemediationPlan` per the JSON schema on the `record_
 
 For non-DLQ hypotheses:
 - `consumer_saturation` → `restart_consumer_group`
+- `resolver_stall` → `restart_consumer_group` on `dependency-resolver` — see "A chain held from outside itself" below
 - `stale_cache` / `hot_key` → `invalidate_cache_key`
 - `runaway_saga` / `stuck_dag` → read the chain, then read the stopped node's dead-letter row, then follow "Stuck dependency chains" below. The fix is a replay of the node that stopped the chain, and only when that node's own row says the replay is safe. It is not `pause_dag`.
+
+## A chain held from outside itself (`resolver_stall`)
+
+{{rule:stalled_chain}} So the plan is `restart_consumer_group` with `consumer_group` exactly `"dependency-resolver"`, copied from the reading that showed it stopped, and nothing else: no job of the chain is replayed, fenced or paused, because none of them failed. Verify with `get_consumer_lag` on that same group, and write the expectation as the resolver reading — `last_poll_age_seconds` back within a few seconds of `age_seconds` — not as the chain draining: the children promote only when the held sweep expires, so the chain still reads `waiting` after a restart that worked.
 
 ## Stuck dependency chains (`runaway_saga` / `stuck_dag`)
 

@@ -8,6 +8,7 @@ Rules:
 - If the context names a Tier-1 action as already attempted, say so in `findings`. Never recommend repeating it; recommend checking whether it took effect. The human may not otherwise know it fired.
 - A verify read proves only what it read. A filtered read proves that slice and nothing outside it, and a read taken at one moment proves nothing about a later one. Never widen a verify result into a claim about the whole system: rows or resources this run did not act on are named as REMAINING, with what is still wrong with each, and are never described as cleared, addressed, or resolved.
 - {{rule:unresolved_remainder}} Say for each what the human is being asked to look at, and keep `recommendation` pointed at the remainder rather than at the cause this run already acted on.
+- {{rule:stalled_chain}} So when the trail holds a `get_control_loops` reading with a loop `paused: true`, name that loop and its `paused_expires_in_seconds` in `findings` whether or not the run resolved: it is still holding work when the run ends, and nothing the agent can do lifts it.
 - If no probes ran (the trail is empty), `findings` should say so plainly and `recommendation` should point the human at the raw alert.
 - Both strings must be one or two short sentences. No lists, no markdown, no headings — plain prose.
 - Prefer concrete verification steps in `recommendation` over speculative fixes. The human decides what to do; you help them find the fastest thing to check.

@@ -429,7 +429,7 @@ class TestWhatIsMetricShaped:
 
 
 class TestTheCannedReproduction:
-    """Part 4's scenario loads, polls twice canned, and is the only one in the corpus that does."""
+    """Part 4's scenario polls twice canned; WO-R3-372's resolver world is the one other."""
 
     def _corpus(self) -> dict[str, Scenario]:
         return {scenario.name: scenario for scenario in load_scenarios(_SCENARIOS_DIR)}
@@ -441,7 +441,10 @@ class TestTheCannedReproduction:
 
     def test_no_other_scenario_polls_more_than_once_canned(self) -> None:
         polling = {name for name, s in self._corpus().items() if s.canned_verify_polls != 1}
-        assert polling == {"verify_judge_reads_history_backwards"}
+        # WO-R3-372: the restarted resolver's first post-action poll reads the frozen value and
+        # the second reads it polling, measured on rehearsal 11b24360e455 — the canned world
+        # replays that timing, so it declares two polls.
+        assert polling == {"verify_judge_reads_history_backwards", "workflow_stuck_resolver_stall"}
 
     def test_the_knob_is_evaluator_only(self) -> None:
         assert "canned_verify_polls" in Scenario.EVALUATOR_ONLY_FIELDS

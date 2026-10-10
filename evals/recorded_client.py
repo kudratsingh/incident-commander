@@ -91,7 +91,11 @@ SHIFTED_CLOCK_FIELDS: Final[Mapping[str, frozenset[str]]] = {
 #: recording session to an instant, so a held duration can be out by the session's length.
 HELD_DURATION_FIELDS: Final[Mapping[str, frozenset[str]]] = {
     "get_cache_key_info": frozenset({"ttl_seconds"}),
-    "get_consumer_lag": frozenset({"age_seconds", "last_poll_age_seconds"}),
+    # v0.6.25 (plat #244): `poll_interval_seconds` is the consumer's fixed cadence — held, like
+    # `relay_tick_interval_s`. `polling` is a boolean verdict and needs no entry in either table.
+    "get_consumer_lag": frozenset(
+        {"age_seconds", "last_poll_age_seconds", "poll_interval_seconds"}
+    ),
     # v0.6.24 (plat #243). `tick_interval_seconds` is configuration, held like
     # `relay_tick_interval_s`; a held pause expiry is the `get_dag_state` rule.
     "get_control_loops": frozenset(

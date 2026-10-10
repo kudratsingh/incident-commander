@@ -84,8 +84,14 @@ _EXPECTED_READ_TOOLS: Final[frozenset[str]] = frozenset(
 #: `get_consumer_lag` was re-described, 3,728 → 4,852 (+1,124), plus 4 characters of
 #: indentation for the one paragraph it gained. 3,687 + 1,124 + 4 = 4,815. Its two new
 #: output fields (`last_poll_at`, `last_poll_age_seconds`) are not here, by the v0.6.18 rule.
+#: v0.6.25 (WO-R3-373, platform ADR 0041 amendment) SHRINKS it, for one cause, and the
+#: arithmetic closes: 34,267 → 32,496, −1,771 characters. `get_consumer_lag`'s description
+#: was trimmed 4,852 → 3,093 (−1,759) and went from 10 lines to 7, so three fewer lines carry
+#: the block's 4 characters of indentation (−12): −1,759 − 12 = −1,771. Read surface still 17,
+#: no tier moved. Its two new output fields (`polling`, `poll_interval_seconds`) and the two
+#: rewritten output-field texts are not here, by the v0.6.18 rule.
 _EXPECTED_TOOL_BLOCK_HASH: Final[str] = (
-    "df460a8dcfff014bef4f1b7706387e8669db8c8b43ed32198a7eaa6b0096b28f"
+    "18257df13237bca7008f81618a490a2dffeeb0ce7ff53daa6a9964cfe8963a60"
 )
 
 

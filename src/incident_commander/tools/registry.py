@@ -62,6 +62,12 @@ class GetConsumerLagOutput(BaseModel):
     # Null on the static groups and when no poll time is on record, which is unknown, not evidence.
     last_poll_at: datetime | None = None
     last_poll_age_seconds: int | None = None
+    # v0.6.25 (plat #244, platform ADR 0041 amendment, INC-008 addendum): the platform's verdict
+    # on that poll time — true polled within 5 poll intervals when it looked, false not (the
+    # consumer has stopped, whatever `lag` reads), null no poll time on record (unknown). And
+    # the cadence it was judged against: 2.0 on the two live groups, null elsewhere.
+    polling: bool | None = None
+    poll_interval_seconds: float | None = None
 
 
 # --- get_dag_state -------------------------------------------------------

@@ -831,13 +831,13 @@
     },
     {
       "name": "get_consumer_lag",
-      "description": "Read the last-emitted Kafka consumer lag for one of the platform's consumer groups. Known consumer groups: worker-dispatcher, billing-consumer, orders-consumer, notifications-consumer, analytics-consumer, payments-consumer, shipping-consumer, healthy-consumer.\nFRESHNESS: cached in Redis, never a live Kafka query, and the refresh behaviour differs per group — read `source` on the response before reasoning about change over time.\n  - `worker-dispatcher` (source: live) is re-measured by a background pass whose interval is deployment-configured, and cached under a TTL of a few passes. THE INTERVAL IS NOT A NUMBER YOU CAN ASSUME: read `age_seconds` for how old the reading in front of you is, and the gaps between `recent_samples` for how often this deployment measures. Any single reading is up to one interval stale in either direction — after a fault begins the cached value catches up within about one interval, and after a recovery it can keep reading the old high value for a fraction of one. This is the only group whose lag moves, and so the only one where watching lag grow or drain is a valid way to observe a change.\n  - The other seven (source: static) report a recorded constant that nothing refreshes. Re-reading one after an action returns the same number — that is the expected behaviour, not evidence the action failed, and lag on these groups will never be seen to grow.\nONE CALL SHOWS THE TREND. Every response carries `measured_at` (when this number was measured), `age_seconds` (how old it is), and `recent_samples` — the measurements recorded over the last 15 minutes, newest first, at most 15 of them, each with its own time, the current one included. Compare those samples to decide whether lag is climbing, draining or flat. That comparison is the evidence; a second call is not, because a new measurement exists only once a pass has taken one. Two calls inside one interval therefore return the SAME number with the SAME `measured_at`, and that repetition means 'not re-measured yet', never 'not moving' — reading sooner cannot show change that has not been measured. If you need a genuinely newer number than the one in front of you, it exists once `age_seconds` exceeds the gap between the newest two samples; until then this response already contains every reading the platform has. On the seven groups reporting a recorded constant, `measured_at` and `age_seconds` are null and `recent_samples` is empty: a constant was never measured at a moment, so it has no time and no history. `recent_samples` can also be empty for worker-dispatcher when nothing has been recorded yet — an empty list is missing history, not a flat line.\nA STALLED CONSUMER STILL REPORTS LAG. A consumer that has stopped processing keeps its Kafka assignment, so this metric goes on reporting its real and climbing lag rather than going null — rising lag is the expected signal of a stall, not absence of data.\nUNKNOWN IS NOT ZERO. `lag_known: false` with `lag: null` means the platform could not determine lag (nothing recorded for the group, unknown group, consumer not started, no partition assignment, or the query errored). It is deliberately not reported as 0, because a fabricated 0 would read as healthy. A measured `lag: 0` with `lag_known: true` is the opposite finding — the group is caught up. Never treat a null as a zero.\n`source: static` with `lag_known: false` means a value that should be recorded for this group is absent — an environment problem to report, not a fault to diagnose.\nNeither a number nor a null proves liveness. Consumer-group membership is the authoritative check — a group holds its assignment and keeps reporting accurate lag for minutes after its consumer stops, without being evicted.",
+      "description": "Read the last-emitted Kafka consumer lag for one of the platform's consumer groups. Known consumer groups: worker-dispatcher, dependency-resolver, billing-consumer, orders-consumer, notifications-consumer, analytics-consumer, payments-consumer, shipping-consumer, healthy-consumer.\nFRESHNESS: cached in Redis, never a live Kafka query, and the refresh behaviour differs per group — read `source` on the response before reasoning about change over time.\n  - `worker-dispatcher` and `dependency-resolver` (source: live) are re-measured by a background pass whose interval is deployment-configured, and cached under a TTL of a few passes. THE INTERVAL IS NOT A NUMBER YOU CAN ASSUME: read `age_seconds` for how old the reading in front of you is, and the gaps between `recent_samples` for how often this deployment measures. Any single reading is up to one interval stale in either direction — after a fault begins the cached value catches up within about one interval, and after a recovery it can keep reading the old high value for a fraction of one. These are the only two groups whose lag moves, and so the only ones where watching lag grow or drain is a valid way to observe a change. `worker-dispatcher` consumes submitted jobs and runs them. `dependency-resolver` consumes job completions and moves a waiting job whose parent jobs have all completed on to run; its lag grows only while completions are arriving, so on a quiet platform it reads flat whether or not anything is consuming — see IS ANYTHING CONSUMING below.\n  - The other seven (source: static) report a recorded constant that nothing refreshes. Re-reading one after an action returns the same number — that is the expected behaviour, not evidence the action failed, and lag on these groups will never be seen to grow.\nONE CALL SHOWS THE TREND. Every response carries `measured_at` (when this number was measured), `age_seconds` (how old it is), and `recent_samples` — the measurements recorded over the last 15 minutes, newest first, at most 15 of them, each with its own time, the current one included. Compare those samples to decide whether lag is climbing, draining or flat. That comparison is the evidence; a second call is not, because a new measurement exists only once a pass has taken one. Two calls inside one interval therefore return the SAME number with the SAME `measured_at`, and that repetition means 'not re-measured yet', never 'not moving' — reading sooner cannot show change that has not been measured. If you need a genuinely newer number than the one in front of you, it exists once `age_seconds` exceeds the gap between the newest two samples; until then this response already contains every reading the platform has. On the seven groups reporting a recorded constant, `measured_at` and `age_seconds` are null and `recent_samples` is empty: a constant was never measured at a moment, so it has no time and no history. `recent_samples` can also be empty for a live group when nothing has been recorded yet — an empty list is missing history, not a flat line.\nA STALLED CONSUMER STILL REPORTS LAG. A consumer that has stopped processing keeps its Kafka assignment, so this metric goes on reporting its real and climbing lag rather than going null — rising lag is the expected signal of a stall, not absence of data.\nIS ANYTHING CONSUMING? Lag says how far behind a group is, not whether anything is reading it. On the two live groups `last_poll_at` is when the group's consumer last asked Kafka for messages, which a running consumer does every few seconds even with nothing to read, and `last_poll_age_seconds` is how long ago that was. On a consuming group `last_poll_age_seconds` is never more than a few seconds above `age_seconds`. Well above it, and growing call after call, means the consumer had stopped asking before the platform last measured: it is not consuming, whatever the lag reads — including a lag of 0. Both are null on the seven static groups, and null when the platform holds no poll time, which is unknown rather than evidence either way.\nUNKNOWN IS NOT ZERO. `lag_known: false` with `lag: null` means the platform could not determine lag (nothing recorded for the group, unknown group, consumer not started, no partition assignment, or the query errored). It is deliberately not reported as 0, because a fabricated 0 would read as healthy. A measured `lag: 0` with `lag_known: true` is the opposite finding — the group is caught up. Never treat a null as a zero.\n`source: static` with `lag_known: false` means a value that should be recorded for this group is absent — an environment problem to report, not a fault to diagnose.\nNeither a lag number nor a null proves liveness — a group holds its assignment and keeps reporting accurate lag for minutes after its consumer stops, without being evicted. `last_poll_at` is the liveness reading.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
           "consumer_group": {
             "default": "worker-dispatcher",
-            "description": "Kafka consumer group to inspect. Continuously refreshed group: worker-dispatcher. Groups reported from a recorded constant: billing-consumer, orders-consumer, notifications-consumer, analytics-consumer, payments-consumer, shipping-consumer, healthy-consumer. Any other name is accepted and returns lag: null with source: unrecognized.",
+            "description": "Kafka consumer group to inspect. Continuously refreshed groups: worker-dispatcher, dependency-resolver. Groups reported from a recorded constant: billing-consumer, orders-consumer, notifications-consumer, analytics-consumer, payments-consumer, shipping-consumer, healthy-consumer. Any other name is accepted and returns lag: null with source: unrecognized.",
             "title": "Consumer Group",
             "type": "string"
           }
@@ -935,12 +935,39 @@
             "title": "Age Seconds"
           },
           "recent_samples": {
-            "description": "The measurements recorded for this group over the last 15 minutes, newest first, the current one included — at most 15 of them, one per measurement pass. A deployment that samples more often than that records more than this call returns; the ones returned are always the newest. Comparing them is how to tell a climbing lag from a flat one without waiting. Empty for a group reporting a recorded constant (nothing measures it), and empty for the continuously-refreshed group when no window has been recorded yet — an empty list is absence of history, never evidence the lag is steady.",
+            "description": "The measurements recorded for this group over the last 15 minutes, newest first, the current one included — at most 15 of them, one per measurement pass. A deployment that samples more often than that records more than this call returns; the ones returned are always the newest. Comparing them is how to tell a climbing lag from a flat one without waiting. Empty for a group reporting a recorded constant (nothing measures it), and empty for a continuously-refreshed group when no window has been recorded yet — an empty list is absence of history, never evidence the lag is steady.",
             "items": {
               "$ref": "#/$defs/LagSample"
             },
             "title": "Recent Samples",
             "type": "array"
+          },
+          "last_poll_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "When this group's consumer last asked Kafka for messages — ISO-8601, UTC, the worker's clock. A running consumer asks every few seconds whether or not there is anything to read, so this is the liveness reading: lag alone cannot show a stopped consumer behind a quiet topic. `null` for a group reporting a recorded constant (nothing polls it) and whenever the platform holds no poll time for the group — unknown, never evidence either way.",
+            "title": "Last Poll At"
+          },
+          "last_poll_age_seconds": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "How long ago `last_poll_at` was, in whole seconds. `null` exactly when `last_poll_at` is null. On a consuming group it is never more than a few seconds above `age_seconds`; well above it — and growing call after call — means the consumer had stopped asking for messages before the platform last measured.",
+            "title": "Last Poll Age Seconds"
           }
         },
         "required": [
@@ -951,6 +978,160 @@
           "cache_key"
         ],
         "title": "GetConsumerLagOutput",
+        "type": "object"
+      },
+      "required_scope": "telemetry:read",
+      "is_idempotent": false
+    },
+    {
+      "name": "get_control_loops",
+      "description": "Read whether each of the worker's background loops is running: for every loop, whether it is paused (and for how much longer), when it last completed a pass, and how often it is meant to run.\nWHAT THEY ARE. Besides its Kafka consumer groups (read those with `get_consumer_lag`), the worker runs timed loops that move work along without waiting for an event. When one stops, the work it moves stops moving, usually with no error and nothing dead-lettered. The loops:\n  - `outbox_relay` — publishes committed job state changes to Kafka (`get_outbox_status` reads the queue it drains).\n  - `delayed_retry_promote` — re-submits a failed job once its retry backoff has elapsed.\n  - `dlq_replay_promote` — runs dead-letter replays that were scheduled for later.\n  - `resume_unblocked_waiting` — moves a `waiting` job whose parent jobs have all completed on to run. It backstops the `dependency-resolver` consumer group, which does the same when a parent's completion arrives: if that promotion is missed, or the resolver is not consuming, this loop is what eventually moves the child. With both stopped, a child of a completed parent stays `waiting` indefinitely.\n  - `stale_pending_backstop` — re-submits a `pending` job that nothing is going to pick up.\n  - `stale_running_sweep` — dead-letters a `running` job whose worker died.\n  - `lease_renewal` — keeps the `running` jobs a worker holds marked as alive.\n  - `slo_evaluation` — evaluates the service-level objectives and raises a fast-burn alert.\n  - `metrics` — measures consumer lag (what `get_consumer_lag` reports) and evaluates the platform's own alert rules.\n  - `digest` — writes the periodic incident summary.\n  - `idempotency_reaper` — deletes expired idempotency records.\nREADING ONE. `tick_interval_seconds` is how often the loop is meant to run, and the yardstick for `last_run_age_seconds`: an age within a few multiples of the interval is a loop that is running; an age many times the interval is a loop that has not completed a pass in that long. `paused: true` means the loop is set to skip its work until `paused_expires_in_seconds` runs out, when it resumes by itself; its `last_run_age_seconds` grows while it is held. A loop can also stop without being paused — a growing age with `paused: false` is a loop that is not completing passes for some other reason.\nWHAT IT DOES NOT SAY. Why a loop is paused, who or what paused it, or why a pass did not complete. It reports state and times only.\nFRESHNESS AND WHICH CLOCK. Nothing is cached: the pause state is read at call time, so a second call is genuine new evidence. `last_run_at` is written by the worker process on its clock at the end of each pass; `measured_at` is the clock of the process answering this call, and each age compares the two — treat a second either way as noise.\nNO PAGING, NOTHING CAPPED. It takes no arguments and always returns every loop, in the same order; `total` is that count, not a page size.\nUNKNOWN IS NULL. `last_run_at: null` means no completed pass is on record — none since the platform started, or the last one is older than the platform keeps or its record was lost. When the platform cannot read the loops' state at all, `unknown_reason` says so and every `paused` and `last_run_at` is null: that is missing information, not healthy loops.\nSCOPE. The loops are platform-wide and serve every tenant; this reading is not scoped to yours.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {},
+        "title": "GetControlLoopsInput",
+        "type": "object"
+      },
+      "outputSchema": {
+        "$defs": {
+          "ControlLoopName": {
+            "description": "One background loop inside the worker process.",
+            "enum": [
+              "outbox_relay",
+              "delayed_retry_promote",
+              "dlq_replay_promote",
+              "resume_unblocked_waiting",
+              "stale_pending_backstop",
+              "stale_running_sweep",
+              "lease_renewal",
+              "slo_evaluation",
+              "metrics",
+              "digest",
+              "idempotency_reaper"
+            ],
+            "title": "ControlLoopName",
+            "type": "string"
+          },
+          "ControlLoopState": {
+            "properties": {
+              "name": {
+                "$ref": "#/$defs/ControlLoopName",
+                "description": "Which loop. A fixed platform name, the same across calls and restarts; the tool description says what each one does."
+              },
+              "paused": {
+                "anyOf": [
+                  {
+                    "type": "boolean"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "True while this loop is set to skip its work. It resumes by itself when `paused_expires_in_seconds` runs out, and nothing on this surface lifts it sooner. False when it is not held. `null` only when `unknown_reason` is set — then whether it is held is unknown, which is not the same as false.",
+                "title": "Paused"
+              },
+              "paused_expires_in_seconds": {
+                "anyOf": [
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "description": "Seconds until the pause lifts and the loop resumes on its own. `null` when the loop is not paused, when the pause carries no expiry, and when the state is unknown.",
+                "title": "Paused Expires In Seconds"
+              },
+              "tick_interval_seconds": {
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "description": "How often this loop is configured to run on this deployment, in seconds — the yardstick for `last_run_age_seconds`. `null` when the loop is configured not to run at all.",
+                "title": "Tick Interval Seconds"
+              },
+              "last_run_at": {
+                "anyOf": [
+                  {
+                    "format": "date-time",
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "description": "When this loop last completed a pass — ISO-8601, UTC, recorded by the worker process on its clock at the end of the pass. A pass counts whether or not there was work to do, so an idle loop stays fresh here; a paused loop does not record passes. `null` when no completed pass is on record: none since the platform started (a loop with a long interval, like `digest`, reads null for most of its first interval), the last one is older than the platform keeps or the record was lost, or the state is unknown.",
+                "title": "Last Run At"
+              },
+              "last_run_age_seconds": {
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "description": "How long ago `last_run_at` was, in seconds, against `measured_at`. `null` exactly when `last_run_at` is null. It compares two processes' clocks, so treat a second either way as noise, and a recorded time later than `measured_at` reads 0, never negative.",
+                "title": "Last Run Age Seconds"
+              }
+            },
+            "required": [
+              "name",
+              "paused"
+            ],
+            "title": "ControlLoopState",
+            "type": "object"
+          }
+        },
+        "properties": {
+          "measured_at": {
+            "description": "When this reading was taken — ISO-8601, UTC, the clock of the process that answered this call. Every `last_run_age_seconds` is this time minus the `last_run_at` beside it.",
+            "format": "date-time",
+            "title": "Measured At",
+            "type": "string"
+          },
+          "loops": {
+            "description": "Every background loop, always all of them, in the same order on every call.",
+            "items": {
+              "$ref": "#/$defs/ControlLoopState"
+            },
+            "title": "Loops",
+            "type": "array"
+          },
+          "total": {
+            "description": "How many loops are listed. A count of all of them, not a page size: nothing is ever left out.",
+            "title": "Total",
+            "type": "integer"
+          },
+          "unknown_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Set only when the platform could not read the loops' state at all; every `paused`, `last_run_at` and `last_run_age_seconds` is then null. That is missing information, never eleven healthy loops. `null` on a normal reading.",
+            "title": "Unknown Reason"
+          }
+        },
+        "required": [
+          "measured_at",
+          "loops",
+          "total"
+        ],
+        "title": "GetControlLoopsOutput",
         "type": "object"
       },
       "required_scope": "telemetry:read",

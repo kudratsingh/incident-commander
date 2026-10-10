@@ -70,18 +70,22 @@ class HypothesisCategory(StrEnum):
     the queue is not the problem, the consumer of it has stopped.
 
     On a stuck chain this is the `dependency-resolver` consumer group, which
-    promotes a waiting child once every parent has completed, and since
-    platform v0.6.24 one reading PROVES it (INC-008, platform ADR 0041):
-    `get_consumer_lag(consumer_group="dependency-resolver")` with
-    `last_poll_age_seconds` far above `age_seconds` — the platform measured
-    the group seconds ago and the consumer had stopped asking long before.
-    Its lag is no help: a dead resolver over a chain where nothing completes
-    reads lag 0, known and fresh, exactly like a healthy idle one. The fix is
-    `restart_consumer_group` on that group (FIX_MAP, ADR 0080), verified by
-    `last_poll_age_seconds` falling back to a few seconds. The paused
+    promotes a waiting child once every parent has completed, and one reading
+    PROVES it (INC-008 and its addendum, platform ADR 0041 and its v0.6.25
+    amendment): `get_consumer_lag(consumer_group="dependency-resolver")`
+    reading `polling: false` — the platform's own verdict that the consumer
+    stopped asking for messages — whatever `lag`, `lag_known`, `source` and
+    `age_seconds` say. Its lag is no help: a dead resolver over a chain where
+    nothing completes reads lag 0, known and fresh, exactly like a healthy
+    idle one, and `last_poll_age_seconds` is only the number behind the
+    verdict, not a second test to threshold. The fix is
+    `restart_consumer_group` on that group (FIX_MAP, ADR 0080), verified by a
+    reading taken after the restart that says `polling: true`. The paused
     `resume_unblocked_waiting` sweep that usually backstops promotion is read
-    with `get_control_loops`; no tool lifts it, so it is named with its expiry
-    and left to run out."""
+    with `get_control_loops`; a paused backstop never explains a stalled
+    primary consumer (ADR 0081), so while the resolver reads `polling: false`
+    this is the label and the restart is the repair, and the sweep — which no
+    tool lifts — is named with its expiry and left to run out."""
 
     SAGA_COORDINATOR_STALL = "saga_coordinator_stall"
     """The coordinator that advances a multi-step workflow has stopped
@@ -90,11 +94,13 @@ class HypothesisCategory(StrEnum):
     No reading shows the coordinator today: `saga-coordinator` is not a
     group `get_consumer_lag` measures and has no poll time (platform ADR
     0041 names it as not built). So this label is asserted only by ruling
-    the resolver OUT — `dependency-resolver` read with `last_poll_age_seconds`
-    near its `age_seconds` (polling) and the `resume_unblocked_waiting`
-    sweep read not paused — and never on the chain view alone, which looks
-    the same for both. Escalate-only: with no reading of the coordinator, a
-    restart of it could not be verified, so it stays outside FIX_MAP."""
+    the resolver OUT — `dependency-resolver` read with `polling: true` and
+    the `resume_unblocked_waiting` sweep read not paused — and never on the
+    chain view alone, which looks the same for both, and never while the
+    resolver reads `polling: false`: a stopped resolver is RESOLVER_STALL
+    however crisp a paused loop beside it looks (INC-008 addendum, ADR 0081).
+    Escalate-only: with no reading of the coordinator, a restart of it could
+    not be verified, so it stays outside FIX_MAP."""
 
     DB_QUERY_LATENCY = "db_query_latency"
     """Query time on the platform's database has degraded; the work is
@@ -141,6 +147,13 @@ class HypothesisCategory(StrEnum):
     """A dependency chain is not advancing because it is deliberately
     paused — `get_dag_state` reads `paused: true` with an expiry and the
     ancestor that holds it — rather than because anything in it broke.
+
+    The CHAIN's own pause, and nothing else: a background loop that
+    `get_control_loops` reads `paused: true` (the `resume_unblocked_waiting`
+    sweep, say) is not this category, however alike the two fields look. A
+    chain whose `get_dag_state` reads `paused: false` is not `dag_paused`;
+    when its resolver reads `polling: false` it is RESOLVER_STALL (INC-008
+    addendum, ADR 0081, where a planner read a held loop as a held chain).
 
     The gap WP-7.2 found by having to label a world it could not name. The
     chain is healthy: no node is dead-lettered, nothing is queued to replay,

@@ -37,23 +37,29 @@ STUCK_CHAIN_ROOT_RULE: Final[str] = (
 
 
 #: What holds a stuck chain whose own rows are healthy, and how each reading of it is acted on:
-#: the resolver is restarted, the paused sweep is named and left to expire, and the coordinator is
-#: only what remains once both are ruled out (INC-008, O-49, ADR 0080). Same words to every reader.
+#: the resolver's `polling` verdict is read first and decides, a paused backstop loop never
+#: explains a stalled resolver, the resolver is restarted, the paused sweep is named and left to
+#: expire, and the coordinator is only what remains once both are ruled out (INC-008 and its
+#: addendum, O-49, O-51, ADR 0080, ADR 0081). Same words to every reader.
 STALLED_CHAIN_RULE: Final[str] = (
     "A stuck dependency chain whose own nodes are healthy — nothing in it dead-lettered, "
     "the chain not paused, children `waiting` behind parents that `completed` — is held "
-    "by what promotes it, and two reads show which: "
-    '`get_consumer_lag(consumer_group="dependency-resolver")` with '
-    "`last_poll_age_seconds` far above its `age_seconds` means the resolver stopped "
-    "polling (a stopped resolver's lag can read 0 exactly like a healthy one's, so the "
-    "lag proves nothing here), which is `resolver_stall`, fixed with "
-    "`restart_consumer_group` on `dependency-resolver` and verified by "
-    "`last_poll_age_seconds` back within a few seconds of `age_seconds`; "
-    "`get_control_loops` reading the `resume_unblocked_waiting` loop as `paused: true` "
-    "means the sweep that backstops the resolver is held, which no tool lifts, so it is "
-    "left to expire and named in the report with its `paused_expires_in_seconds`; and "
-    "only when the resolver is polling and that sweep is running is "
-    "`saga_coordinator_stall` what remains, a label no reading confirms."
+    "by what promotes it, so read `polling` on "
+    '`get_consumer_lag(consumer_group="dependency-resolver")` first: `polling: false` '
+    "means the resolver has stopped, whatever its `lag`, `lag_known`, `source` and "
+    "`age_seconds` say (a dead resolver reads lag 0, known and fresh, exactly like a "
+    "healthy idle one, and `last_poll_age_seconds` is only the number behind the "
+    "verdict), which is `resolver_stall`, fixed with `restart_consumer_group` on "
+    "`dependency-resolver` and verified by a reading taken after the restart that says "
+    "`polling: true`; `get_control_loops` reading the `resume_unblocked_waiting` loop as "
+    "`paused: true` means the sweep that backstops the resolver is held too, and a paused "
+    "backstop never explains a stalled primary consumer — it is not the cause while the "
+    "resolver reads `polling: false`, and it is not `dag_paused`, which is the chain's own "
+    "`get_dag_state` `paused: true` — so the resolver is still restarted, and the held "
+    "sweep, which no tool lifts, is named in the report with its "
+    "`paused_expires_in_seconds` and left to expire; and only when the resolver reads "
+    "`polling: true` and that sweep is running is `saga_coordinator_stall` what remains, "
+    "a label no reading confirms."
 )
 
 

@@ -125,7 +125,9 @@ _EXPECTED_HASHES: Final[dict[str, str]] = {
     # a rule (INC-002), so the two hashes move together or the change is wrong.
     # Moved by WO-R3-372 / ADR 0080 with the three below: `{{rule:stalled_chain}}` tells the writer
     # to name a held loop and its expiry in the handoff, resolved run or not.
-    "briefing_writer": ("23912b2eb95990c4b80c7cf41f60e3b762b48211f00c510e0103be73757a0b24"),
+    # Moved again by WO-R3-374 / ADR 0081 with the same three: the rule now reads the resolver's
+    # `polling` verdict first and says a paused backstop never explains a stalled resolver.
+    "briefing_writer": ("1c8d8d61b2e1cf7f5a308df7afcc5d29cff740eb972b88c8a5bf09804730d95d"),
     # Moved by WP-1.6 (nine category rows and the healthy-world rule) and again by
     # WO-R3-263 / O-19 / ADR 0054, whose three moved hashes are named in that PR's
     # body. Note what those three have in common: ONE sentence held in
@@ -159,7 +161,10 @@ _EXPECTED_HASHES: Final[dict[str, str]] = {
     # WO-R3-372 (O-49, ADR 0080): the `resolver_stall` row gains its Tier-1 fix, the coordinator
     # row says it is only what remains, the stuck-chain verdict sentence names the two new
     # required reads, and `{{rule:stalled_chain}}` is served. Four hashes move together.
-    "investigation_planner": ("e98983f79d63ff70ed52abfa777f8c3a08203a1efc42ac9e826c300a82b42a17"),
+    # WO-R3-374 (INC-008 addendum, O-51, ADR 0081): `{{rule:stalled_chain}}` reads `polling` first
+    # and says a paused backstop never explains a stalled resolver; the `resolver_stall`,
+    # `saga_coordinator_stall` and `dag_paused` rows say the same. The same four move together.
+    "investigation_planner": ("144369281dfbe35f0e1c1b4ef0e6607212bdba829831e7a97747083c223c2882"),
     # WP-5.2's addendum, appended to `investigation_planner` by
     # `best_of_n_enumerated` and never loaded alone — which is why the planner prompt's
     # own hash did not move: the control group's system prompt is byte-for-byte what it was.
@@ -181,8 +186,9 @@ _EXPECTED_HASHES: Final[dict[str, str]] = {
     # again by WO-R3-284 / ADR 0070, the chain-node rule's third reader, and again by
     # WO-R3-321 / ADR 0071, the attribution rule's third reader (which also quotes the
     # attribution block's own heading to it).
-    # And by WO-R3-372 / ADR 0080, the stalled-chain rule's fourth reader.
-    "briefing_judge": ("b1322bf44d1f00a89c22ad39b8da157e8147b6a2386575c55d09f6a2e87f3595"),
+    # And by WO-R3-372 / ADR 0080, the stalled-chain rule's fourth reader, and by WO-R3-374 /
+    # ADR 0081 when that rule moved to the `polling` verdict.
+    "briefing_judge": ("27bffb14bb8cf9949b1b29cc2cba41ea5cae434d1046250f2cb0aded2670a7e9"),
     # Moved by WO-R3-226 / ADR 0056: two sentences cited ADR 0008 for "you get one Tier-1
     # call", which is now true of a PLAN and not of a run. The rules themselves are
     # unchanged — a plan still proposes exactly one action. Moved again by WO-R3-284 /
@@ -190,7 +196,9 @@ _EXPECTED_HASHES: Final[dict[str, str]] = {
     # by WO-R3-321 / ADR 0071: it is told the cleared-before-action refusal is structural.
     # And by WO-R3-372 / ADR 0080: `resolver_stall` routes to a restart of `dependency-resolver`,
     # verified on its poll age, with the shared stalled-chain rule beside it.
-    "remediation_planner": ("1dd3c25c8234aa14f433b6470f4023abe8e9dda52eb3591c0ebca7559070a2f8"),
+    # And by WO-R3-374 / ADR 0081: the restart is verified on `polling: true` after it, and the
+    # shared rule beside it reads `polling` first.
+    "remediation_planner": ("3659cb0f7762ba313fc36cd7e78deb031da29ce627a625f265e200e319731020"),
     # Moved by WO-R3-353 / ADR 0077 (INC-005): the judge is told how its reading's sample
     # history is laid out — oldest first, with a computed trend and the action's time.
     "verification_judge": ("2aa252b4a168105c6246caa3b1ff96ed498b6043c9165059af213d03ef279f73"),
@@ -1153,9 +1161,26 @@ class TestTheStalledChainRuleReachesEveryReader:
 
         assert f'`get_consumer_lag(consumer_group="{CHAIN_RESOLVER_GROUP}")`' in STALLED_CHAIN_RULE
         assert "`get_control_loops`" in STALLED_CHAIN_RULE
-        assert "`last_poll_age_seconds`" in STALLED_CHAIN_RULE
         assert f"`{FIX_MAP[HypothesisCategory.RESOLVER_STALL]}`" in STALLED_CHAIN_RULE
         assert "`saga_coordinator_stall`" in STALLED_CHAIN_RULE
+
+    def test_the_rule_reads_the_platforms_polling_verdict_first(self) -> None:
+        """WO-R3-374 (INC-008 addendum, ADR 0081): a number the model must threshold lost to a
+        boolean with a clock (archive daea4943f3a5), so the rule names the platform's verdict and
+        says which way each value points, and keeps the poll age only as the number behind it."""
+        rule = STALLED_CHAIN_RULE
+        assert "read `polling`" in rule
+        assert rule.index("`polling: false`") < rule.index("`get_control_loops`")
+        assert "whatever its `lag`, `lag_known`, `source` and `age_seconds` say" in rule
+        assert "`polling: true`" in rule
+        assert "`last_poll_age_seconds` is only the number behind the verdict" in rule
+        assert "far above" not in rule
+
+    def test_the_rule_says_a_paused_backstop_never_explains_a_stalled_resolver(self) -> None:
+        rule = STALLED_CHAIN_RULE
+        assert "a paused backstop never explains a stalled primary consumer" in rule
+        assert "it is not `dag_paused`" in rule
+        assert "only when the resolver reads `polling: true`" in rule
 
     def test_the_rule_is_in_the_table(self) -> None:
         assert self._KEY in SHARED_RULES

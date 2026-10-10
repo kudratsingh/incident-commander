@@ -29,6 +29,7 @@ from incident_commander.agent.hypothesis import (
 )
 from incident_commander.agent.incidents import incident_slots
 from incident_commander.agent.planner_context import format_planner_context
+from incident_commander.agent.required_reads import RequiredReading, VerdictCondition
 from incident_commander.agent.state import (
     EvidenceEntry,
     IncidentState,
@@ -78,6 +79,8 @@ _WHOLE_QUEUE_REFUSED_MARKER: Final[str] = "_handoff_refused_unlisted_queue"
 # Ledger row name for refusing one more read of the alert's subject once the ranking has settled
 # (ADR 0073's rule) — the only one of these three markers that refuses a read, not a handoff.
 _CONFIRMING_READ_REFUSED_MARKER: Final[str] = "_probe_refused_confirming_read"
+# Ledger row name for refusing a verdict made before a read the alert requires (ADR 0078's rule).
+VERDICT_REFUSED_MARKER: Final[str] = "_verdict_refused_missing_reads"
 _DEFAULT_MAX_ITERATIONS: Final[int] = 5
 # How confident the top hypothesis must be before the loop will remediate on it. Public because
 # remediation's resolve gate (ADR 0059) and the briefing's cause slots (ADR 0065) need one number.
@@ -102,6 +105,13 @@ _SETTLED_RANKING_STEPS: Final[int] = 2
 # How many further reads the loop may refuse before it escalates instead. Two: the first refusal
 # names what is left to do, the second allows for a misread, a third would not land either.
 _MAX_CONFIRMING_READ_REFUSALS: Final[int] = 2
+
+# How often the loop may refuse a verdict that lacks a required read, or a probe of anything but
+# the owed reads, before it escalates instead (ADR 0078). Two, like the other steering refusals.
+_MAX_VERDICT_REFUSALS: Final[int] = 2
+
+# The read that observes a dependency chain. An alert whose subject it reads is a stuck-chain page.
+_CHAIN_READ_TOOL: Final[str] = "get_dag_state"
 
 
 # The one place a diagnosis category is mapped to the Tier-1 tool that fixes it; a category not
@@ -157,6 +167,9 @@ DLQ_LISTING_TOOL: Final[str] = "list_dlq_messages"
 # `limit` and `offset` are deliberately absent: paging through a listing still reads every row,
 # so it does not narrow which rows the run has seen.
 DLQ_LISTING_FILTERS: Final[frozenset[str]] = frozenset({"remediation_hint", "job_type"})
+
+# Required reads that count only when made whole: a filtered listing does not pay ADR 0078's debt.
+_UNNARROWED_READS: Final[dict[str, frozenset[str]]] = {DLQ_LISTING_TOOL: DLQ_LISTING_FILTERS}
 
 
 # Every Tier-1 tool that replays or fences a dead-letter row, hand-listed rather than derived from
@@ -523,11 +536,13 @@ def make_llm_investigate(
     critic_llm_client: LLMClientProtocol | None = None,
     branch_prober: BranchProber | None = None,
     planner_log: PlannerLog | None = None,
+    required_before_verdict: Sequence[RequiredReading] = (),
 ) -> Callable[[RunState, datetime], RunState]:
     """Bind clients + model to the Phase 2 INVESTIGATING transition.
 
     Each iteration the LLM ranks hypotheses and either probes or stops. ``strategy`` makes the one
     planner call; every gate around it stays here — strategies propose, the loop decides (ADR 0036).
+    ``required_before_verdict`` is the alert's burden of proof, declared by its scenario (ADR 0078).
     """
     chosen: Final[InvestigationStrategy] = strategy if strategy is not None else _control_group()
     # Which role the console files this run's thinking rows under. The `reflection` arm hands back
@@ -548,15 +563,52 @@ def make_llm_investigate(
         # A consecutive streak, not a running total: a run whose ranking changed its mind has
         # earned another look at the world (ADR 0073's rule).
         settled_steps = 0
-        for iteration in range(max_iterations):
-            # 2. Escalate if a budget ran out before this iteration could start.
+        # The required reads a refused verdict still owes (ADR 0078), and the refusals spent.
+        owed: tuple[str, ...] = ()
+        verdict_refusals_spent = 0
+        limit_refused = False
+        free_steps = 0
+        iteration = -1
+        while True:
+            # 2. Count this step against max_iterations, unless it only pays a read that a refused
+            #    verdict owes (ADR 0078's rule); those steps are bounded by the owed list instead.
+            #    Running out of steps is an escalation too, so it owes the same reads, once.
+            owed = _still_owed(run_state, owed)
+            if not owed and free_steps >= max_iterations:
+                missing = (
+                    ()
+                    if limit_refused
+                    else _missing_required_reads(
+                        run_state, required_before_verdict, run_state.hypotheses, subject
+                    )
+                )
+                remaining = run_state.budget.max_tool_calls - run_state.budget.tool_calls_used
+                if not missing or remaining < len(missing):
+                    break
+                limit_refused = True
+                owed = missing
+                run_state = _record_verdict_refusal(
+                    run_state,
+                    at,
+                    planner_log,
+                    "escalation at the step limit",
+                    missing,
+                    verdict_refusals_spent,
+                )
+            if not owed:
+                free_steps += 1
+            iteration += 1
+            # Escalate if a budget ran out before this step could start.
             if run_state.budget.is_exhausted:
                 return _escalate_investigation(run_state, at, "budget exhausted mid-investigation")
 
             # 3. Decide whether another read of the alert's subject is still worth making. If it
-            #    is not, withdraw that option and say why BEFORE asking (ADR 0074's rule).
+            #    is not, withdraw that option and say why BEFORE asking (ADR 0074's rule). Never
+            #    while reads are owed: then the step offers exactly those reads and nothing else.
             withdrawn = (
-                _probe_withdrawn(run_state, subject, settled_steps) if subject is not None else None
+                _probe_withdrawn(run_state, subject, settled_steps)
+                if subject is not None and not owed
+                else None
             )
             if withdrawn is not None and subject is not None:
                 run_state = _refuse_confirming_read(
@@ -582,6 +634,8 @@ def make_llm_investigate(
                         # Every strategy is told about the withdrawal through the
                         # context; no strategy decides it for itself.
                         offer_probe=withdrawn is None,
+                        # After a refused verdict, only the reads it still owes (ADR 0078).
+                        required_probes=owed,
                     ),
                 )
             except (ValueError, ValidationError, LLMError) as err:
@@ -590,8 +644,21 @@ def make_llm_investigate(
                 run_state = run_state.model_copy(
                     update={"budget": accrue_llm_error(run_state.budget, err, model)}
                 )
-                # 6. If it asked for the read step 3 withdrew, spend one refusal and give it
-                #    another turn; once those refusals are gone, escalate with the reason.
+                # 6. If it asked for a move this step did not offer, spend one refusal and give it
+                #    another turn; once those refusals are gone, escalate with the reason. First
+                #    a verdict while reads are owed (ADR 0078), then the read step 3 withdrew.
+                if isinstance(err, OutputNotOffered) and owed:
+                    if verdict_refusals_spent >= _MAX_VERDICT_REFUSALS:
+                        return _finalize(
+                            run_state,
+                            at,
+                            _verdict_refusals_exhausted_reason(owed, verdict_refusals_spent),
+                        )
+                    verdict_refusals_spent += 1
+                    run_state = _record_verdict_refusal(
+                        run_state, at, planner_log, "a verdict", owed, verdict_refusals_spent
+                    )
+                    continue
                 if (
                     isinstance(err, OutputNotOffered)
                     and withdrawn is not None
@@ -650,13 +717,37 @@ def make_llm_investigate(
                 continue
 
             action = step.next_action
-            # 10. The planner chose to stop: end the run at ESCALATED, quoting its own reason.
+            # 10. The planner concluded, with `stop` or `remediate`. Refuse the verdict while a read
+            #     this alert requires before it is missing (ADR 0078's rule): the next steps offer
+            #     only those reads. Escalate instead when refusals or the tool budget run out.
+            if isinstance(action, (StopAction, RemediateAction)):
+                missing = _missing_required_reads(
+                    run_state, required_before_verdict, step.hypotheses, subject
+                )
+                if missing:
+                    if verdict_refusals_spent >= _MAX_VERDICT_REFUSALS:
+                        return _finalize(
+                            run_state,
+                            at,
+                            _verdict_refusals_exhausted_reason(missing, verdict_refusals_spent),
+                        )
+                    remaining = run_state.budget.max_tool_calls - run_state.budget.tool_calls_used
+                    if remaining < len(missing):
+                        reason = _reads_unaffordable_reason(action.kind, missing, remaining)
+                        return _finalize(run_state, at, reason)
+                    verdict_refusals_spent += 1
+                    owed = missing
+                    run_state = _record_verdict_refusal(
+                        run_state, at, planner_log, action.kind, missing, verdict_refusals_spent
+                    )
+                    continue
+            # 11. The planner chose to stop: end the run at ESCALATED, quoting its own reason.
             if isinstance(action, StopAction):
                 return _finalize(run_state, at, action.reason)
-            # 11. The planner chose to remediate. Four gates must pass, in this order, before
+            # 12. The planner chose to remediate. Four gates must pass, in this order, before
             #     the run is allowed into PLANNING.
             if isinstance(action, RemediateAction):
-                # 11a. Escalate unless the top diagnosis is a category FIX_MAP has a Tier-1 tool
+                # 12a. Escalate unless the top diagnosis is a category FIX_MAP has a Tier-1 tool
                 #      for, and is confident enough to act on. Asking again would not help.
                 top = step.hypotheses[0]
                 if top.category not in FIX_MAP:
@@ -679,7 +770,7 @@ def make_llm_investigate(
                             f"{REMEDIATE_CONFIDENCE_THRESHOLD}; escalating"
                         ),
                     )
-                # 11b. Nothing in this run has read the resource the alert is about (ADR 0032's
+                # 12b. Nothing in this run has read the resource the alert is about (ADR 0032's
                 #      rule). Refuse so the planner may try again; escalate when refusals run out.
                 if subject is not None and not _alert_subject_probed(run_state, subject):
                     if refusals_spent >= _MAX_SUBJECT_PROBE_REFUSALS:
@@ -697,7 +788,7 @@ def make_llm_investigate(
                     refusals_spent += 1
                     run_state = _refuse_handoff(run_state, at, subject)
                     continue
-                # 11c. The planner may not remediate until the whole dead-letter queue has been
+                # 12c. The planner may not remediate until the whole dead-letter queue has been
                 #      listed once (ADR 0041's rule); check it here, because PLANNING never probes.
                 if top.category in DLQ_ACTING_CATEGORIES and not _whole_queue_listed(run_state):
                     if whole_queue_refusals_spent >= _MAX_WHOLE_QUEUE_REFUSALS:
@@ -716,17 +807,37 @@ def make_llm_investigate(
                     whole_queue_refusals_spent += 1
                     run_state = _refuse_whole_queue_handoff(run_state, at, top.category)
                     continue
-                # 11d. All four gates passed: move the run to PLANNING with the planner's reason.
+                # 12d. All four gates passed: move the run to PLANNING with the planner's reason.
                 return _handoff_to_planning(run_state, at, action.reason)
 
-            # 12. The planner chose to probe. Its schema already limited the tool name, so an
+            # 13. The planner chose to probe. Its schema already limited the tool name, so an
             #     unknown one here means the registry changed after startup — escalate.
             if action.tool_name not in TOOL_REGISTRY:
                 return _escalate_investigation(
                     run_state, at, f"planner proposed unknown tool: {action.tool_name}"
                 )
 
-            # 13. Refuse this read if the subject has already been read as often as ADR 0073
+            # 14. While reads are owed, refuse any probe that does not pay one of them. The schema
+            #     already says so; this catches the arms that assemble their step in Python.
+            if owed and not _pays_an_owed_read(action, owed):
+                if verdict_refusals_spent >= _MAX_VERDICT_REFUSALS:
+                    return _finalize(
+                        run_state,
+                        at,
+                        _verdict_refusals_exhausted_reason(owed, verdict_refusals_spent),
+                    )
+                verdict_refusals_spent += 1
+                run_state = _record_verdict_refusal(
+                    run_state,
+                    at,
+                    planner_log,
+                    f"probe of {action.tool_name}",
+                    owed,
+                    verdict_refusals_spent,
+                )
+                continue
+
+            # 15. Refuse this read if the subject has already been read as often as ADR 0073
             #     allows. Counted here, in code, because a rule stated only in a prompt fails open.
             confirming = withdrawn or (
                 _confirming_read_exhausted(run_state, subject, action, settled_steps)
@@ -749,7 +860,7 @@ def make_llm_investigate(
                     )
                 continue
 
-            # 14. Escalate if the tool-call budget is spent; otherwise run the read. A failed call
+            # 16. Escalate if the tool-call budget is spent; otherwise run the read. A failed call
             #     already escalated, so return as-is, and remember this probe as the last one.
             if run_state.budget.is_exhausted:
                 return _escalate_investigation(run_state, at, "budget exhausted before probe")
@@ -759,7 +870,7 @@ def make_llm_investigate(
                 return run_state
             last_probe = action
 
-        # 15. Every iteration was used without stopping, remediating or escalating: escalate,
+        # 17. Every counted step was used without stopping, remediating or escalating: escalate,
         #     naming the ranking the run was holding when it ran out (ADR 0073's rule).
         return _escalate_investigation(
             run_state, at, _iterations_exhausted_reason(run_state, max_iterations)
@@ -1279,6 +1390,136 @@ def _whole_queue_listed(run_state: RunState) -> bool:
             continue
         return True
     return False
+
+
+def _condition_holds(
+    when: VerdictCondition, top: Hypothesis | None, subject: AlertSubject | None
+) -> bool:
+    """Whether one required read applies to the verdict this step carries (ADR 0078)."""
+    if when is VerdictCondition.ANY:
+        return True
+    if when is VerdictCondition.NO_FAULT:
+        return top is not None and top.category is HypothesisCategory.NO_FAULT
+    return subject is not None and subject.tool_name == _CHAIN_READ_TOOL
+
+
+def required_read_made(run_state: RunState, tool: str) -> bool:
+    """Whether this run's evidence holds a read of ``tool`` that counts as a required read.
+
+    A listing in ``_UNNARROWED_READS`` counts only unfiltered, as in ADR 0041; paging is fine.
+    """
+    filters = _UNNARROWED_READS.get(tool, frozenset())
+    return any(
+        entry.tool_name == tool
+        and not any(_narrowed_on(entry.arguments, field) for field in filters)
+        for entry in run_state.evidence
+    )
+
+
+def _missing_required_reads(
+    run_state: RunState,
+    requirements: Sequence[RequiredReading],
+    hypotheses: Sequence[Hypothesis],
+    subject: AlertSubject | None,
+) -> tuple[str, ...]:
+    """The required reads this verdict applies to and this run has not made, in declared order."""
+    top = hypotheses[0] if hypotheses else None
+    missing: list[str] = []
+    for requirement in requirements:
+        tool = str(requirement.tool)
+        if tool in missing or not _condition_holds(requirement.when, top, subject):
+            continue
+        if not required_read_made(run_state, tool):
+            missing.append(tool)
+    return tuple(missing)
+
+
+def _still_owed(run_state: RunState, owed: tuple[str, ...]) -> tuple[str, ...]:
+    """The owed reads this run has still not made."""
+    return tuple(tool for tool in owed if not required_read_made(run_state, tool))
+
+
+def _pays_an_owed_read(action: ProbeAction, owed: tuple[str, ...]) -> bool:
+    """Whether this probe, as it would go on the wire, makes one of the owed reads."""
+    if action.tool_name not in owed:
+        return False
+    spec = TOOL_REGISTRY.get(action.tool_name)
+    if spec is None:
+        return False
+    try:
+        arguments = wire_arguments(spec, action.arguments)
+    except ValidationError:
+        return False
+    filters = _UNNARROWED_READS.get(action.tool_name, frozenset())
+    return not any(_narrowed_on(arguments, field) for field in filters)
+
+
+def _listed(tools: Sequence[str]) -> str:
+    return ", ".join(tools)
+
+
+def _record_verdict_refusal(
+    run_state: RunState,
+    at: datetime,
+    planner_log: PlannerLog | None,
+    refused: str,
+    missing: tuple[str, ...],
+    refusals_spent: int,
+) -> RunState:
+    """Refuse a move made before the required reads, as a ledger row and a console row.
+
+    NOT terminal: the state stays INVESTIGATING and the next steps offer only ``missing``. The text
+    names each read, and what makes a listing count, because "read more" alone steers nowhere.
+    """
+    whole = [
+        f"{tool} counts only with no {' and no '.join(sorted(_UNNARROWED_READS[tool]))} filter "
+        f"(paging with limit/offset is fine)"
+        for tool in missing
+        if tool in _UNNARROWED_READS
+    ]
+    reason = (
+        f"{refused} refused: this incident's alert requires these reads before that verdict, "
+        f"and this run has not made them: {_listed(missing)}. A conclusion about this alert has "
+        f"to rest on every place its problem could come from, not on the first reading that "
+        f"agreed with you. {' '.join(whole) + ' ' if whole else ''}Your next steps offer only "
+        f"a probe of those reads; once all of them are in your evidence, `remediate` and `stop` "
+        f"are offered again and you conclude on everything you have read."
+    )
+    entry = EvidenceEntry(
+        tool_name=VERDICT_REFUSED_MARKER,
+        arguments={
+            "refused": refused,
+            "missing_reads": list(missing),
+            "offered": ["probe"],
+            "refusals_spent": refusals_spent,
+        },
+        result_summary=reason,
+        timestamp=at,
+    )
+    if planner_log is not None:
+        planner_log.refusal(
+            hypotheses=run_state.hypotheses, refused=refused, missing=missing, reason=reason
+        )
+    return run_state.model_copy(update={"evidence": (*run_state.evidence, entry), "updated_at": at})
+
+
+def _verdict_refusals_exhausted_reason(missing: tuple[str, ...], refusals_spent: int) -> str:
+    """Why a run that kept concluding without the required reads is handed off instead."""
+    return (
+        f"planner concluded or probed elsewhere {refusals_spent + 1} times without making the "
+        f"reads this alert requires before a verdict (still unread: {_listed(missing)}); a "
+        f"verdict without them is not proven, so the run escalates with the readings it has"
+    )
+
+
+def _reads_unaffordable_reason(refused: str, missing: tuple[str, ...], remaining: int) -> str:
+    """Why a refused verdict escalates at once: the budget cannot pay for the reads it owes."""
+    return (
+        f"{refused} refused and not recoverable: this alert requires {_listed(missing)} before "
+        f"a verdict, which is {len(missing)} more tool call(s), and the tool budget has "
+        f"{max(remaining, 0)} left; escalating with the readings it has rather than a verdict "
+        f"it cannot prove"
+    )
 
 
 def _narrowed_on(arguments: Mapping[str, Any], field: str) -> bool:

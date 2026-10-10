@@ -22,11 +22,13 @@ _LOG: Final = logging.getLogger(__name__)
 PLANNER_TOOL: Final = "investigation_planner"
 REFLECTION_TOOL: Final = "reflection"
 VERIFY_JUDGE_TOOL: Final = "verify_judge"
+#: Not a model role: the loop itself refusing a verdict that lacks a required read (ADR 0078).
+VERDICT_GATE_TOOL: Final = "verdict_gate"
 
-#: All three names together, for anything that has to recognise a thinking row without
+#: All four names together, for anything that has to recognise a thinking row without
 #: listing them again.
 THINKING_TOOLS: Final[frozenset[str]] = frozenset(
-    {PLANNER_TOOL, REFLECTION_TOOL, VERIFY_JUDGE_TOOL}
+    {PLANNER_TOOL, REFLECTION_TOOL, VERIFY_JUDGE_TOOL, VERDICT_GATE_TOOL}
 )
 
 #: How many ranked diagnoses one thinking row shows, which is what a person can read at a
@@ -73,7 +75,7 @@ class ObservedThinking:
     run state — a mid-transition report would otherwise carry the last transition's ranking.
     """
 
-    #: Which kind of thinking this was: one of the three names above.
+    #: Which kind of thinking this was: one of the four names above.
     tool: str
     #: The ranking this call produced, most likely first; the step schema sorted it.
     hypotheses: tuple[Hypothesis, ...]
@@ -205,6 +207,27 @@ class PlannerLog:
                 verification=ObservedVerdict(
                     verdict=verdict, reasoning=trimmed, attempt=attempt, of=of
                 ),
+            )
+        )
+
+    def refusal(
+        self,
+        *,
+        hypotheses: tuple[Hypothesis, ...],
+        refused: str,
+        missing: tuple[str, ...],
+        reason: str,
+    ) -> None:
+        """Record the loop refusing a ``refused`` verdict until ``missing`` are read (ADR 0078),
+        so the page shows why the run kept reading after the planner concluded."""
+        self.observe(
+            ObservedThinking(
+                tool=VERDICT_GATE_TOOL,
+                hypotheses=tuple(hypotheses),
+                next_action=ThinkingAction(kind=refused),
+                reason=_reason(reason),
+                at=self.clock(),
+                headline=f"{refused} refused, read first: {', '.join(missing)}",
             )
         )
 

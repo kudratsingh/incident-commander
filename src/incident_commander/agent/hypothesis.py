@@ -7,6 +7,7 @@ be invented (ADR-0005). ``StructuredOutput`` decodes a stringified nested object
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from enum import StrEnum
 from typing import Annotated, Any, Final, Literal, cast
 
@@ -325,5 +326,89 @@ def asked_for_a_probe(error: Exception) -> bool:
                 continue
             context = detail.get("ctx") or {}
             if str(context.get("tag", "")) == ProbeAction.model_fields["kind"].default:
+                return True
+    return False
+
+
+# The opposite narrowing (ADR 0078): a verdict refused because a read the alert requires is
+# missing. The next step offers only a probe, and only of the reads still owed.
+
+
+#: What the planner is told, on the field, when only the owed reads are on offer.
+REQUIRED_READS_DESCRIPTION: Final[str] = (
+    "This step offers one move: a probe of one of the reads listed in `tool_name`. You emitted "
+    "a verdict before making a read this incident requires before any verdict, so the state "
+    "machine refused it and named the missing reads on the evidence trail. Make one of them "
+    "now. Once every one is in your evidence, `remediate` and `stop` are offered again."
+)
+
+
+class VerdictWithdrawn(StructuredOutput):
+    # Deliberately no class docstring: Pydantic would copy it into the JSON schema the planner
+    # reads. The explanation is on the `next_action` field instead.
+    model_config = ConfigDict(extra="forbid")
+
+    @classmethod
+    def output_refused(cls, error: Exception) -> bool:
+        """A ``stop``/``remediate`` payload here is a refused move, not unreadable output, so it
+        raises ``OutputNotOffered`` rather than being re-asked (ADR 0074, ADR 0078)."""
+        return asked_for_a_verdict(error)
+
+
+#: Narrowed models built so far, keyed by the model narrowed and the reads offered. Cached for
+#: the same reason as ``_WITHOUT_PROBE``: a fresh class per step would lose the prompt cache.
+_ONLY_PROBES: Final[dict[tuple[type[BaseModel], tuple[str, ...]], type[BaseModel]]] = {}
+
+
+def only_probes[T: BaseModel](model: type[T], tools: Iterable[str]) -> type[T]:
+    """``model`` whose ``next_action`` can only be a probe of one of ``tools`` (ADR 0078).
+
+    Derived from the model handed in, like ``without_probe``, so every strategy's own step model
+    is narrowed. ``tools`` must be read tools; the ``Literal`` refuses anything else.
+    """
+    names = tuple(sorted(set(tools)))
+    if not names:
+        raise ValueError("only_probes needs at least one tool to offer")
+    cached = _ONLY_PROBES.get((model, names))
+    if cached is None:
+        probe = create_model(
+            "RequiredProbe",
+            __base__=ProbeAction,
+            __module__=__name__,
+            tool_name=(cast(Any, Literal)[names], ...),
+        )
+        cached = create_model(
+            f"ReadsRequired{model.__name__}",
+            __base__=(VerdictWithdrawn, model),
+            __module__=__name__,
+            next_action=(probe, Field(description=REQUIRED_READS_DESCRIPTION)),
+        )
+        _ONLY_PROBES[(model, names)] = cached
+    return cast(type[T], cached)
+
+
+#: The two verdict moves, by the discriminator value each one carries.
+_VERDICT_KINDS: Final[frozenset[str]] = frozenset(
+    {StopAction.model_fields["kind"].default, RemediateAction.model_fields["kind"].default}
+)
+
+
+def asked_for_a_verdict(error: Exception) -> bool:
+    """Whether a validation failure is a planner emitting a verdict the schema withdrew.
+
+    The narrowed ``next_action`` is a single model, so a verdict fails as a ``literal_error`` on
+    its ``kind``. Reads the ``__cause__`` too, as ``asked_for_a_probe`` does (ADR 0007).
+    """
+    for candidate in (error, error.__cause__):
+        if not isinstance(candidate, ValidationError):
+            continue
+        for detail in candidate.errors():
+            location = detail.get("loc") or ()
+            if (
+                detail.get("type") == "literal_error"
+                and location
+                and location[-1] == "kind"
+                and detail.get("input") in _VERDICT_KINDS
+            ):
                 return True
     return False

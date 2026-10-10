@@ -2023,6 +2023,8 @@ def run_scenario(
         ),
         # Where the loop writes each ranking it accepts (ADR 0075); ``None`` unless reporting is on.
         planner_log=planner_log,
+        # The reads this alert's verdict owes, from the agent-visible projection (ADR 0078).
+        required_before_verdict=agent_visible.required_before_verdict,
     )
     # Phase 6 remediation loop: PLANNING → REMEDIATING → VERIFYING, a client per role.
     transitions[IncidentState.PLANNING] = make_llm_plan(

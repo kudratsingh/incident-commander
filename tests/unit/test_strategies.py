@@ -719,6 +719,9 @@ class TestStrategiesHoldNoExecutionPolicy:
             # (`ctx.step_model`). Nothing here lets a strategy decide it — the conditions are
             # the remediate gate's own inputs and stay in `investigation.py` (ADR 0036).
             "offer_probe",
+            # ADR 0078: tool NAMES, set by the loop after it refused a verdict. A strategy renders
+            # them into its schema; it cannot call them, and nothing here lets it choose them.
+            "required_probes",
         }
         assert all("client" not in name or name.endswith("llm_client") for name in fields), (
             f"a non-LLM client reached StrategyContext: {sorted(fields)}. A "

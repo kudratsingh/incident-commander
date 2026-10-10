@@ -1361,7 +1361,7 @@ first pin where the new setting changes how fast the DEMO can build its fault;
 v0.6.21, the second console-only release, and v0.6.22, a backend fix with no contract
 change, needed no new step — item 12 covers both; v0.6.24, one new read tool and two new
 output fields on a tool the canned fixtures already hold, needed none either — items 3, 4
-and 5 cover it, and item 4 says what it left open):
+and 5 cover it, and item 4 says how its fixtures were brought up to date):
 
 1. Update `demo/compose.yml` — **all THREE platform-code services**
    (`migrate`, `platform`, `api`) and the prose that names the version:
@@ -1600,25 +1600,41 @@ and 5 cover it, and item 4 says what it left open):
    `warm`. Neither tool is wrong. Read the CONTEXT of every row in the stale
    list before believing any of it.
 
-   **v0.6.24 (WO-R3-371, platform ADR 0041) is the v0.6.7 case again, and the re-pin
-   left it open on purpose.** `get_consumer_lag` gained two optional output fields,
-   `last_poll_at` and `last_poll_age_seconds` (when the group's consumer last asked
-   Kafka for work, and how long ago). Every canned `get_consumer_lag` response predates
-   them, so the key-set diff reports both as `live_only_field` on all 40 canned readings
-   in 26 scenarios: **80 new rows**, nothing else, and `make test-drift` is red on them.
-   The re-pin did not bless them and did not write the fields into the fixtures, because
-   the honest value is a world decision: the 16 readings of a recorded-constant or
-   unknown group would take `null` (what the platform answers), but the 24
-   `worker-dispatcher` readings need a poll time that fits their world — frozen at the
-   kill in a stalled world, about as fresh as `measured_at` in a healthy one — and that
-   is new evidence in a canned world, the v0.6.14 reason. The two ways out: write both
-   fields into the fixtures and add them to `_VOLATILE["get_consumer_lag"]` (they are a
-   clock and an age, like `measured_at` and `age_seconds`), or ledger the 52 generic rows
-   as `fixture-defect` and pin the burn-down list by name, as v0.6.14 did. Either way
-   `lag` stays guarded. The same run also listed one STALE row, `api_latency_downstream`
-   `get_slo_status` `objectives[].failed[]`, and it is the local volume: the fixture's
-   `failed: 28` happens to equal the 28 late dispatches INC-007 left in this stack's
-   24-hour window, while CI's empty window reads 0 and still drifts. Leave it alone.
+   **v0.6.24 (WO-R3-371, platform ADR 0041) is the v0.6.7 case again, and it was closed
+   the v0.6.7 way: the fields went into the fixtures, not into the ledger.**
+   `get_consumer_lag` gained two optional output fields, `last_poll_at` and
+   `last_poll_age_seconds` (when the group's consumer last asked Kafka for work, and how
+   long ago). Every canned `get_consumer_lag` response predated them, so the key-set diff
+   reported both as `live_only_field` on all 40 canned readings in 26 scenarios: **80 new
+   rows**, nothing else. The coordinator chose to write the fields in (one dedicated
+   commit), by one rule per reading:
+   - **null** on the 17 readings of a recorded-constant or unknown group, including the
+     six `retry_*` readings (they can `billing-consumer` as `source: live`, but the
+     platform answers that group as static, so it never has a poll time) and the
+     deliberately malformed `tool_output_schema_mismatch` reading, whose six ledgered
+     omissions stay;
+   - **null** on `cascading_redis_starves_backpressure`'s `worker-dispatcher` reading too:
+     its lag is unknown because the pass's writes to Redis go quiet, and the poll time is
+     written to the same Redis under the same TTL;
+   - **a few seconds old** on the 8 readings of a running dispatcher (healthy worlds, and
+     every read taken after the restart): one second before `measured_at`, age
+     `age_seconds + 1`;
+   - **frozen at the kill** on the 14 readings of a stopped dispatcher: the poll time is
+     set just before the first sample that shows the backlog building, and its age is
+     counted from the reading's own `measured_at + age_seconds`, so it is large (27 to
+     328 s) where `age_seconds` is small — what the platform now shows for a stopped
+     consumer.
+
+   Both fields joined `_VOLATILE["get_consumer_lag"]` (a clock and an age, like
+   `measured_at` and `age_seconds`), so an honest re-reading never reads as drift; `lag`
+   stays guarded and no ledger row was added. Result: `make fixture-drift` reads `new: 0`
+   and the canned eval grades did not move. Note for anyone who checks a recording with
+   `make world-drift`: the same `_VOLATILE` applies there, so a recording's poll age is
+   checked for presence and type only — a scenario that needs it must claim it. The same
+   run lists one STALE row, `api_latency_downstream` `get_slo_status`
+   `objectives[].failed[]`, and it is the local volume: the fixture's `failed: 28` happens
+   to equal the 28 late dispatches INC-007 left in this stack's 24-hour window, while CI's
+   empty window reads 0 and still drifts. Leave it alone.
    `get_control_loops` has no canned fixture, so it adds nothing here; whoever writes
    the first one should treat `measured_at`, `loops[].last_run_at`,
    `loops[].last_run_age_seconds` and `loops[].paused_expires_in_seconds` as volatile

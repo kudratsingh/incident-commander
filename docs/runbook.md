@@ -1136,6 +1136,12 @@ It is not free of consequence: when the recording is of a **seeded** world it fi
 
 Exit codes: `0` no drift, `1` drift, `2` selection refusal, `3` preflight, `4` post-reset baseline dirty, `5` a chaos hook was refused, `6` the reset failed, `7` a precondition was not met.
 
+**Every recording at once: `make world-drift-all`** (WO-R3-362). The same check on each scenario's newest recording, with `make eval-reset PURGE_IDEMPOTENCY=1` and the baseline re-audit **before** each one — a hand loop without them refused 4 of 17 recordings for a world the previous check had left dirty (2026-10-08). A reset that fails stops the loop; the rest are marked NOT RUN. It prints one table (CLEAN, DRIFT, REFUSED per recording). `WRITE=1` keeps it under `evals/reports/world-drift/`, which is what a phase close reads for "drift check green" (`make phase-close-report PHASE=3`). `FROM_LOGS=<dir>` builds the same table from saved `make world-drift` output instead of touching the stack. Same go as a single check.
+
+```bash
+make world-drift-all WRITE=1
+```
+
 **Exit 1 means the world moved, not that the check failed.** Three readings, and the check deliberately does not choose between them:
 
 1. the platform was released — re-record (`make world-record ONLY=<scenario>`) and re-pin whatever rested on the old recording;

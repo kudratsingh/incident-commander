@@ -112,6 +112,14 @@ KINDS: Final[dict[str, ArtifactKind]] = {
     "regrade_report_md": ArtifactKind(
         ("evals", "reports"), ".md", fixed_stem="regrade_report", folder="regrades"
     ),
+    # `make world-drift-all WRITE=1` (evals/world_drift_table.py, WO-R3-362) — every recording's
+    # drift verdict in one table, the evidence a phase close reads for "drift check green".
+    "world_drift_table": ArtifactKind(
+        ("evals", "reports"), ".json", fixed_stem="world_drift_table", folder="world-drift"
+    ),
+    "world_drift_table_md": ArtifactKind(
+        ("evals", "reports"), ".md", fixed_stem="world_drift_table", folder="world-drift"
+    ),
     # `make judge-calibration` (evals/judge_calibration/, WP-6.3) — one judge's trap agreement,
     # stability and track record. Grouped per JUDGE through the per-scenario mechanism, because
     # plan 03 § 112's flat fixed stem cannot carry "one per judge" (a reported divergence).

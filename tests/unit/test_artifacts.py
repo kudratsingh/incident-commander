@@ -322,6 +322,8 @@ class TestTheLayoutIsOneFamilyPerFolder:
         "research_report_md": ("evals", "reports", "research"),
         "regrade_report": ("evals", "reports", "regrades"),
         "regrade_report_md": ("evals", "reports", "regrades"),
+        "world_drift_table": ("evals", "reports", "world-drift"),
+        "world_drift_table_md": ("evals", "reports", "world-drift"),
         "human": ("evals", "reports", "human", "consumer_lag_pass"),
         "dossier": ("evals", "reports", "dossiers", "consumer_lag_pass"),
         # WP-6.3. Per-JUDGE, not per-scenario: it rides the per-scenario mechanism because

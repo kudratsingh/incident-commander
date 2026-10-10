@@ -1,0 +1,214 @@
+{
+  "scenario": "workflow_stuck_resolver_stall",
+  "incident_id": "2e6ab3e2-9236-43c0-8b6d-7952626ab216",
+  "checkpoints": [
+    {
+      "schema_version": 3,
+      "incident_id": "2e6ab3e2-9236-43c0-8b6d-7952626ab216",
+      "state": "triage",
+      "alert": {
+        "source": "platform.dag",
+        "severity": "critical",
+        "fingerprint": "workflow_not_advancing",
+        "group": null,
+        "remediation_hint": null,
+        "dlq_scope": null,
+        "job_id": "4a30546f-d3c5-549f-a772-633c0b26219d",
+        "summary": "a workflow is not advancing; the dependency chain rooted at this job has a descendant that has not run"
+      },
+      "budget": {
+        "max_tool_calls": 17,
+        "tool_calls_used": 0,
+        "max_tokens": 200000,
+        "tokens_used": 0,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.0,
+        "max_usd": "1.00",
+        "usd_used": "0"
+      },
+      "evidence": [],
+      "hypotheses": [],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-10-10T17:02:02.280620Z",
+      "updated_at": "2026-10-10T17:02:02.280620Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "2e6ab3e2-9236-43c0-8b6d-7952626ab216",
+      "state": "investigating",
+      "alert": {
+        "source": "platform.dag",
+        "severity": "critical",
+        "fingerprint": "workflow_not_advancing",
+        "group": null,
+        "remediation_hint": null,
+        "dlq_scope": null,
+        "job_id": "4a30546f-d3c5-549f-a772-633c0b26219d",
+        "summary": "a workflow is not advancing; the dependency chain rooted at this job has a descendant that has not run"
+      },
+      "budget": {
+        "max_tool_calls": 17,
+        "tool_calls_used": 0,
+        "max_tokens": 200000,
+        "tokens_used": 0,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 20.338917,
+        "max_usd": "1.00",
+        "usd_used": "0"
+      },
+      "evidence": [
+        {
+          "evidence_id": "7c4c0629-6a64-4aff-a412-b1e9667e3e0e",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "critical",
+            "dedup_key": "9c341d086ad7a8025a768d1dec53676b"
+          },
+          "result_summary": "severity=critical classified as investigating",
+          "timestamp": "2026-10-10T17:02:22.619537Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-10-10T17:02:02.280620Z",
+      "updated_at": "2026-10-10T17:02:22.619537Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "2e6ab3e2-9236-43c0-8b6d-7952626ab216",
+      "state": "escalated",
+      "alert": {
+        "source": "platform.dag",
+        "severity": "critical",
+        "fingerprint": "workflow_not_advancing",
+        "group": null,
+        "remediation_hint": null,
+        "dlq_scope": null,
+        "job_id": "4a30546f-d3c5-549f-a772-633c0b26219d",
+        "summary": "a workflow is not advancing; the dependency chain rooted at this job has a descendant that has not run"
+      },
+      "budget": {
+        "max_tool_calls": 17,
+        "tool_calls_used": 4,
+        "max_tokens": 200000,
+        "tokens_used": 110667,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 91.004498,
+        "max_usd": "1.00",
+        "usd_used": "0.301345"
+      },
+      "evidence": [
+        {
+          "evidence_id": "7c4c0629-6a64-4aff-a412-b1e9667e3e0e",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "critical",
+            "dedup_key": "9c341d086ad7a8025a768d1dec53676b"
+          },
+          "result_summary": "severity=critical classified as investigating",
+          "timestamp": "2026-10-10T17:02:22.619537Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "7b9e183a-fe94-4fca-bd72-5b99147317c5",
+          "tool_name": "get_dag_state",
+          "arguments": {
+            "job_id": "4a30546f-d3c5-549f-a772-633c0b26219d"
+          },
+          "result_summary": "{\"seed_id\":\"4a30546f-d3c5-549f-a772-633c0b26219d\",\"nodes\":[{\"id\":\"4a30546f-d3c5-549f-a772-633c0b26219d\",\"type\":\"bulk_api_sync\",\"status\":\"completed\",\"retry_count\":0,\"created_at\":\"2026-10-10T16:15:02.324786Z\"},{\"id\":\"404c3151-cdc6-511e-8532-471693d5cfe1\",\"type\":\"bulk_api_sync\",\"status\":\"completed\",\"retry_count\":0,\"created_at\":\"2026-10-10T16:15:02.324786Z\"},{\"id\":\"7fb11dea-d182-5033-a4d0-2d2a645eb1df\",\"type\":\"bulk_api_sync\",\"status\":\"waiting\",\"retry_count\":0,\"created_at\":\"2026-10-10T16:15:02.324786Z\"}],\"edges\":[{\"from_id\":\"4a30546f-d3c5-549f-a772-633c0b26219d\",\"to_id\":\"404c3151-cdc6-511e-8532-471693d5cfe1\"},{\"from_id\":\"7fb11dea-d182-5033-a4d0-2d2a645eb1df\",\"to_id\":\"4a30546f-d3c5-549f-a772-633c0b26219d\"}],\"paused\":false,\"paused_expires_in_seconds\":null,\"paused_by\":null}",
+          "timestamp": "2026-10-10T17:02:22.619557Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "128fe78e-29b6-4717-8de8-df47385ea7d3",
+          "tool_name": "get_consumer_lag",
+          "arguments": {
+            "consumer_group": "dependency-resolver"
+          },
+          "result_summary": "{\"consumer_group\":\"dependency-resolver\",\"lag\":0,\"lag_known\":true,\"source\":\"live\",\"cache_key\":\"kafka:consumer_lag:dependency-resolver\",\"measured_at\":\"2026-10-10T17:02:37.789033Z\",\"age_seconds\":3,\"recent_samples\":[{\"lag\":0,\"measured_at\":\"2026-10-10T17:02:37.789033Z\"},{\"lag\":0,\"measured_at\":\"2026-10-10T17:02:32.591616Z\"},{\"lag\":0,\"measured_at\":\"2026-10-10T17:02:27.380957Z\"},{\"lag\":0,\"measured_at\":\"2026-10-10T17:02:22.157761Z\"},{\"lag\":0,\"measured_at\":\"2026-10-10T17:02:16.983112Z\"},{\"lag\":0,\"measured_at\":\"2026-10-10T17:02:11.840221Z\"},{\"lag\":0,\"measured_at\":\"2026-10-10T17:02:06.670822Z\"},{\"lag\":0,\"measured_at\":\"2026-10-10T17:02:01.503192Z\"},{\"lag\":0,\"measured_at\":\"2026-10-10T17:01:56.320903Z\"},{\"lag\":0,\"measured_at\":\"2026-10-10T17:01:51.128451Z\"},{\"lag\":0,\"measured_at\":\"2026-10-10T17:01:45.965981Z\"},{\"lag\":0,\"measured_at\":\"2026-10-10T17:01:40.760819Z\"},{\"lag\":0,\"measured_at\":\"2026-10-10T17:01:35.501097Z\"},{\"lag\":0,\"measured_at\":\"2026-10-10T17:01:30.133933Z\"},{\"lag\":0,\"measured_at\":\"2026-10-10T17:01:24.685150Z\"}],\"last_poll_at\":\"2026-10-10T17:02:02.012374Z\",\"last_poll_age_seconds\":39}",
+          "timestamp": "2026-10-10T17:02:22.619557Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "b3694f01-6b88-484c-a88b-cf123ee3a72a",
+          "tool_name": "get_control_loops",
+          "arguments": {},
+          "result_summary": "{\"measured_at\":\"2026-10-10T17:02:51.361465Z\",\"loops\":[{\"name\":\"outbox_relay\",\"paused\":false,\"paused_expires_in_seconds\":null,\"tick_interval_seconds\":1.0,\"last_run_at\":\"2026-10-10T17:02:51.240314Z\",\"last_run_age_seconds\":0.1},{\"name\":\"delayed_retry_promote\",\"paused\":false,\"paused_expires_in_seconds\":null,\"tick_interval_seconds\":0.5,\"last_run_at\":\"2026-10-10T17:02:51.227710Z\",\"last_run_age_seconds\":0.1},{\"name\":\"dlq_replay_promote\",\"paused\":false,\"paused_expires_in_seconds\":null,\"tick_interval_seconds\":0.5,\"last_run_at\":\"2026-10-10T17:02:51.227064Z\",\"last_run_age_seconds\":0.1},{\"name\":\"resume_unblocked_waiting\",\"paused\":true,\"paused_expires_in_seconds\":851,\"tick_interval_seconds\":10.0,\"last_run_at\":\"2026-10-10T17:02:00.877640Z\",\"last_run_age_seconds\":50.5},{\"name\":\"stale_pending_backstop\",\"paused\":false,\"paused_expires_in_seconds\":null,\"tick_interval_seconds\":60.0,\"last_run_at\":\"2026-10-10T17:01:56.384486Z\",\"last_run_age_seconds\":55.0},{\"name\":\"stale_running_sweep\",\"paused\":false,\"paused_expires_in_seconds\":null,\"tick_interval_seconds\":60.0,\"last_run_at\":\"2026-10-10T17:01:56.383979Z\",\"last_run_age_seconds\":55.0},{\"name\":\"lease_renewal\",\"paused\":false,\"paused_expires_in_seconds\":null,\"tick_interval_seconds\":20.0,\"last_run_at\":\"2026-10-10T17:02:36.695000Z\",\"last_run_age_seconds\":14.7},{\"name\":\"slo_evaluation\",\"paused\":false,\"paused_expires_in_seconds\":null,\"tick_interval_seconds\":300.0,\"last_run_at\":\"2026-10-10T17:00:53.967866Z\",\"last_run_age_seconds\":117.4},{\"name\":\"metrics\",\"paused\":false,\"paused_expires_in_seconds\":null,\"tick_interval_seconds\":5.0,\"last_run_at\":\"2026-10-10T17:02:48.198378Z\",\"last_run_age_seconds\":3.2},{\"name\":\"digest\",\"paused\":false,\"paused_expires_in_seconds\":null,\"tick_interval_seconds\":86400.0,\"last_run_at\":null,\"last_run_age_seconds\":null},{\"name\":\"idempotency_reaper\",\"paused\":false,\"paused_expires_in_seconds\":null,\"tick_interval_seconds\":3600.0,\"last_run_at\":\"2026-10-10T16:40:53.199795Z\",\"last_run_age_seconds\":1318.2}],\"total\":11,\"unknown_reason\":null}",
+          "timestamp": "2026-10-10T17:02:22.619557Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "4caa0740-e238-4f95-8da9-e87aee5909c9",
+          "tool_name": "_verdict_refused_missing_reads",
+          "arguments": {
+            "refused": "stop",
+            "missing_reads": [
+              "list_dlq_messages"
+            ],
+            "offered": [
+              "probe"
+            ],
+            "refusals_spent": 1
+          },
+          "result_summary": "stop refused: this incident's alert requires these reads before that verdict, and this run has not made them: list_dlq_messages. A conclusion about this alert has to rest on every place its problem could come from, not on the first reading that agreed with you. list_dlq_messages counts only with no job_type and no remediation_hint filter (paging with limit/offset is fine) Your next steps offer only a probe of those reads; once all of them are in your evidence, `remediate` and `stop` are offered again and you conclude on everything you have read.",
+          "timestamp": "2026-10-10T17:02:22.619557Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "2d8429d5-b906-4eb6-bf78-18eed8535275",
+          "tool_name": "list_dlq_messages",
+          "arguments": {
+            "job_type": null,
+            "remediation_hint": null,
+            "limit": 50,
+            "offset": 0
+          },
+          "result_summary": "{\"total\":4,\"items\":[{\"id\":\"fc8d2a03-23b3-5371-9acb-46443c73baa5\",\"type\":\"bulk_api_sync\",\"error_message\":\"UpstreamTimeout: bulk_api_sync POST https://partner-api.internal/v2/sync timed out after 30s on attempt 3/3 — the request was never acknowledged, so no downstream write was recorded\",\"retry_count\":3,\"created_at\":\"2026-10-10T16:53:28.539717Z\",\"updated_at\":\"2026-10-10T16:53:34.539717Z\",\"trace_id\":\"c5ca46c1-f4dd-5021-8be4-130143553096\",\"triage\":{\"root_cause_category\":\"upstream_timeout\",\"summary\":\"partner-api.internal did not answer inside the 30s deadline on any of the three attempts. The payload was accepted by validation and nothing was committed downstream.\",\"suggested_fix\":\"Re-run the job as it stands: the call is idempotent, no partial write survived the timeout, and a fresh attempt is the entire remedy. Neither the payload nor the producer needs changing.\",\"is_retryable\":true,\"confidence\":0.88},\"remediation_hint\":\"replay_safe\",\"dead_lettered_at\":\"2026-10-10T16:53:34.539717Z\",\"fenced_at\":null,\"fenced_by\":null,\"extra\":null},{\"id\":\"f030f975-974e-5ce3-aa6b-444136507d86\",\"type\":\"csv_upload\",\"error_message\":\"ValueError: invalid literal for int() with base 10: 'not-a-number' at row 15,382\",\"retry_count\":3,\"created_at\":\"2026-10-10T16:49:28.539717Z\",\"updated_at\":\"2026-10-10T16:49:50.539717Z\",\"trace_id\":\"89609789-fdcb-5a5a-b826-d7d5d5f9cf37\",\"triage\":{\"root_cause_category\":\"bad_input\",\"summary\":\"Non-numeric value in a supposedly-integer CSV column.\",\"suggested_fix\":\"Not retryable — data quality issue. Notify the uploader; add a validation step in the CSV importer that fails the whole upload with a clear error rather than half-processing.\",\"is_retryable\":false,\"confidence\":0.94},\"remediation_hint\":\"human_required\",\"dead_lettered_at\":\"2026-10-10T16:49:50.539717Z\",\"fenced_at\":null,\"fenced_by\":null,\"extra\":null},{\"id\":\"af67d1b1-13f8-5a2c-8c44-66ec5564597d\",\"type\":\"bulk_api_sync\",\"error_message\":\"RateLimited: partner-api.internal answered 429 Too Many Requests on attempt 3/3 (retry-after: 120s); the per-tenant quota window has not rolled over yet\",\"retry_count\":3,\"created_at\":\"2026-10-10T16:36:28.539717Z\",\"updated_at\":\"2026-10-10T16:37:02.539717Z\",\"trace_id\":\"6f76e48d-72c4-5e5a-a5cf-bc29758167cb\",\"triage\":{\"root_cause_category\":\"rate_limited\",\"summary\":\"All three attempts landed inside one quota window. The partner is shedding load, not rejecting the payload.\",\"suggested_fix\":\"Let the 120s retry-after window pass before the next attempt. An immediate re-run spends another attempt against the same closed window and comes back 429.\",\"is_retryable\":true,\"confidence\":0.86},\"remediation_hint\":\"wait_and_replay\",\"dead_lettered_at\":\"2026-10-10T16:37:02.539717Z\",\"fenced_at\":null,\"fenced_by\":null,\"extra\":null},{\"id\":\"97d91272-9774-5b8e-980b-f0d2fa6ed619\",\"type\":\"bulk_api_sync\",\"error_message\":\"send_email downstream call failed: ConnectionRefusedError('smtp.mailer.internal:587')\",\"retry_count\":3,\"created_at\":\"2026-10-10T16:21:28.539717Z\",\"updated_at\":\"2026-10-10T16:21:44.539717Z\",\"trace_id\":\"1bfc7482-c957-5217-beae-e8cba48a152d\",\"triage\":{\"root_cause_category\":\"downstream_unavailable\",\"summary\":\"SMTP relay unreachable — connection refused at TCP layer.\",\"suggested_fix\":\"Check smtp.mailer.internal ECS task health; recent billing hotfix (v0.4.2) may have changed VPC egress rules — cross-reference `get_deploy_history`. Re-run once the dependency answers.\",\"is_retryable\":true,\"confidence\":0.82},\"remediation_hint\":\"wait_and_replay\",\"dead_lettered_at\":\"2026-10-10T16:21:44.539717Z\",\"fenced_at\":null,\"fenced_by\":null,\"extra\":null}]}",
+          "timestamp": "2026-10-10T17:02:22.619557Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "ae306adf-1fe4-4d6b-9fd8-727d4354a0d1",
+          "tool_name": "_planner_stop",
+          "arguments": {
+            "reason": "The 'resume_unblocked_waiting' control loop is paused for 851 more seconds (approximately 14 minutes). This is what is holding node 7fb11dea-d182-5033-a4d0-2d2a645eb1df in 'waiting' state — it completed its parent (the alerted job 4a30546f) but the sweep that would promote it is deliberately paused. The dependency-resolver is healthy (lag=0, last_poll_age=39s, polling active). No DLQ entries belong to this chain. The DLQ holds 4 rows for other jobs (replay_safe, human_required, wait_and_replay x2), none linked to this chain. This is a 'saga_coordinator_stall' / 'dag_paused' scenario — there is no Tier-1 fix available. The loop will self-resume in ~851 seconds. Escalate for human awareness: the 'resume_unblocked_waiting' loop is paused (paused_expires_in_seconds=851), leaving the waiting descendant 7fb11dea stuck until the pause lifts automatically. No tool exists to un-pause it."
+          },
+          "result_summary": "planner stop: The 'resume_unblocked_waiting' control loop is paused for 851 more seconds (approximately 14 minutes). This is what is holding node 7fb11dea-d182-5033-a4d0-2d2a645eb1df in 'waiting' state — it completed its parent (the alerted job 4a30546f) but the sweep that would promote it is deliberately paused. The dependency-resolver is healthy (lag=0, last_poll_age=39s, polling active). No DLQ entries belong to this chain. The DLQ holds 4 rows for other jobs (replay_safe, human_required, wait_and_replay x2), none linked to this chain. This is a 'saga_coordinator_stall' / 'dag_paused' scenario — there is no Tier-1 fix available. The loop will self-resume in ~851 seconds. Escalate for human awareness: the 'resume_unblocked_waiting' loop is paused (paused_expires_in_seconds=851), leaving the waiting descendant 7fb11dea stuck until the pause lifts automatically. No tool exists to un-pause it.",
+          "timestamp": "2026-10-10T17:03:33.285118Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [
+        {
+          "category": "saga_coordinator_stall",
+          "name": "resume-unblocked-waiting-paused-851s-waiting-child-stuck",
+          "confidence": 0.85,
+          "reasoning": "The DAG shows node 7fb11dea is 'waiting' with its child (the alerted root) completed, and the 'resume_unblocked_waiting' control loop is paused with 851 seconds remaining — this sweep is what would normally promote the waiting node, and with the resolver lag at 0 and last_poll_age only 39s (healthy), the stall is the paused loop."
+        },
+        {
+          "category": "resolver_stall",
+          "name": "dependency-resolver-last-poll-age-39s-slightly-elevated",
+          "confidence": 0.1,
+          "reasoning": "The dependency-resolver last_poll_age_seconds is 39s vs age_seconds of 3s, which is elevated but not dramatically so; lag is 0, so this is weak evidence of a stall."
+        },
+        {
+          "category": "unknown",
+          "name": "other-cause-not-yet-identified",
+          "confidence": 0.05,
+          "reasoning": "Residual uncertainty in case neither of the above explains the stuck waiting node."
+        }
+      ],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-10-10T17:02:02.280620Z",
+      "updated_at": "2026-10-10T17:03:33.285118Z"
+    }
+  ],
+  "invocation_id": "daea4943f3a5"
+}

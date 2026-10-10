@@ -1,0 +1,64 @@
+{
+  "incident_id": "2e6ab3e2-9236-43c0-8b6d-7952626ab216",
+  "final_state": "escalated",
+  "alert_summary": "source=platform.dag severity=critical fingerprint=workflow_not_advancing",
+  "escalation_reason": "planner stop: The 'resume_unblocked_waiting' control loop is paused for 851 more seconds (approximately 14 minutes). This is what is holding node 7fb11dea-d182-5033-a4d0-2d2a645eb1df in 'waiting' state — it completed its parent (the alerted job 4a30546f) but the sweep that would promote it is deliberately paused. The dependency-resolver is healthy (lag=0, last_poll_age=39s, polling active). No DLQ entries belong to this chain. The DLQ holds 4 rows for other jobs (replay_safe, human_required, wait_and_replay x2), none linked to this chain. This is a 'saga_coordinator_stall' / 'dag_paused' scenario — there is no Tier-1 fix available. The loop will self-resume in ~851 seconds. Escalate for human awareness: the 'resume_unblocked_waiting' loop is paused (paused_expires_in_seconds=851), leaving the waiting descendant 7fb11dea stuck until the pause lifts automatically. No tool exists to un-pause it.",
+  "attempted_action": null,
+  "incidents": {
+    "primary": {
+      "category": "saga_coordinator_stall",
+      "name": "resume-unblocked-waiting-paused-851s-waiting-child-stuck",
+      "confidence": 0.85,
+      "addressed": false
+    },
+    "secondary": [],
+    "unresolved_extra": [
+      {
+        "category": "saga_coordinator_stall",
+        "name": "resume-unblocked-waiting-paused-851s-waiting-child-stuck",
+        "confidence": 0.85,
+        "addressed": false
+      }
+    ]
+  },
+  "attribution": null,
+  "investigation_trail": [
+    {
+      "tool": "get_dag_state",
+      "summary": "{\"seed_id\":\"4a30546f-d3c5-549f-a772-633c0b26219d\",\"nodes\":[{\"id\":\"4a30546f-d3c5-549f-a772-633c0b26219d\",\"type\":\"bulk_api_sync\",\"status\":\"completed\",\"retry_count\":0,\"created_at\":\"2026-10-10T16:15:02.324786Z\"},{\"id\":\"404c3151-cdc6-511e-8532-471693d5cfe1\",\"type\":\"bulk_api_sync\",\"status\":\"completed\",\"retry_count\":0,\"created_at\":\"2026-10-10T16:15:02.324786Z\"},{\"id\":\"7fb11dea-d182-5033-a4d0-2d2a645eb1df\",\"type\":\"bulk_api_sync\",\"status\":\"waiting\",\"retry_count\":0,\"created_at\":\"2026-10-10T16:15:02.324786Z\"}],\"edges\":[{\"from_id\":\"4a30546f-d3c5-549f-a772-633c0b26219d\",\"to_id\":\"404c3151-cdc6-511e-8532-471693d5cfe1\"},{\"from_id\":\"7fb11dea-d182-5033-a4d0-2d2a645eb1df\",\"to_id\":\"4a30546f-d3c5-549f-a772-633c0b26219d\"}],\"paused\":false,\"paused_expires_in_seconds\":null,\"paused_by\":null}",
+      "arguments": {
+        "job_id": "4a30546f-d3c5-549f-a772-633c0b26219d"
+      }
+    },
+    {
+      "tool": "get_consumer_lag",
+      "summary": "{\"consumer_group\":\"dependency-resolver\",\"lag\":0,\"lag_known\":true,\"source\":\"live\",\"cache_key\":\"kafka:consumer_lag:dependency-resolver\",\"measured_at\":\"2026-10-10T17:02:37.789033Z\",\"age_seconds\":3,\"recent_samples\":[{\"lag\":0,\"measured_at\":\"2026-10-10T17:02:37.789033Z\"},{\"lag\":0,\"measured_at\":\"2026-10-10T17:02:32.591616Z\"},{\"lag\":0,\"measured_at\":\"2026-10-10T17:02:27.380957Z\"},{\"lag\":0,\"measured_at\":\"2026-10-10T17:02:22.157761Z\"},{\"lag\":0,\"measured_at\":\"2026-10-10T17:02:16.983112Z\"},{\"lag\":0,\"measured_at\":\"2026-10-10T17:02:11.840221Z\"},{\"lag\":0,\"measured_at\":\"2026-10-10T17:02:06.670822Z\"},{\"lag\":0,\"measured_at\":\"2026-10-10T17:02:01.503192Z\"},{\"lag\":0,\"measured_at\":\"2026-10-10T17:01:56.320903Z\"},{\"lag\":0,\"measured_at\":\"2026-10-10T17:01:51.128451Z\"},{\"lag\":0,\"measured_at\":\"2026-10-10T17:01:45.965981Z\"},{\"lag\":0,\"measured_at\":\"2026-10-10T17:01:40.760819Z\"},{\"lag\":0,\"measured_at\":\"2026-10-10T17:01:35.501097Z\"},{\"lag\":0,\"measured_at\":\"2026-10-10T17:01:30.133933Z\"},{\"lag\":0,\"measured_at\":\"2026-10-10T17:01:24.685150Z\"}],\"last_poll_at\":\"2026-10-10T17:02:02.012374Z\",\"last_poll_age_seconds\":39}",
+      "arguments": {
+        "consumer_group": "dependency-resolver"
+      }
+    },
+    {
+      "tool": "get_control_loops",
+      "summary": "{\"measured_at\":\"2026-10-10T17:02:51.361465Z\",\"loops\":[{\"name\":\"outbox_relay\",\"paused\":false,\"paused_expires_in_seconds\":null,\"tick_interval_seconds\":1.0,\"last_run_at\":\"2026-10-10T17:02:51.240314Z\",\"last_run_age_seconds\":0.1},{\"name\":\"delayed_retry_promote\",\"paused\":false,\"paused_expires_in_seconds\":null,\"tick_interval_seconds\":0.5,\"last_run_at\":\"2026-10-10T17:02:51.227710Z\",\"last_run_age_seconds\":0.1},{\"name\":\"dlq_replay_promote\",\"paused\":false,\"paused_expires_in_seconds\":null,\"tick_interval_seconds\":0.5,\"last_run_at\":\"2026-10-10T17:02:51.227064Z\",\"last_run_age_seconds\":0.1},{\"name\":\"resume_unblocked_waiting\",\"paused\":true,\"paused_expires_in_seconds\":851,\"tick_interval_seconds\":10.0,\"last_run_at\":\"2026-10-10T17:02:00.877640Z\",\"last_run_age_seconds\":50.5},{\"name\":\"stale_pending_backstop\",\"paused\":false,\"paused_expires_in_seconds\":null,\"tick_interval_seconds\":60.0,\"last_run_at\":\"2026-10-10T17:01:56.384486Z\",\"last_run_age_seconds\":55.0},{\"name\":\"stale_running_sweep\",\"paused\":false,\"paused_expires_in_seconds\":null,\"tick_interval_seconds\":60.0,\"last_run_at\":\"2026-10-10T17:01:56.383979Z\",\"last_run_age_seconds\":55.0},{\"name\":\"lease_renewal\",\"paused\":false,\"paused_expires_in_seconds\":null,\"tick_interval_seconds\":20.0,\"last_run_at\":\"2026-10-10T17:02:36.695000Z\",\"last_run_age_seconds\":14.7},{\"name\":\"slo_evaluation\",\"paused\":false,\"paused_expires_in_seconds\":null,\"tick_interval_seconds\":300.0,\"last_run_at\":\"2026-10-10T17:00:53.967866Z\",\"last_run_age_seconds\":117.4},{\"name\":\"metrics\",\"paused\":false,\"paused_expires_in_seconds\":null,\"tick_interval_seconds\":5.0,\"last_run_at\":\"2026-10-10T17:02:48.198378Z\",\"last_run_age_seconds\":3.2},{\"name\":\"digest\",\"paused\":false,\"paused_expires_in_seconds\":null,\"tick_interval_seconds\":86400.0,\"last_run_at\":null,\"last_run_age_seconds\":null},{\"name\":\"idempotency_reaper\",\"paused\":false,\"paused_expires_in_seconds\":null,\"tick_interval_seconds\":3600.0,\"last_run_at\":\"2026-10-10T16:40:53.199795Z\",\"last_run_age_seconds\":1318.2}],\"total\":11,\"unknown_reason\":null}",
+      "arguments": {}
+    },
+    {
+      "tool": "list_dlq_messages",
+      "summary": "{\"total\":4,\"items\":[{\"id\":\"fc8d2a03-23b3-5371-9acb-46443c73baa5\",\"type\":\"bulk_api_sync\",\"error_message\":\"UpstreamTimeout: bulk_api_sync POST https://partner-api.internal/v2/sync timed out after 30s on attempt 3/3 — the request was never acknowledged, so no downstream write was recorded\",\"retry_count\":3,\"created_at\":\"2026-10-10T16:53:28.539717Z\",\"updated_at\":\"2026-10-10T16:53:34.539717Z\",\"trace_id\":\"c5ca46c1-f4dd-5021-8be4-130143553096\",\"triage\":{\"root_cause_category\":\"upstream_timeout\",\"summary\":\"partner-api.internal did not answer inside the 30s deadline on any of the three attempts. The payload was accepted by validation and nothing was committed downstream.\",\"suggested_fix\":\"Re-run the job as it stands: the call is idempotent, no partial write survived the timeout, and a fresh attempt is the entire remedy. Neither the payload nor the producer needs changing.\",\"is_retryable\":true,\"confidence\":0.88},\"remediation_hint\":\"replay_safe\",\"dead_lettered_at\":\"2026-10-10T16:53:34.539717Z\",\"fenced_at\":null,\"fenced_by\":null,\"extra\":null},{\"id\":\"f030f975-974e-5ce3-aa6b-444136507d86\",\"type\":\"csv_upload\",\"error_message\":\"ValueError: invalid literal for int() with base 10: 'not-a-number' at row 15,382\",\"retry_count\":3,\"created_at\":\"2026-10-10T16:49:28.539717Z\",\"updated_at\":\"2026-10-10T16:49:50.539717Z\",\"trace_id\":\"89609789-fdcb-5a5a-b826-d7d5d5f9cf37\",\"triage\":{\"root_cause_category\":\"bad_input\",\"summary\":\"Non-numeric value in a supposedly-integer CSV column.\",\"suggested_fix\":\"Not retryable — data quality issue. Notify the uploader; add a validation step in the CSV importer that fails the whole upload with a clear error rather than half-processing.\",\"is_retryable\":false,\"confidence\":0.94},\"remediation_hint\":\"human_required\",\"dead_lettered_at\":\"2026-10-10T16:49:50.539717Z\",\"fenced_at\":null,\"fenced_by\":null,\"extra\":null},{\"id\":\"af67d1b1-13f8-5a2c-8c44-66ec5564597d\",\"type\":\"bulk_api_sync\",\"error_message\":\"RateLimited: partner-api.internal answered 429 Too Many Requests on attempt 3/3 (retry-after: 120s); the per-tenant quota window has not rolled over yet\",\"retry_count\":3,\"created_at\":\"2026-10-10T16:36:28.539717Z\",\"updated_at\":\"2026-10-10T16:37:02.539717Z\",\"trace_id\":\"6f76e48d-72c4-5e5a-a5cf-bc29758167cb\",\"triage\":{\"root_cause_category\":\"rate_limited\",\"summary\":\"All three attempts landed inside one quota window. The partner is shedding load, not rejecting the payload.\",\"suggested_fix\":\"Let the 120s retry-after window pass before the next attempt. An immediate re-run spends another attempt against the same closed window and comes back 429.\",\"is_retryable\":true,\"confidence\":0.86},\"remediation_hint\":\"wait_and_replay\",\"dead_lettered_at\":\"2026-10-10T16:37:02.539717Z\",\"fenced_at\":null,\"fenced_by\":null,\"extra\":null},{\"id\":\"97d91272-9774-5b8e-980b-f0d2fa6ed619\",\"type\":\"bulk_api_sync\",\"error_message\":\"send_email downstream call failed: ConnectionRefusedError('smtp.mailer.internal:587')\",\"retry_count\":3,\"created_at\":\"2026-10-10T16:21:28.539717Z\",\"updated_at\":\"2026-10-10T16:21:44.539717Z\",\"trace_id\":\"1bfc7482-c957-5217-beae-e8cba48a152d\",\"triage\":{\"root_cause_category\":\"downstream_unavailable\",\"summary\":\"SMTP relay unreachable — connection refused at TCP layer.\",\"suggested_fix\":\"Check smtp.mailer.internal ECS task health; recent billing hotfix (v0.4.2) may have changed VPC egress rules — cross-reference `get_deploy_history`. Re-run once the dependency answers.\",\"is_retryable\":true,\"confidence\":0.82},\"remediation_hint\":\"wait_and_replay\",\"dead_lettered_at\":\"2026-10-10T16:21:44.539717Z\",\"fenced_at\":null,\"fenced_by\":null,\"extra\":null}]}",
+      "arguments": {
+        "job_type": null,
+        "remediation_hint": null,
+        "limit": 50,
+        "offset": 0
+      }
+    }
+  ],
+  "findings": "The `resume_unblocked_waiting` control loop is paused with 851 seconds (~14 minutes) remaining, which is holding node 7fb11dea-d182-5033-a4d0-2d2a645eb1df in `waiting` state despite its parent (job 4a30546f) having completed; the dependency-resolver is healthy and no DLQ entries are linked to this chain, so the sole cause is the paused sweep. This is the remaining open incident — saga_coordinator_stall / resume-unblocked-waiting-paused-851s-waiting-child-stuck (confidence 0.85) — and no tool available to the agent can lift the pause.",
+  "recommendation": "Confirm the `resume_unblocked_waiting` loop self-resumes after its pause expires (watch for `paused: false` in `get_control_loops`) and verify that node 7fb11dea subsequently advances out of `waiting`; if the pause lifts but the node remains stuck, escalate for deeper saga-coordinator investigation.",
+  "budget_used": {
+    "tool_calls": 4,
+    "tokens": 110667,
+    "wall_seconds": 91.004498,
+    "usd": "0.301345"
+  }
+}

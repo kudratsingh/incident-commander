@@ -1359,7 +1359,9 @@ sets to something else; the twelfth with v0.6.19, the first release that changes
 nothing on the agent's side of the wire at all; the thirteenth with v0.6.20, the
 first pin where the new setting changes how fast the DEMO can build its fault;
 v0.6.21, the second console-only release, and v0.6.22, a backend fix with no contract
-change, needed no new step — item 12 covers both):
+change, needed no new step — item 12 covers both; v0.6.24, one new read tool and two new
+output fields on a tool the canned fixtures already hold, needed none either — items 3, 4
+and 5 cover it, and item 4 says what it left open):
 
 1. Update `demo/compose.yml` — **all THREE platform-code services**
    (`migrate`, `platform`, `api`) and the prose that names the version:
@@ -1597,6 +1599,32 @@ change, needed no new step — item 12 covers both):
    exempt as "unknown") while the integration test does and this run read
    `warm`. Neither tool is wrong. Read the CONTEXT of every row in the stale
    list before believing any of it.
+
+   **v0.6.24 (WO-R3-371, platform ADR 0041) is the v0.6.7 case again, and the re-pin
+   left it open on purpose.** `get_consumer_lag` gained two optional output fields,
+   `last_poll_at` and `last_poll_age_seconds` (when the group's consumer last asked
+   Kafka for work, and how long ago). Every canned `get_consumer_lag` response predates
+   them, so the key-set diff reports both as `live_only_field` on all 40 canned readings
+   in 26 scenarios: **80 new rows**, nothing else, and `make test-drift` is red on them.
+   The re-pin did not bless them and did not write the fields into the fixtures, because
+   the honest value is a world decision: the 16 readings of a recorded-constant or
+   unknown group would take `null` (what the platform answers), but the 24
+   `worker-dispatcher` readings need a poll time that fits their world — frozen at the
+   kill in a stalled world, about as fresh as `measured_at` in a healthy one — and that
+   is new evidence in a canned world, the v0.6.14 reason. The two ways out: write both
+   fields into the fixtures and add them to `_VOLATILE["get_consumer_lag"]` (they are a
+   clock and an age, like `measured_at` and `age_seconds`), or ledger the 52 generic rows
+   as `fixture-defect` and pin the burn-down list by name, as v0.6.14 did. Either way
+   `lag` stays guarded. The same run also listed one STALE row, `api_latency_downstream`
+   `get_slo_status` `objectives[].failed[]`, and it is the local volume: the fixture's
+   `failed: 28` happens to equal the 28 late dispatches INC-007 left in this stack's
+   24-hour window, while CI's empty window reads 0 and still drifts. Leave it alone.
+   `get_control_loops` has no canned fixture, so it adds nothing here; whoever writes
+   the first one should treat `measured_at`, `loops[].last_run_at`,
+   `loops[].last_run_age_seconds` and `loops[].paused_expires_in_seconds` as volatile
+   and keep `name`, `paused`, `tick_interval_seconds`, `total` and `unknown_reason`
+   guarded.
+
 5. Re-pin the planner's tool listing, which is the OTHER prompt the agent
    reads:
    ```bash
@@ -1658,6 +1686,14 @@ change, needed no new step — item 12 covers both):
    move. The pin is real all the same, which is step 10's subject: what v0.6.17
    changed is the REQUEST envelope, and `tools/list` does not describe it.
 
+   v0.6.24 (WO-R3-371) moves the block for two causes at once, and they add up
+   exactly: 29,452 → 34,267 characters, +4,815. `get_control_loops` joins the read
+   surface (16 → 17 tools) with an entry of 3,687 characters (its 3,394-character
+   description plus its input-schema line), and `get_consumer_lag` was re-described,
+   3,728 → 4,852 (+1,124), plus 4 characters of indentation for the one paragraph it
+   gained: 3,687 + 1,124 + 4 = 4,815. Its two new output fields are not in the block,
+   by the v0.6.18 rule (item 10).
+
    The lab-vocabulary assertion in that file is the one part to write
    carefully, and v0.6.11 is the example. Its two hooks are `saturate_db_pool`
    and `degrade_downstream`, and a filter on their word stems went red
@@ -1686,6 +1722,10 @@ change, needed no new step — item 12 covers both):
    of the field, are asserted to be superseded. The next pin that makes a
    field required reds the parse check until the worlds are re-recorded or
    the field is waived with the pin named.
+   v0.6.24's two new `get_consumer_lag` fields are optional, so the v0.6.23
+   recordings still parse and the waiver stays empty. They will still drift
+   against a v0.6.24 stack, because every recorded `get_consumer_lag` reading
+   lacks the two fields; re-recording them is WO-R3-372's job, not the pin's.
 
    `make world-drift` on all twelve committed recordings after this pin is
    the cleanest possible reading of it: the eight whose premise a reset quiet

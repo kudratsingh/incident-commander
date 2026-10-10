@@ -120,6 +120,14 @@ KINDS: Final[dict[str, ArtifactKind]] = {
     "world_drift_table_md": ArtifactKind(
         ("evals", "reports"), ".md", fixed_stem="world_drift_table", folder="world-drift"
     ),
+    # `make oracle-gap-batch` / `make oracle-gap-report` (evals/oracle_gap.py, WO-R3-347) — the
+    # oracle gap per world and pooled over the sample's batch archives, named for those archives.
+    "oracle_gap_report": ArtifactKind(
+        ("evals", "reports"), ".json", fixed_stem="oracle_gap_report", folder="oracle-gap"
+    ),
+    "oracle_gap_report_md": ArtifactKind(
+        ("evals", "reports"), ".md", fixed_stem="oracle_gap_report", folder="oracle-gap"
+    ),
     # `make judge-calibration` (evals/judge_calibration/, WP-6.3) — one judge's trap agreement,
     # stability and track record. Grouped per JUDGE through the per-scenario mechanism, because
     # plan 03 § 112's flat fixed stem cannot carry "one per judge" (a reported divergence).

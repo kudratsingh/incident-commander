@@ -42,6 +42,8 @@ _READ_ONLY: Final[str] = "dlq_backlog"
 #: A scenario with ``expected_action_tools`` and a committed recording: it is the
 #: one that must stop at the handoff.
 _ACTING: Final[str] = "remediate_consumer_lag_success"
+#: A scenario with two committed recordings: two pins of one scenario must be refused.
+_TWICE_RECORDED: Final[str] = "api_latency_db_query"
 
 _RECORDED_AT: Final[datetime] = datetime(2026, 9, 17, 12, 0, 0, tzinfo=UTC)
 
@@ -409,6 +411,52 @@ class TestTheWorldIsResolved:
         found, refusal = runner.recordings_for(selection, _ACTING)
         assert found == {}
         assert "pins one recording" in refusal
+
+    def test_several_worlds_pin_one_recording_each(self, scenarios: dict[str, Scenario]) -> None:
+        """WO-R3-347: one invocation replays a whole batch, every world pinned."""
+        selection = [scenarios[_ACTING], scenarios[_READ_ONLY]]
+        paths = [artifacts.newest("recorded_world", s.name) for s in selection]
+        ids = [path.name.rsplit(".", 2)[1] for path in paths]
+        found, refusal = runner.pinned_recordings_for(selection, ids)
+        assert refusal == ""
+        assert found == {_ACTING: paths[0], _READ_ONLY: paths[1]}
+
+    def test_a_selected_scenario_left_unpinned_is_refused(
+        self, scenarios: dict[str, Scenario]
+    ) -> None:
+        """A world nobody pinned would replay whatever is newest, which nobody chose."""
+        selection = [scenarios[_ACTING], scenarios[_READ_ONLY], scenarios[_TWICE_RECORDED]]
+        found, refusal = runner.pinned_recordings_for(selection, [_ACTING, _READ_ONLY])
+        assert found == {}
+        assert f"have no --world: {_TWICE_RECORDED}" in refusal
+
+    def test_a_world_given_twice_is_refused(self, scenarios: dict[str, Scenario]) -> None:
+        selection = [scenarios[_ACTING], scenarios[_READ_ONLY]]
+        found, refusal = runner.pinned_recordings_for(selection, [_ACTING, _ACTING])
+        assert found == {}
+        assert "more than once" in refusal
+
+    def test_two_recordings_of_one_scenario_are_refused(
+        self, scenarios: dict[str, Scenario]
+    ) -> None:
+        versions = artifacts.versions("recorded_world", _TWICE_RECORDED)
+        assert len(versions) >= 2
+        ids = [path.name.rsplit(".", 2)[1] for path in versions[:2]]
+        found, refusal = runner.pinned_recordings_for([scenarios[_TWICE_RECORDED]], ids)
+        assert found == {}
+        assert "pinned by two --world values" in refusal
+
+    def test_a_world_outside_the_selection_is_refused(self, scenarios: dict[str, Scenario]) -> None:
+        found, refusal = runner.pinned_recordings_for(
+            [scenarios[_ACTING], scenarios[_READ_ONLY]], [_ACTING, "deadbeefcafe"]
+        )
+        assert found == {}
+        assert "'deadbeefcafe' matches no recording" in refusal
+
+    def test_world_flags_repeat_and_split_on_commas(self) -> None:
+        argv = ["--world", "a", "--world=b,c", "--only", "x"]
+        assert runner._parse_worlds(argv) == ["a", "b", "c"]
+        assert runner._parse_worlds(["--only", "x"]) == []
 
     def test_the_runner_and_the_drift_check_resolve_a_world_the_same_way(self) -> None:
         """One rule: otherwise the check vouches for a recording nobody replays."""

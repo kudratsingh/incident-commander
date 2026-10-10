@@ -1102,7 +1102,7 @@ guard.
 
 **Several worlds in one invocation.** `--world` may be repeated, one per selected scenario. When any
 world is pinned, every selected scenario must be — a scenario left to float to its newest recording
-is refused, because nobody chose that world (ADR 00XX). `--only` still matches by substring in this
+is refused, because nobody chose that world (ADR 0079). `--only` still matches by substring in this
 mode, so `--only jobs_not_progressing_outbox_stall` also selects `..._deploy_noise`; the refusal
 names it.
 

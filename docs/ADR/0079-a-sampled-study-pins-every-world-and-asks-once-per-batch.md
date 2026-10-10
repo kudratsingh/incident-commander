@@ -1,8 +1,8 @@
-# ADR 00XX: A sampled study pins every world, and one paid invocation runs one batch
+# ADR 0079: A sampled study pins every world, and one paid invocation runs one batch
 
 * Status: accepted
 * Date: 2026-10-10
-* Decider: WO-R3-347 (number assigned by the coordinator before merge)
+* Decider: WO-R3-347
 
 ## Context and problem statement
 

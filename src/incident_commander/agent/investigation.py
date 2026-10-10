@@ -123,7 +123,7 @@ FIX_MAP: Final[dict[HypothesisCategory, str]] = {
     # A stuck chain is fixed by replaying its dead-lettered root job, never by `pause_dag`:
     # pausing leaves the chain stuck and blocks the replay. The root's own row picks the tool.
     HypothesisCategory.RUNAWAY_SAGA: "replay_dlq_by_ids",
-    # The first category promoted out of WP-1.6's escalate-only set (O-49, ADR 00XX): since
+    # The first category promoted out of WP-1.6's escalate-only set (O-49, ADR 0080): since
     # platform v0.6.24 a stopped resolver is READABLE (`last_poll_age_seconds`), so restarting it
     # is a Tier-1 fix a scenario grades, aimed at `CHAIN_RESOLVER_GROUP` and nothing else.
     HypothesisCategory.RESOLVER_STALL: "restart_consumer_group",
@@ -1411,7 +1411,7 @@ def _counts_as(requirement: RequiredReading, tool: str, arguments: Mapping[str, 
     """Whether one call of ``tool`` with these (wired) arguments makes ``requirement``'s read.
 
     A listing in ``_UNNARROWED_READS`` counts only unfiltered, as in ADR 0041 (paging is fine), and
-    a read pinned to a resource counts only on that resource (ADR 00XX).
+    a read pinned to a resource counts only on that resource (ADR 0080).
     """
     if tool != str(requirement.tool):
         return False

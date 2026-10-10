@@ -688,7 +688,7 @@ def _routing(scope: PhaseScope) -> frozenset[str]:
     return frozenset(category.value for category in FIX_MAP)
 
 
-#: FIX_MAP's keys from WP-1.6 until WO-R3-372 promoted `resolver_stall` (O-49, ADR 00XX): the
+#: FIX_MAP's keys from WP-1.6 until WO-R3-372 promoted `resolver_stall` (O-49, ADR 0080): the
 #: routing every Phase 1 and Phase 2 run was made under, so those closes keep quoting it.
 FIX_MAP_BEFORE_O49: Final[frozenset[str]] = frozenset(
     {"consumer_saturation", "poison_message", "runaway_saga", "stale_cache"}

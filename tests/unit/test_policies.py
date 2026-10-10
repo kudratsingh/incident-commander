@@ -1783,7 +1783,7 @@ class TestEveryNewCategoryIsEscalateOnly:
 
     ``_PROMOTED`` is that later decision, written down: each entry names the tool, the
     owner's ruling and the scenario that grades the action. ``RESOLVER_STALL`` is the
-    first (O-49, ADR 00XX), once platform v0.6.24 made a stopped resolver readable.
+    first (O-49, ADR 0080), once platform v0.6.24 made a stopped resolver readable.
     """
 
     @staticmethod
@@ -2373,7 +2373,7 @@ class TestWorkflowStuckFamily:
     2. **The pair the chain view separates by one boolean.** ``resolver_stall`` and
        ``paused_dag`` agree on every chain and queue reading but ``paused``. The
        boolean is asserted in both directions, because a pair that agreed on it too
-       would be one world under two names. Since WO-R3-372 (ADR 00XX) the pair also
+       would be one world under two names. Since WO-R3-372 (ADR 0080) the pair also
        differs on the resolver's reading and on the answer's kind: the stranded world
        restarts the resolver, the paused one hands off.
     3. **A family whose every answer is a handoff measures nothing on ACTION.**
@@ -2395,7 +2395,7 @@ class TestWorkflowStuckFamily:
 
     #: The worlds whose answer is an action, and which action each sanctions. Two since
     #: WO-R3-284 — a replay aimed at the alerted ROOT and a fence aimed at a DESCENDANT — and
-    #: three since WO-R3-372 (O-49, ADR 00XX): a restart aimed at the RESOLVER, which is not a
+    #: three since WO-R3-372 (O-49, ADR 0080): a restart aimed at the RESOLVER, which is not a
     #: node of the chain at all.
     ACTING: Final[dict[str, tuple[str, ...]]] = {
         "workflow_stuck_dead_lettered_root": ("replay_dlq_by_ids",),
@@ -2636,7 +2636,7 @@ class TestWorkflowStuckFamily:
         }
         assert acting == self.ACTING, (
             "this family measures ACTION through exactly three worlds, with a different "
-            f"tool each; got {acting}. Read ADR 0053 § 2, ADR 0070 and ADR 00XX before "
+            f"tool each; got {acting}. Read ADR 0053 § 2, ADR 0070 and ADR 0080 before "
             "changing it."
         )
         # Different tools, and different TARGETS: the replay names the alerted subject, the

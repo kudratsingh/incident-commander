@@ -173,7 +173,7 @@ def _value_pool(scenario: Scenario) -> dict[str, list[str]]:
     Four places the scenario has ALREADY written the value down, so nothing is invented: the
     alert payload via ``ALERT_SUBJECT_PROBES``, the ``expected_precondition`` arguments,
     ``expected_action_arguments``' ``equals`` values, and the arguments a required read is pinned
-    to (``required_before_verdict``, ADR 00XX) — the resolver every chain verdict must read.
+    to (``required_before_verdict``, ADR 0080) — the resolver every chain verdict must read.
     """
     pool: dict[str, list[str]] = {}
 
@@ -388,7 +388,7 @@ def derive_probes(scenario: Scenario) -> tuple[list[Probe], list[str]]:
                 )
 
     # 6. Add every read the alert requires before a verdict (ADR 0078), with the arguments it is
-    #    pinned to (ADR 00XX): the loop refuses a verdict without them, so the agent makes them.
+    #    pinned to (ADR 0080): the loop refuses a verdict without them, so the agent makes them.
     for reading in scenario.required_before_verdict:
         probes.append(
             _probe(

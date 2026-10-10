@@ -1,4 +1,4 @@
-# ADR 00XX: A stuck chain's resolver is read before any verdict, and a stopped one is repaired
+# ADR 0080: A stuck chain's resolver is read before any verdict, and a stopped one is repaired
 
 * Status: accepted
 * Date: 2026-10-10

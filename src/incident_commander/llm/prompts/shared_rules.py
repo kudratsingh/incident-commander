@@ -38,7 +38,7 @@ STUCK_CHAIN_ROOT_RULE: Final[str] = (
 
 #: What holds a stuck chain whose own rows are healthy, and how each reading of it is acted on:
 #: the resolver is restarted, the paused sweep is named and left to expire, and the coordinator is
-#: only what remains once both are ruled out (INC-008, O-49, ADR 00XX). Same words to every reader.
+#: only what remains once both are ruled out (INC-008, O-49, ADR 0080). Same words to every reader.
 STALLED_CHAIN_RULE: Final[str] = (
     "A stuck dependency chain whose own nodes are healthy — nothing in it dead-lettered, "
     "the chain not paused, children `waiting` behind parents that `completed` — is held "

@@ -44,7 +44,7 @@ _LATENCY_SWEEP: Final[tuple[RequiredReading, ...]] = FAMILY_REQUIRED_BEFORE_VERD
     ScenarioFamily.API_LATENCY
 ]
 # The workflow_stuck family's declaration: the whole queue (ADR 0078), the resolver BY NAME and
-# the background loops (O-49, ADR 00XX).
+# the background loops (O-49, ADR 0080).
 _CHAIN_SWEEP: Final[tuple[RequiredReading, ...]] = FAMILY_REQUIRED_BEFORE_VERDICT[
     ScenarioFamily.WORKFLOW_STUCK
 ]

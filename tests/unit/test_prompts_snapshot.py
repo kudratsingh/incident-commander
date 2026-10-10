@@ -76,7 +76,7 @@ _CHAIN_NODE_RULE_READERS: Final[tuple[str, ...]] = (
     "remediation_planner",
 )
 
-# WO-R3-372's readers of the stalled-chain rule (ADR 00XX): the planner that reads the resolver
+# WO-R3-372's readers of the stalled-chain rule (ADR 0080): the planner that reads the resolver
 # and the loops and picks the label, the fix table that restarts the resolver, the writer that
 # names the held sweep in the handoff, and the judge that grades that handoff. Compared against
 # the directory in both directions, as above.
@@ -123,7 +123,7 @@ _EXPECTED_HASHES: Final[dict[str, str]] = {
     # `llm/prompts/shared_rules.py` tells the writer that produces the briefing and the judge
     # that grades it how to read the structured remainder. A rule given to one of them is half
     # a rule (INC-002), so the two hashes move together or the change is wrong.
-    # Moved by WO-R3-372 / ADR 00XX with the three below: `{{rule:stalled_chain}}` tells the writer
+    # Moved by WO-R3-372 / ADR 0080 with the three below: `{{rule:stalled_chain}}` tells the writer
     # to name a held loop and its expiry in the handoff, resolved run or not.
     "briefing_writer": ("23912b2eb95990c4b80c7cf41f60e3b762b48211f00c510e0103be73757a0b24"),
     # Moved by WP-1.6 (nine category rows and the healthy-world rule) and again by
@@ -156,7 +156,7 @@ _EXPECTED_HASHES: Final[dict[str, str]] = {
     # sentence says so. One hash, again: no other prompt carries the rule.
     # WO-R3-363 (ADR 0078): the stuck-chain rule and the healthy-world rule each gain one
     # sentence naming the reads the loop now requires before a verdict. One hash moves.
-    # WO-R3-372 (O-49, ADR 00XX): the `resolver_stall` row gains its Tier-1 fix, the coordinator
+    # WO-R3-372 (O-49, ADR 0080): the `resolver_stall` row gains its Tier-1 fix, the coordinator
     # row says it is only what remains, the stuck-chain verdict sentence names the two new
     # required reads, and `{{rule:stalled_chain}}` is served. Four hashes move together.
     "investigation_planner": ("e98983f79d63ff70ed52abfa777f8c3a08203a1efc42ac9e826c300a82b42a17"),
@@ -181,14 +181,14 @@ _EXPECTED_HASHES: Final[dict[str, str]] = {
     # again by WO-R3-284 / ADR 0070, the chain-node rule's third reader, and again by
     # WO-R3-321 / ADR 0071, the attribution rule's third reader (which also quotes the
     # attribution block's own heading to it).
-    # And by WO-R3-372 / ADR 00XX, the stalled-chain rule's fourth reader.
+    # And by WO-R3-372 / ADR 0080, the stalled-chain rule's fourth reader.
     "briefing_judge": ("b1322bf44d1f00a89c22ad39b8da157e8147b6a2386575c55d09f6a2e87f3595"),
     # Moved by WO-R3-226 / ADR 0056: two sentences cited ADR 0008 for "you get one Tier-1
     # call", which is now true of a PLAN and not of a run. The rules themselves are
     # unchanged — a plan still proposes exactly one action. Moved again by WO-R3-284 /
     # ADR 0070: the fix table now says which node of the chain the routing is aimed at. And
     # by WO-R3-321 / ADR 0071: it is told the cleared-before-action refusal is structural.
-    # And by WO-R3-372 / ADR 00XX: `resolver_stall` routes to a restart of `dependency-resolver`,
+    # And by WO-R3-372 / ADR 0080: `resolver_stall` routes to a restart of `dependency-resolver`,
     # verified on its poll age, with the shared stalled-chain rule beside it.
     "remediation_planner": ("1dd3c25c8234aa14f433b6470f4023abe8e9dda52eb3591c0ebca7559070a2f8"),
     # Moved by WO-R3-353 / ADR 0077 (INC-005): the judge is told how its reading's sample
@@ -1114,7 +1114,7 @@ class TestTheChainNodeActionRuleReachesEveryReader:
 
 
 class TestTheStalledChainRuleReachesEveryReader:
-    """WO-R3-372 (INC-008, O-49, ADR 00XX): what holds a chain whose own rows are healthy.
+    """WO-R3-372 (INC-008, O-49, ADR 0080): what holds a chain whose own rows are healthy.
 
     Four readers, because four prompts act on the reading: the planner that must read the
     resolver and the loops and pick the label, the fix table that restarts the resolver and

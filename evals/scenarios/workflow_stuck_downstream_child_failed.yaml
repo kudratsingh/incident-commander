@@ -222,7 +222,7 @@ canned_tool_responses:
     - type: text
       text: '{"job_id":"7fb11dea-d182-5033-a4d0-2d2a645eb1df","previous_hint":"human_required","remediation_hint":"human_required","already_marked":true,"fenced_at":"2026-09-20T06:04:11.512430Z"}'
     is_error: false
-  # THE FAMILY'S TWO OTHER READS (ADR 0078, ADR 00XX, WO-R3-372): the resolver
+  # THE FAMILY'S TWO OTHER READS (ADR 0078, ADR 0080, WO-R3-372): the resolver
   # that promotes the chain's waiting children, by name, and the background
   # loops. Transcribed verbatim from the v0.6.24 recording
   # `…20261010T161020Z.7d1f2d80470b`. Here both rule the outside-the-chain
@@ -276,7 +276,7 @@ canned_llm_responses:
       kind: probe
       tool_name: list_dlq_messages
       arguments: {}
-  # THE FAMILY'S OTHER TWO READS before any verdict (ADR 0078, ADR 00XX): the
+  # THE FAMILY'S OTHER TWO READS before any verdict (ADR 0078, ADR 0080): the
   # loop refuses a conclusion about this chain until both are in the evidence.
   - hypotheses:
     - category: poison_message

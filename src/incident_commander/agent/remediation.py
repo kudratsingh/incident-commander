@@ -1254,7 +1254,7 @@ def _graph_nodes_in_evidence(
 
 
 class ChainService(NamedTuple):
-    """A resource OUTSIDE a chain's own reading that the chain's progress depends on (ADR 00XX).
+    """A resource OUTSIDE a chain's own reading that the chain's progress depends on (ADR 0080).
 
     The chain view lists jobs, never the consumer that promotes them, so a node-only admission
     (ADR 0070) can never reach it. Named here, one row per service, rather than inferred.
@@ -1312,7 +1312,7 @@ def _chain_services_read(
 
 
 def _declared_services_read(run_state: RunState) -> frozenset[str]:
-    """The chain services this run has read, as values a plan may name (ADR 00XX).
+    """The chain services this run has read, as values a plan may name (ADR 0080).
 
     ``_evidence_value_corpus`` drops a reading's echo of its own argument (B-08: a typed probe
     argument must not launder itself into a source), and the resolver's name reaches a run ONLY
@@ -1387,7 +1387,7 @@ def _unaddressed_alert_subject(plan: RemediationPlan, run_state: RunState) -> Su
             return None
         # 3. It is also fine if the action names a node beneath that resource in a reading THIS
         #    run holds (ADR 0070's rule); a node of some other chain is still refused. Or the one
-        #    service that promotes the chain, read by this run first (ADR 00XX's rule).
+        #    service that promotes the chain, read by this run first (ADR 0080's rule).
         nodes = _graph_nodes_in_evidence(run_state.evidence, subject)
         services = _chain_services_read(plan, run_state, subject)
         off_graph = sorted(acted - nodes - services)

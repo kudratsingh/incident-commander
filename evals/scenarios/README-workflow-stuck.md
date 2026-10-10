@@ -45,7 +45,7 @@ only ROOT_CAUSE can separate; and without worlds 5 and 2 nothing in the corpus
 asks whether an action may be aimed anywhere but at the job the page named.
 
 **Since platform v0.6.24 (WO-R3-372, owner decision O-49, [ADR
-00XX](../../docs/ADR/00XX-a-stalled-resolver-is-read-before-the-verdict-and-repaired.md)).**
+0080](../../docs/ADR/0080-a-stalled-resolver-is-read-before-the-verdict-and-repaired.md)).**
 INC-008 found that the stranded world's label was a coin flip against
 `saga_coordinator_stall`: nothing the agent could read told a stopped resolver from
 a stopped coordinator. v0.6.24 made the resolver's poll time and the background
@@ -273,7 +273,7 @@ a sanctioned action no cause routes to is an action no correct run can reach, an
 Since WO-R3-372 every trajectory below also makes the family's two other required
 reads before its verdict — `get_consumer_lag(consumer_group="dependency-resolver")`
 and `get_control_loops()` — because the loop refuses a verdict on this alert
-without them (ADR 0078, ADR 00XX). They add two calls to every world and are not
+without them (ADR 0078, ADR 0080). They add two calls to every world and are not
 repeated in each bullet.
 
 * **dead_lettered_root** — probe `get_dag_state(<root>)`, probe

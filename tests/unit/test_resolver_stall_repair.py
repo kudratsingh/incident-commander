@@ -1,4 +1,4 @@
-"""WO-R3-372 (O-49, ADR 00XX): a stuck chain's resolver is read before any verdict, and repaired.
+"""WO-R3-372 (O-49, ADR 0080): a stuck chain's resolver is read before any verdict, and repaired.
 
 INC-008: `workflow_stuck_resolver_stall`'s label was a coin flip against `saga_coordinator_stall`
 on identical evidence, because nothing the agent could read separated them. Platform v0.6.24 made

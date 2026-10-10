@@ -721,7 +721,7 @@ FAMILY_REQUIRED_BEFORE_VERDICT: Final[Mapping[ScenarioFamily, tuple[RequiredRead
             ),
             # One chain under five faults: any verdict about it lists the whole dead-letter
             # queue first (README-workflow-stuck.md, ADR 0041's unfiltered read), and reads the
-            # two things outside the chain that hold its waiting children (O-49, ADR 00XX): the
+            # two things outside the chain that hold its waiting children (O-49, ADR 0080): the
             # resolver that promotes them, by name, and the background loops that backstop it.
             ScenarioFamily.WORKFLOW_STUCK: (
                 *_sweep(VerdictCondition.STUCK_CHAIN, "list_dlq_messages"),

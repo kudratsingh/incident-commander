@@ -17,7 +17,7 @@ from incident_commander.tools.registry import TOOL_REGISTRY
 
 #: The consumer group that promotes a chain's waiting children once every parent has completed.
 #: A stuck chain whose own rows are healthy is stalled HERE, so it is the one resource outside the
-#: chain's own reading that a chain verdict must read (ADR 00XX) and a chain action may name.
+#: chain's own reading that a chain verdict must read (ADR 0080) and a chain action may name.
 CHAIN_RESOLVER_GROUP: Final[str] = "dependency-resolver"
 
 
@@ -39,7 +39,7 @@ class RequiredReading(BaseModel):
 
     tool: ReadToolName
     when: VerdictCondition
-    # The arguments the read must be MADE WITH, compared as they go on the wire (ADR 00XX). Empty
+    # The arguments the read must be MADE WITH, compared as they go on the wire (ADR 0080). Empty
     # means any call of the tool counts. A read of another resource is not this read: the
     # resolver's lag is not the dispatcher's, though one tool answers both.
     arguments: Mapping[str, str] = Field(default_factory=dict)

@@ -51,7 +51,7 @@ class HypothesisCategory(StrEnum):
 
     # Nine labels added for newer fault families, none of them with an automatic fix when they
     # landed. One has since been promoted: RESOLVER_STALL routes to `restart_consumer_group`
-    # (O-49, ADR 00XX). Added at the end rather than in place, because old run archives are read
+    # (O-49, ADR 0080). Added at the end rather than in place, because old run archives are read
     # back against this enum.
 
     NO_FAULT = "no_fault"
@@ -77,7 +77,7 @@ class HypothesisCategory(StrEnum):
     the group seconds ago and the consumer had stopped asking long before.
     Its lag is no help: a dead resolver over a chain where nothing completes
     reads lag 0, known and fresh, exactly like a healthy idle one. The fix is
-    `restart_consumer_group` on that group (FIX_MAP, ADR 00XX), verified by
+    `restart_consumer_group` on that group (FIX_MAP, ADR 0080), verified by
     `last_poll_age_seconds` falling back to a few seconds. The paused
     `resume_unblocked_waiting` sweep that usually backstops promotion is read
     with `get_control_loops`; no tool lifts it, so it is named with its expiry

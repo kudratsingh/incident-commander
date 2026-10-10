@@ -1,5 +1,5 @@
 # Family C, the stranded world (plan 01 § 7.2, WO-R3-214 / WP-7.2, ADR 0053) —
-# a REPAIR scenario since WO-R3-372 (owner decision O-49, ADR 00XX).
+# a REPAIR scenario since WO-R3-372 (owner decision O-49, ADR 0080).
 #
 # The chain's root SUCCEEDED and its descendants are still waiting. Nothing in
 # the chain is dead-lettered, so there is nothing to replay; the chain is not
@@ -27,7 +27,7 @@
 #
 # Same alert as every sibling, field for field, including the root id — the
 # five worlds are ONE chain under five faults (ADR 0053), and the family's
-# required reads (ADR 0078, ADR 00XX) are the same in all five, so neither the
+# required reads (ADR 0078, ADR 0080) are the same in all five, so neither the
 # alert nor the declaration names this world's answer. See
 # `README-workflow-stuck.md` for the matrix.
 

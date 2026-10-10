@@ -324,6 +324,9 @@ class TestTheLayoutIsOneFamilyPerFolder:
         "regrade_report_md": ("evals", "reports", "regrades"),
         "world_drift_table": ("evals", "reports", "world-drift"),
         "world_drift_table_md": ("evals", "reports", "world-drift"),
+        # WO-R3-347: the oracle-gap sample's report, beside the other many-run documents.
+        "oracle_gap_report": ("evals", "reports", "oracle-gap"),
+        "oracle_gap_report_md": ("evals", "reports", "oracle-gap"),
         "human": ("evals", "reports", "human", "consumer_lag_pass"),
         "dossier": ("evals", "reports", "dossiers", "consumer_lag_pass"),
         # WP-6.3. Per-JUDGE, not per-scenario: it rides the per-scenario mechanism because

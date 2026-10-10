@@ -56,6 +56,12 @@ help:
 	@echo "                   committed archives: one leaderboard per model, grouped by the seven"
 	@echo "                   WP-2.5 keys, every difference beside its paired-trial count."
 	@echo "                   Reads only, spends nothing. --write persists it; --scan lists scope"
+	@echo "  oracle-gap-batch FREE by default: check evals/samples/oracle_gap.json and print the"
+	@echo "                   one recorded-mode command a batch runs (WO-R3-347). YES_SPEND=1"
+	@echo "                   runs it: real model calls, SPENDS MONEY, the owner's yes per batch;"
+	@echo "                   writes evals/reports/oracle-gap/. WORLDS=<name,...> runs a subset"
+	@echo "  oracle-gap-report FREE: the oracle gap over ARCHIVES=<id,...> (the batch archives),"
+	@echo "                   per world and pooled; WRITE=1 persists it"
 	@echo "  judge-calibration  put each judge's trap set to it and report trap agreement,"
 	@echo "                   stability over N=5 and its track record (plan 03 section 9)."
 	@echo "                   FREE by default (scripted fake judge, spends nothing)."
@@ -143,6 +149,21 @@ judge-calibration:
 		$(if $(REPS),--reps $(REPS),) $(if $(WRITE),--write,) \
 		$(if $(LIVE),--live,) $(if $(YES_SPEND),--yes-spend,) \
 		$(if $(LABELS),--labels $(filter-out 1,$(LABELS)),)
+
+# The oracle-gap sample (WO-R3-347, evals/oracle_gap.py). FREE by default: it checks the
+# committed sample plan and prints the exact recorded-mode command one batch runs, then
+# stops. YES_SPEND=1 (exactly 1) runs that batch — real model calls, SPENDS MONEY, needs the
+# owner's yes for this batch — and writes its report. WORLDS= re-runs a subset of the plan.
+.PHONY: oracle-gap-batch oracle-gap-report
+oracle-gap-batch:
+	uv run python -m evals.oracle_gap batch \
+		$(if $(PLAN),--plan $(PLAN),) $(if $(WORLDS),--worlds $(WORLDS),) \
+		$(if $(filter 1,$(YES_SPEND)),--yes-spend,)
+
+# FREE: the same report over ARCHIVES=<id>[,<id>...] — the batch archives, pooled.
+oracle-gap-report:
+	uv run python -m evals.oracle_gap report --archives "$(ARCHIVES)" \
+		$(if $(PLAN),--plan $(PLAN),) $(if $(WRITE),--write,)
 
 # Owner labels for briefing usefulness (WO-R3-278). Free: picks 16 committed
 # briefings and writes evals/judge_calibration/labels/packet.<YYYYMMDD>.md.

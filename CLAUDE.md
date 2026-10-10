@@ -147,6 +147,8 @@ incident-commander/
 │   ├── recorded_client.py          # replays one recording to the agent — misses counted, Tier-1 refused
 │   ├── inventory.py                # counts and classifies the corpus (make inventory)
 │   ├── candidate_metrics.py        # pass@k, appeared-at-any-step, duplicate rate (WP-5.2)
+│   ├── oracle_gap.py               # the oracle-gap sample: one recorded batch per paid invocation, and its report
+│   ├── samples/                    # committed sample plans a paid study runs over (oracle_gap.json)
 │   ├── export.py                   # trajectory export for training — refs, not output; refuses holdout
 │   ├── reward.py                    # reward v0 — deterministic, audit-log grounded, withheld when unearnable
 │   ├── judge_calibration/          # trap sets + the calibration harness per judge (WP-6.3)

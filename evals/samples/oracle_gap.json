@@ -1,0 +1,27 @@
+{
+  "study": "oracle_gap",
+  "work_order": "WO-R3-347",
+  "design": "audit-ws docs/plans/research-buildout-v2.1/samples/oracle-gap.md",
+  "strategy": "candidate_selector",
+  "generator": "best_of_n_enumerated",
+  "n": 8,
+  "model_role": "benchmark",
+  "token_multiplier": "2",
+  "usd_multiplier": "1",
+  "batches": 4,
+  "worlds": [
+    {"scenario": "api_latency_db_query", "recording": "<id from WO-R3-294>"},
+    {"scenario": "api_latency_downstream", "recording": "<id from WO-R3-294>"},
+    {"scenario": "api_latency_redis", "recording": "<id from WO-R3-294>"},
+    {"scenario": "dlq_mislabeled_replay_safe", "recording": "<id from WO-R3-294>"},
+    {"scenario": "jobs_not_progressing_dispatcher_stall", "recording": "<id from WO-R3-294>"},
+    {"scenario": "jobs_not_progressing_outbox_stall", "recording": "<id from WO-R3-294>"},
+    {"scenario": "jobs_not_progressing_outbox_stall_deploy_noise", "recording": "<id from WO-R3-294>"},
+    {"scenario": "remediate_consumer_lag_success", "recording": "<id from WO-R3-294>"},
+    {"scenario": "remediate_dlq_backlog_success", "recording": "<id from WO-R3-294>"},
+    {"scenario": "workflow_stuck_dead_lettered_root", "recording": "<id from WO-R3-294>"},
+    {"scenario": "workflow_stuck_downstream_child_failed", "recording": "<id from WO-R3-294>"},
+    {"scenario": "workflow_stuck_paused_dag", "recording": "<id from WO-R3-294>"},
+    {"scenario": "workflow_stuck_resolver_stall", "recording": "<id from WO-R3-294>"}
+  ]
+}

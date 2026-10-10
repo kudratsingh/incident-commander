@@ -1095,9 +1095,50 @@ uv run python -m evals.runner --mode recorded --world c8c4f0119dcd \
     --only remediate_consumer_lag_success
 ```
 
-There is deliberately no `make` target for it. `make eval-live` exists because a live run has a
-world to seed and reset around it; a recorded run has neither, and a target would mostly be a
-second place for the mode's refusals to be re-stated. The runner's own gates are the guard.
+There is deliberately no `make` target for a single recorded run. `make eval-live` exists because a
+live run has a world to seed and reset around it; a recorded run has neither, and a target would
+mostly be a second place for the mode's refusals to be re-stated. The runner's own gates are the
+guard.
+
+**Several worlds in one invocation.** `--world` may be repeated, one per selected scenario. When any
+world is pinned, every selected scenario must be — a scenario left to float to its newest recording
+is refused, because nobody chose that world (ADR 00XX). `--only` still matches by substring in this
+mode, so `--only jobs_not_progressing_outbox_stall` also selects `..._deploy_noise`; the refusal
+names it.
+
+```bash
+uv run python -m evals.runner --mode recorded \
+    --only workflow_stuck_paused_dag,remediate_consumer_lag_success \
+    --world 93673b198b72 --world c8c4f0119dcd
+```
+
+### A sampled study: `make oracle-gap-batch` (WO-R3-347)
+
+The one recorded-mode target, and the reason it exists is the owner's rule that every paid
+invocation gets its own yes (O-45): a batch of 13 worlds has to be ONE invocation, not 13. It reads
+the committed sample plan `evals/samples/oracle_gap.json` (worlds, the recording each is pinned to,
+the arm, the model role, the budget multipliers) and restates none of the runner's refusals — they
+run unchanged inside it.
+
+```bash
+make oracle-gap-batch                 # FREE: checks the plan, prints the exact command, stops
+make oracle-gap-batch YES_SPEND=1     # PAID: one batch, one invocation, the owner's yes for it
+make oracle-gap-batch YES_SPEND=1 WORLDS=<scenario,...>   # a re-run of named worlds (its own yes)
+make oracle-gap-report ARCHIVES=<id>,<id>,<id>,<id> WRITE=1   # FREE: pooled over the batches
+```
+
+The free check refuses a placeholder recording id, a recording that does not exist, and a recording
+whose answer key says it does not describe its world (`applies: false`, ADR 0040) — before anything
+is spent. `YES_SPEND` must be exactly `1`. A paid batch runs the runner once with
+`INFERENCE_STRATEGY`, `SELECTOR_GENERATOR`, `BEST_OF_N`, the two budget multipliers and
+`EVAL_TRACE_DIR=evals/traces` set from the plan, then writes the batch's report under
+`evals/reports/oracle-gap/`. The report scores only comparable runs and lists every other run with
+its reason (a crash, a replay miss, a label that does not apply, another arm or recording, no step
+records); selector numbers stay withheld until the arm's calibration report id is registered in
+`evals/research_report.py`'s calibration register (plan 02:243) AND that report was made on the
+model the selector runs on — the calibration harness asks the judge model, a run's selector is
+called on the agent's model, and the report says which in its `model` field. Run `make world-drift-all` first and read it CLEAN for every pinned recording, as for any
+recorded number. The archive is committed like any paid run's (PROTOCOL step 9).
 
 `--mode recorded` cannot be combined with `--live` or `--smoke`, and it refuses to start if `ANTHROPIC_API_KEY` is a placeholder: a canned planner under a recorded label would be a fabricated row. A selected scenario with no recording is refused by name — it never falls back to canned fixtures.
 

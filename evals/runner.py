@@ -3134,14 +3134,21 @@ def _parse_mode(argv: Sequence[str]) -> tuple[str | None, str]:
     )
 
 
-def _parse_world(argv: Sequence[str]) -> str | None:
-    """The ``--world`` selection: a recording's invocation id, or a scenario name."""
+def _parse_worlds(argv: Sequence[str]) -> list[str]:
+    """Every ``--world`` value, in order: a recording's invocation id or a scenario name.
+
+    Repeated flags or one comma-separated value, like ``--only``; one world per scenario.
+    """
+    worlds: list[str] = []
     for i, arg in enumerate(argv):
+        raw = None
         if arg == "--world" and i + 1 < len(argv):
-            return argv[i + 1].strip()
-        if arg.startswith("--world="):
-            return arg.split("=", 1)[1].strip()
-    return None
+            raw = argv[i + 1]
+        elif arg.startswith("--world="):
+            raw = arg.split("=", 1)[1]
+        if raw is not None:
+            worlds.extend(w.strip() for w in raw.split(",") if w.strip())
+    return worlds
 
 
 def recordings_for(scenarios: Sequence[Scenario], world: str | None) -> tuple[dict[str, Path], str]:
@@ -3152,13 +3159,8 @@ def recordings_for(scenarios: Sequence[Scenario], world: str | None) -> tuple[di
     """
     # 1. Refuse a scenario whose fault is meant to expire during the run: a recording answers every
     #    call at the clock it is replayed at, so that fault never expires and nothing is measured.
-    temporal = [
-        (scenario.name, refusal)
-        for scenario in scenarios
-        if (refusal := scenario.recorded_refusal) is not None
-    ]
-    if temporal:
-        return {}, "RECORDED FAIL: " + " ".join(refusal for _, refusal in temporal)
+    if (temporal := _temporal_refusal(scenarios)) is not None:
+        return {}, temporal
     # 2. With no ``--world`` given, take each scenario's newest recording. A scenario with none
     #    REFUSES the invocation rather than falling back to canned fixtures in a recorded report.
     if world is None:
@@ -3201,10 +3203,65 @@ def recordings_for(scenarios: Sequence[Scenario], world: str | None) -> tuple[di
         return {}, (
             f"RECORDED FAIL: --world {world!r} pins one recording but "
             f"{len(scenarios)} scenarios are selected. Add --only "
-            f"{next(iter(matches))}, or drop --world to replay each scenario's newest "
-            "recording."
+            f"{next(iter(matches))}, give one --world per selected scenario, or drop "
+            "--world to replay each scenario's newest recording."
         )
     return matches, ""
+
+
+def _temporal_refusal(scenarios: Sequence[Scenario]) -> str | None:
+    """The refusal for any selected scenario whose fault expires on the clock, or ``None``."""
+    temporal = [refusal for s in scenarios if (refusal := s.recorded_refusal) is not None]
+    return "RECORDED FAIL: " + " ".join(temporal) if temporal else None
+
+
+def pinned_recordings_for(
+    scenarios: Sequence[Scenario], worlds: Sequence[str]
+) -> tuple[dict[str, Path], str]:
+    """One pinned recording per selected scenario, from several ``--world`` values, or a refusal.
+
+    Every world must name exactly one recording of one selected scenario, and every selected
+    scenario must be pinned, so a batch's numbers come only from worlds somebody chose.
+    """
+    # 1. The same clock refusal as a single world, for the same reason.
+    if (temporal := _temporal_refusal(scenarios)) is not None:
+        return {}, temporal
+    # 2. A world given twice is a typo or a pasted list; either way it is not two worlds.
+    repeated = sorted({world for world in worlds if worlds.count(world) > 1})
+    if repeated:
+        return {}, (
+            f"RECORDED FAIL: --world {', '.join(repeated)} is given more than once. "
+            "Pin each world once."
+        )
+    # 3. Resolve each world through the shared resolver; each must land on exactly one scenario,
+    #    and no scenario may be pinned by two worlds.
+    names = [scenario.name for scenario in scenarios]
+    found: dict[str, Path] = {}
+    for world in worlds:
+        matches = matching_recordings(world, names)
+        if len(matches) != 1:
+            return {}, (
+                f"RECORDED FAIL: --world {world!r} matches "
+                f"{'no recording' if not matches else f'recordings of {len(matches)} scenarios'}"
+                " among the selected scenarios. Each --world must name one recording "
+                "(its invocation id) of one scenario selected with --only."
+            )
+        ((scenario, path),) = matches.items()
+        if scenario in found:
+            return {}, (
+                f"RECORDED FAIL: {scenario} is pinned by two --world values. One world is "
+                "one recording; pin each scenario once."
+            )
+        found[scenario] = path
+    # 4. A selected scenario nobody pinned would replay whatever is newest, which nobody chose.
+    unpinned = sorted(set(names) - set(found))
+    if unpinned:
+        return {}, (
+            f"RECORDED FAIL: {len(unpinned)} selected scenario(s) have no --world: "
+            f"{', '.join(unpinned)}. When any world is pinned, every selected scenario is "
+            "pinned — narrow --only, or add a --world for each."
+        )
+    return found, ""
 
 
 def _smoke_holdback_reason(scenario: Scenario) -> str:
@@ -3318,10 +3375,10 @@ def main() -> int:
         )
         print("no scenarios ran, nothing was spent")
         return 2
-    world = _parse_world(sys.argv[1:])
-    if world is not None and not recorded:
+    worlds = _parse_worlds(sys.argv[1:])
+    if worlds and not recorded:
         print(
-            f"WORLD FAIL: --world {world!r} was given without --mode {RECORDED_MODE}. "
+            f"WORLD FAIL: --world {', '.join(worlds)} was given without --mode {RECORDED_MODE}. "
             "A world is a recording, and only a recorded run replays one."
         )
         print("no scenarios ran, nothing was spent")
@@ -3577,7 +3634,12 @@ def main() -> int:
     #     AFTER the selection is final, so a refusal can name the scenarios that would have run.
     recorded_worlds: dict[str, Path] = {}
     if recorded:
-        recorded_worlds, recorded_refusal = recordings_for(scenarios, world)
+        # One --world (or none) keeps the single-world rules; several pin one world per scenario.
+        recorded_worlds, recorded_refusal = (
+            pinned_recordings_for(scenarios, worlds)
+            if len(worlds) > 1
+            else recordings_for(scenarios, worlds[0] if worlds else None)
+        )
         if recorded_refusal:
             print(recorded_refusal)
             print("no scenarios ran, nothing was spent")

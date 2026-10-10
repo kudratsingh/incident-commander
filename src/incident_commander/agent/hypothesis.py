@@ -162,6 +162,7 @@ ReadToolName = Literal[
     "get_cache_key_info",
     "get_circuit_breakers",
     "get_consumer_lag",
+    "get_control_loops",
     "get_dag_state",
     "get_deploy_history",
     "get_incident",

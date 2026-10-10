@@ -37,6 +37,7 @@ _READ_TOOLS: Final[frozenset[str]] = frozenset(
         "get_cache_key_info",
         "get_circuit_breakers",
         "get_consumer_lag",
+        "get_control_loops",
         "get_dag_state",
         "get_deploy_history",
         "get_incident",
@@ -223,6 +224,8 @@ RESOURCE_ARG_FIELDS: Final[dict[str, frozenset[str]]] = {
     # and a missing entry always means "nobody decided" (ADR 0003).
     "get_circuit_breakers": frozenset(),
     "get_consumer_lag": frozenset({"consumer_group"}),
+    # Takes no arguments: every loop comes back on every call.
+    "get_control_loops": frozenset(),
     "get_dag_state": frozenset({"job_id"}),
     "get_deploy_history": frozenset(),
     "get_incident": frozenset({"id"}),

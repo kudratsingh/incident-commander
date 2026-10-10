@@ -45,11 +45,11 @@ canned_tool_responses:
   get_consumer_lag:
   - content:
     - type: text
-      text: '{"consumer_group":"worker-dispatcher","lag":30,"lag_known":true,"source":"live","cache_key":"kafka:consumer_lag:worker-dispatcher","measured_at":"2026-09-20T15:18:04Z","age_seconds":8,"recent_samples":[{"lag":30,"measured_at":"2026-09-20T15:18:04Z"},{"lag":10,"measured_at":"2026-09-20T15:17:04Z"},{"lag":0,"measured_at":"2026-09-20T15:16:04Z"}]}'
+      text: '{"consumer_group":"worker-dispatcher","lag":30,"lag_known":true,"source":"live","cache_key":"kafka:consumer_lag:worker-dispatcher","measured_at":"2026-09-20T15:18:04Z","age_seconds":8,"recent_samples":[{"lag":30,"measured_at":"2026-09-20T15:18:04Z"},{"lag":10,"measured_at":"2026-09-20T15:17:04Z"},{"lag":0,"measured_at":"2026-09-20T15:16:04Z"}],"last_poll_at":"2026-09-20T15:16:34Z","last_poll_age_seconds":98}'
     is_error: false
   - content:
     - type: text
-      text: '{"consumer_group":"worker-dispatcher","lag":30,"lag_known":true,"source":"live","cache_key":"kafka:consumer_lag:worker-dispatcher","measured_at":"2026-09-20T15:18:04Z","age_seconds":52,"recent_samples":[{"lag":30,"measured_at":"2026-09-20T15:18:04Z"},{"lag":10,"measured_at":"2026-09-20T15:17:04Z"},{"lag":0,"measured_at":"2026-09-20T15:16:04Z"}]}'
+      text: '{"consumer_group":"worker-dispatcher","lag":30,"lag_known":true,"source":"live","cache_key":"kafka:consumer_lag:worker-dispatcher","measured_at":"2026-09-20T15:18:04Z","age_seconds":52,"recent_samples":[{"lag":30,"measured_at":"2026-09-20T15:18:04Z"},{"lag":10,"measured_at":"2026-09-20T15:17:04Z"},{"lag":0,"measured_at":"2026-09-20T15:16:04Z"}],"last_poll_at":"2026-09-20T15:16:34Z","last_poll_age_seconds":142}'
     is_error: false
   # THE DISTRACTOR, AND IT IS THE REAL ONE. The platform's four resting dead-letter rows, byte
   # for byte as `dlq_backlog` declares them — including the row whose error names an SMTP relay,

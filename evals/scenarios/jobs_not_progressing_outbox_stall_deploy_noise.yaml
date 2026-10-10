@@ -81,10 +81,12 @@ canned_tool_responses:
   # RECORDED from the live v0.6.9 world with this hook seeded and `make traffic`
   # running (`make world-record ONLY=jobs_not_progressing_outbox_stall_deploy_noise`;
   # the recording is committed under `evals/recorded_worlds/`).
+  # `last_poll_at` / `last_poll_age_seconds` (platform v0.6.24) were added at that re-pin, not
+  # recorded: the dispatcher is running, so one second before the reading.
   get_consumer_lag:
     content:
     - type: text
-      text: '{"consumer_group":"worker-dispatcher","lag":0,"lag_known":true,"source":"live","cache_key":"kafka:consumer_lag:worker-dispatcher","measured_at":"2026-09-17T20:52:01.491615Z","age_seconds":23,"recent_samples":[{"lag":0,"measured_at":"2026-09-17T20:52:01.491615Z"}]}'
+      text: '{"consumer_group":"worker-dispatcher","lag":0,"lag_known":true,"source":"live","cache_key":"kafka:consumer_lag:worker-dispatcher","measured_at":"2026-09-17T20:52:01.491615Z","age_seconds":23,"recent_samples":[{"lag":0,"measured_at":"2026-09-17T20:52:01.491615Z"}],"last_poll_at":"2026-09-17T20:52:00.491615Z","last_poll_age_seconds":24}'
     is_error: false
   get_outbox_status:
     content:

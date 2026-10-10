@@ -97,14 +97,16 @@ canned_tool_responses:
   # `remediate_consumer_lag_success` uses and the drift ledger carries it as
   # `post-action`: the check probes the world BEFORE the remediation, so this
   # element is unfixable by construction rather than wrong.
+  # `last_poll_at` / `last_poll_age_seconds` (platform v0.6.24) were added at that re-pin, not
+  # recorded: frozen at the kill (20:52:45) in [0], one second before the reading in [1].
   get_consumer_lag:
   - content:
     - type: text
-      text: '{"consumer_group":"worker-dispatcher","lag":24,"lag_known":true,"source":"live","cache_key":"kafka:consumer_lag:worker-dispatcher","measured_at":"2026-09-17T20:54:02.092561Z","age_seconds":0,"recent_samples":[{"lag":24,"measured_at":"2026-09-17T20:54:02.092561Z"},{"lag":5,"measured_at":"2026-09-17T20:53:01.675057Z"}]}'
+      text: '{"consumer_group":"worker-dispatcher","lag":24,"lag_known":true,"source":"live","cache_key":"kafka:consumer_lag:worker-dispatcher","measured_at":"2026-09-17T20:54:02.092561Z","age_seconds":0,"recent_samples":[{"lag":24,"measured_at":"2026-09-17T20:54:02.092561Z"},{"lag":5,"measured_at":"2026-09-17T20:53:01.675057Z"}],"last_poll_at":"2026-09-17T20:52:45Z","last_poll_age_seconds":77}'
     is_error: false
   - content:
     - type: text
-      text: '{"consumer_group":"worker-dispatcher","lag":0,"lag_known":true,"source":"live","cache_key":"kafka:consumer_lag:worker-dispatcher","measured_at":"2026-09-17T20:56:02.510773Z","age_seconds":6,"recent_samples":[{"lag":0,"measured_at":"2026-09-17T20:56:02.510773Z"},{"lag":9,"measured_at":"2026-09-17T20:55:02.301884Z"},{"lag":24,"measured_at":"2026-09-17T20:54:02.092561Z"},{"lag":5,"measured_at":"2026-09-17T20:53:01.675057Z"}]}'
+      text: '{"consumer_group":"worker-dispatcher","lag":0,"lag_known":true,"source":"live","cache_key":"kafka:consumer_lag:worker-dispatcher","measured_at":"2026-09-17T20:56:02.510773Z","age_seconds":6,"recent_samples":[{"lag":0,"measured_at":"2026-09-17T20:56:02.510773Z"},{"lag":9,"measured_at":"2026-09-17T20:55:02.301884Z"},{"lag":24,"measured_at":"2026-09-17T20:54:02.092561Z"},{"lag":5,"measured_at":"2026-09-17T20:53:01.675057Z"}],"last_poll_at":"2026-09-17T20:56:01.510773Z","last_poll_age_seconds":7}'
     is_error: false
   # The discriminating read, verbatim from the recording, and in this world it is
   # the one that rules the sibling OUT. `unpublished_count` is 1 and its one row

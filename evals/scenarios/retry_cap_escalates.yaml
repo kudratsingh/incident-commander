@@ -31,15 +31,15 @@ canned_tool_responses:
   get_consumer_lag:
   - content:
     - type: text
-      text: '{"consumer_group":"billing-consumer","lag":40,"lag_known":true,"source":"live","cache_key":"kafka:consumer_lag:billing-consumer","measured_at":"2026-07-28T09:56:02Z","age_seconds":58,"recent_samples":[{"lag":40,"measured_at":"2026-07-28T09:56:02Z"},{"lag":40,"measured_at":"2026-07-28T09:56:02Z"},{"lag":40,"measured_at":"2026-07-28T09:56:02Z"},{"lag":40,"measured_at":"2026-07-28T09:56:02Z"},{"lag":40,"measured_at":"2026-07-28T09:56:02Z"}]}'
+      text: '{"consumer_group":"billing-consumer","lag":40,"lag_known":true,"source":"live","cache_key":"kafka:consumer_lag:billing-consumer","measured_at":"2026-07-28T09:56:02Z","age_seconds":58,"recent_samples":[{"lag":40,"measured_at":"2026-07-28T09:56:02Z"},{"lag":40,"measured_at":"2026-07-28T09:56:02Z"},{"lag":40,"measured_at":"2026-07-28T09:56:02Z"},{"lag":40,"measured_at":"2026-07-28T09:56:02Z"},{"lag":40,"measured_at":"2026-07-28T09:56:02Z"}],"last_poll_at":null,"last_poll_age_seconds":null}'
     is_error: false
   - content:
     - type: text
-      text: '{"consumer_group":"billing-consumer","lag":42000,"lag_known":true,"source":"live","cache_key":"kafka:consumer_lag:billing-consumer","measured_at":"2026-07-28T09:57:10Z","age_seconds":2,"recent_samples":[{"lag":42000,"measured_at":"2026-07-28T09:57:10Z"},{"lag":31500,"measured_at":"2026-07-28T09:56:10Z"},{"lag":22400,"measured_at":"2026-07-28T09:55:10Z"},{"lag":12100,"measured_at":"2026-07-28T09:54:10Z"},{"lag":3800,"measured_at":"2026-07-28T09:53:10Z"}]}'
+      text: '{"consumer_group":"billing-consumer","lag":42000,"lag_known":true,"source":"live","cache_key":"kafka:consumer_lag:billing-consumer","measured_at":"2026-07-28T09:57:10Z","age_seconds":2,"recent_samples":[{"lag":42000,"measured_at":"2026-07-28T09:57:10Z"},{"lag":31500,"measured_at":"2026-07-28T09:56:10Z"},{"lag":22400,"measured_at":"2026-07-28T09:55:10Z"},{"lag":12100,"measured_at":"2026-07-28T09:54:10Z"},{"lag":3800,"measured_at":"2026-07-28T09:53:10Z"}],"last_poll_at":null,"last_poll_age_seconds":null}'
     is_error: false
   - content:
     - type: text
-      text: '{"consumer_group":"billing-consumer","lag":42000,"lag_known":true,"source":"live","cache_key":"kafka:consumer_lag:billing-consumer","measured_at":"2026-07-28T09:57:52Z","age_seconds":1,"recent_samples":[{"lag":42000,"measured_at":"2026-07-28T09:57:52Z"},{"lag":42000,"measured_at":"2026-07-28T09:57:37Z"},{"lag":42000,"measured_at":"2026-07-28T09:57:10Z"},{"lag":31500,"measured_at":"2026-07-28T09:56:10Z"},{"lag":22400,"measured_at":"2026-07-28T09:55:10Z"}]}'
+      text: '{"consumer_group":"billing-consumer","lag":42000,"lag_known":true,"source":"live","cache_key":"kafka:consumer_lag:billing-consumer","measured_at":"2026-07-28T09:57:52Z","age_seconds":1,"recent_samples":[{"lag":42000,"measured_at":"2026-07-28T09:57:52Z"},{"lag":42000,"measured_at":"2026-07-28T09:57:37Z"},{"lag":42000,"measured_at":"2026-07-28T09:57:10Z"},{"lag":31500,"measured_at":"2026-07-28T09:56:10Z"},{"lag":22400,"measured_at":"2026-07-28T09:55:10Z"}],"last_poll_at":null,"last_poll_age_seconds":null}'
     is_error: false
   invalidate_cache_key:
     content:

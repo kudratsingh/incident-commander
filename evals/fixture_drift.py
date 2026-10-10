@@ -30,7 +30,10 @@ _VOLATILE: Final[Mapping[str, frozenset[str]]] = {
     # `age_seconds` and `recent_samples` are all properties of when you looked —
     # `recent_samples` even in its emptiness, which is why `compare` also exempts
     # a volatile list from `no_live_rows`. `lag` and `source` stay guarded, and the
-    # key-set diff still reports a fixture that was never re-recorded.
+    # key-set diff still reports a fixture that was never re-recorded. v0.6.24 (plat #243)
+    # adds `last_poll_at` and `last_poll_age_seconds`: a clock and an age, like the two
+    # above, and frozen-or-fresh is the canned world's story, not something a reset
+    # stack can match.
     "get_consumer_lag": frozenset(
         {
             "lag_known",
@@ -39,6 +42,8 @@ _VOLATILE: Final[Mapping[str, frozenset[str]]] = {
             "recent_samples",
             "recent_samples.lag",
             "recent_samples.measured_at",
+            "last_poll_at",
+            "last_poll_age_seconds",
         }
     ),
     # v0.6.11 (plat #218, WO-R3-217) added twelve output fields and v0.6.12's

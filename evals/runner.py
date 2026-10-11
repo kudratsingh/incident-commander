@@ -4,13 +4,14 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import stat
 import subprocess
 import sys
 import time
 import uuid
 from collections.abc import Callable, Iterable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from enum import StrEnum
@@ -227,6 +228,19 @@ class RunProvenance(BaseModel):
     # The run's OWN ledger: ``max_*`` are the budgets actually seeded (ADR 0019's per-scenario
     # cap, the protocol's .env-only ceilings), ``*_used`` are ADR 0015's four meters.
     budget: BudgetLedger
+    # --- a repeated invocation and its study (WO-R3-375, ADR 0079 amendment) ---------------
+    # Which pass of a ``--repeats N`` invocation made this run, from 0. Each pass is its own
+    # archive under its own ``invocation_id`` (invariant 9: runs are separated by identity), so
+    # an archive still holds one row per scenario. 0 on every run that was not repeated, which
+    # is also how every archive written before the field reads.
+    repeat: int = Field(default=0, ge=0)
+    # Pass 0's ``invocation_id``, on every pass of a repeated invocation, so the passes can be
+    # found from any one of them; ``None`` when the invocation made one pass.
+    repeat_of: str | None = None
+    # The ``study`` of the committed sample plan that asked for this run (``--study``, set by
+    # ``make oracle-gap-batch``); ``None`` when no plan asked. A study's report scores only its
+    # own runs, so a pilot is never pooled into the main sample (O-55).
+    study: str | None = None
 
 
 @lru_cache(maxsize=1)
@@ -2543,6 +2557,23 @@ def _crashed_result(
     return ScenarioResult(outcome=outcome, trajectory=trajectory, briefing=briefing)
 
 
+def _in_series(
+    result: ScenarioResult, *, repeat: int, repeat_of: str | None, study: str | None
+) -> ScenarioResult:
+    """The result with its pass of a repeated invocation, and its study, on its provenance.
+
+    Unchanged when the invocation made one pass for no study, so such a row is byte for byte
+    what it was before the fields existed. A row with no provenance has nowhere to carry them.
+    """
+    provenance = result.outcome.provenance
+    if provenance is None or (repeat == 0 and repeat_of is None and study is None):
+        return result
+    stamped = provenance.model_copy(
+        update={"repeat": repeat, "repeat_of": repeat_of, "study": study}
+    )
+    return replace(result, outcome=result.outcome.model_copy(update={"provenance": stamped}))
+
+
 def run_all(
     scenarios: Iterable[Scenario],
     settings: Settings,
@@ -2556,6 +2587,9 @@ def run_all(
     rehearsal: bool = False,
     world_already_faulted: bool = False,
     alert_from_platform: bool = False,
+    repeat: int = 0,
+    repeat_of: str | None = None,
+    study: str | None = None,
 ) -> tuple[RunReport, tuple[Trajectory, ...], tuple[EscalationBriefing, ...]]:
     """Run every scenario and assemble the report.
 
@@ -2563,7 +2597,9 @@ def run_all(
     ``alert_from_platform`` (O-36) apply to the WHOLE invocation, because each describes the
     process rather than one scenario's world; ``recorded_worlds`` is per scenario and maps a
     name to the recording to replay it against (WP-3.3), with ``main`` refusing a recorded
-    selection that has no recording before anything runs.
+    selection that has no recording before anything runs. ``repeat``, ``repeat_of`` and
+    ``study`` say which pass of a ``--repeats`` invocation this is and which sample plan asked
+    for it; every row's provenance carries them (WO-R3-375).
     """
     # 1. Read the selection into a tuple once. The refusal below needs the names before the loop
     #    starts, and a generator read twice would be empty by the time the loop got to it.
@@ -2614,6 +2650,9 @@ def run_all(
                 rehearsal=rehearsal,
                 world_already_faulted=world_already_faulted,
             )
+        # Stamped here, the one place both a graded row and a crash row pass, and before the
+        # archive hook below writes it: which pass made the row, and which study asked for it.
+        result = _in_series(result, repeat=repeat, repeat_of=repeat_of, study=study)
         results.append(result)
         # 4. Hand the result to the caller's hook, which archives it while the next scenario runs.
         #    OUTSIDE the try, so a failed archive aborts the suite instead of reading as a crash.
@@ -3151,6 +3190,65 @@ def _parse_worlds(argv: Sequence[str]) -> list[str]:
     return worlds
 
 
+#: How many passes one invocation makes over its selection (WO-R3-375). Recorded mode only.
+REPEATS_FLAG: Final[str] = "--repeats"
+#: Which committed sample plan asked for this invocation's runs (WO-R3-375), e.g. ``oracle_gap``.
+STUDY_FLAG: Final[str] = "--study"
+#: A study is a plan's ``study`` name: short, lower case, nothing a filename or a reader trips on.
+_STUDY_NAME: Final[re.Pattern[str]] = re.compile(r"\A[a-z0-9_]{1,64}\Z")
+
+
+def _flag_values(argv: Sequence[str], flag: str) -> tuple[list[str], bool]:
+    """Every value given for ``flag`` (``flag v`` or ``flag=v``), and whether one was left empty."""
+    values: list[str] = []
+    dangling = False
+    for i, arg in enumerate(argv):
+        if arg == flag:
+            if i + 1 < len(argv) and not argv[i + 1].startswith("--"):
+                values.append(argv[i + 1])
+            else:
+                dangling = True
+        elif arg.startswith(f"{flag}="):
+            values.append(arg.split("=", 1)[1])
+    return values, dangling
+
+
+def _parse_repeats(argv: Sequence[str]) -> tuple[int | None, str]:
+    """How many passes this invocation makes over the same selection: 1 unless ``--repeats N``.
+
+    ``None`` and the refusal for anything but one whole number of 1 or more, so a typo is never
+    read as a different number of paid runs.
+    """
+    values, dangling = _flag_values(argv, REPEATS_FLAG)
+    if not values and not dangling:
+        return 1, ""
+    if dangling or len(values) != 1 or not values[0].isdigit() or int(values[0]) < 1:
+        given = ", ".join(repr(value) for value in values) or "nothing"
+        return None, (
+            f"REPEATS FAIL: {REPEATS_FLAG} takes one whole number of passes, 1 or more; "
+            f"got {given}. Each pass is a full run of every selected world, and every one is paid."
+        )
+    return int(values[0]), ""
+
+
+def _parse_study(argv: Sequence[str]) -> tuple[str | None, str]:
+    """The sample plan's study this invocation runs for (``--study NAME``), or ``None``.
+
+    Stamped on every row, so a study's report can tell its own runs from another study's that
+    replayed the same recordings (O-55: the pilot is never pooled into the main sample).
+    """
+    values, dangling = _flag_values(argv, STUDY_FLAG)
+    if not values and not dangling:
+        return None, ""
+    if dangling or len(values) != 1 or not _STUDY_NAME.match(values[0]):
+        given = ", ".join(repr(value) for value in values) or "nothing"
+        return None, (
+            f"STUDY FAIL: {STUDY_FLAG} takes one study name (lower case letters, digits, "
+            f"underscores — the sample plan's `study`); got {given}."
+        )
+    return values[0], ""
+
+
 def recordings_for(scenarios: Sequence[Scenario], world: str | None) -> tuple[dict[str, Path], str]:
     """Which recording each selected scenario replays, or a refusal saying why not.
 
@@ -3383,6 +3481,25 @@ def main() -> int:
         )
         print("no scenarios ran, nothing was spent")
         return 2
+    # ``--repeats N`` makes N passes over the same pinned worlds in this ONE invocation, so a
+    # repeated batch is one paid ask (O-45, WO-R3-375). Recorded mode only: a recording is the
+    # same world on every pass, while a live pass would act on the shared world N times with no
+    # reset between (ADR 0020) and a canned pass would replay the same file to the same planner.
+    repeats, repeats_refusal = _parse_repeats(sys.argv[1:])
+    study, study_refusal = _parse_study(sys.argv[1:])
+    if repeats is None or study_refusal:
+        print(repeats_refusal or study_refusal)
+        print("no scenarios ran, nothing was spent")
+        return 2
+    if repeats > 1 and not recorded:
+        print(
+            f"REPEATS FAIL: {REPEATS_FLAG} {repeats} needs --mode {RECORDED_MODE}. A recorded "
+            "pass replays the same world from a file every time; a live pass would act on the "
+            "shared world again with no reset between passes, and a canned pass would replay "
+            "the same fixtures to the same canned planner."
+        )
+        print("no scenarios ran, nothing was spent")
+        return 2
     # The one combination that could touch the shared world while claiming to be a replay:
     # --live and --smoke reach a platform, and a recording is a file.
     if recorded and (live or smoke):
@@ -3525,8 +3642,13 @@ def main() -> int:
             return 2
         # On the shared-world path a pattern must be a scenario's FULL NAME: `ONLY=dlq_backlog`
         # also took `remediate_dlq_backlog_success`, drained the seeded replay_safe pool and got
-        # the agent blamed. Offline and `--smoke` keep substring matching.
-        if (live or rehearsal) and not smoke:
+        # the agent blamed. A recorded run that PINS its worlds names them in full too: every
+        # selected scenario must be pinned, so a substring that widens the selection
+        # (`jobs_not_progressing_outbox_stall` takes its `_deploy_noise` sibling) could only
+        # refuse the batch (WO-R3-375). Offline, `--smoke` and unpinned recorded runs keep
+        # substring matching.
+        pinned = recorded and bool(worlds)
+        if ((live or rehearsal) and not smoke) or pinned:
             known = {s.name for s in scenarios}
             widened = [p for p in only_patterns if p not in known]
             if widened:
@@ -3534,12 +3656,17 @@ def main() -> int:
                     f"SELECTION FAIL: {len(widened)} --only pattern(s) are not "
                     f"scenario names: {', '.join(widened)}"
                 )
-                print(
-                    "A run against the shared platform selects by full scenario name — "
+                why = (
+                    "A recorded run that pins its worlds with --world selects by full "
+                    "scenario name — one named scenario per pattern — because every "
+                    "selected scenario must be pinned, and a substring widens the "
+                    "selection past the worlds you named."
+                    if pinned
+                    else "A run against the shared platform selects by full scenario name — "
                     "one named scenario per pattern — because a substring silently widens "
-                    "the selection past the ADR 0020 one-mutating-scenario gate. "
-                    "Did you mean:"
+                    "the selection past the ADR 0020 one-mutating-scenario gate."
                 )
+                print(f"{why} Did you mean:")
                 for pattern in widened:
                     for name in matched[pattern]:
                         print(f"  --only {pattern} → {name}")
@@ -3831,16 +3958,13 @@ def main() -> int:
         # Last, so it reads as a statement about the probes just reported.
         print(_lab_probe_note(lab_probe_token))
 
-    # 19. Create this invocation's archive directory BEFORE the suite runs, so each scenario writes
-    #     its evidence as it finishes. Created non-destructively: an id collision fails here.
+    # 19. One archive per pass, each created BEFORE its pass runs so each scenario writes its
+    #     evidence as it finishes, non-destructively: an id collision fails there. Pass 0 keeps this
+    #     invocation's id; each further ``--repeats`` pass mints its own, so every archive holds one
+    #     row per scenario and runs stay separated by identity (invariant 9, WO-R3-375).
     trace_dir_setting = os.environ.get(_TRACE_DIR_ENV)
     trace_dir = Path(trace_dir_setting) if trace_dir_setting else None
-    target = _RUNS_DIR / invocation_id
-    target.mkdir(parents=True, exist_ok=False)
-    (target / "trajectories").mkdir(exist_ok=False)
-    (target / "briefings").mkdir(exist_ok=False)
-    if trace_dir is not None:
-        (target / "traces").mkdir(exist_ok=False)
+    pass_ids = [invocation_id, *(uuid.uuid4().hex[:12] for _ in range(repeats - 1))]
 
     # 20. Start collecting audit pages as the stage runs. The listing has no offset and no "since",
     #     so afterwards only the newest 200 rows exist: a noisy stage would end up unprovable.
@@ -3851,51 +3975,73 @@ def main() -> int:
     )
     scan_client = make_client(settings, token=mcp_token) if guard_required else None
 
-    def _after_scenario(result: ScenarioResult) -> None:
-        archive_scenario(target, result, invocation_id=invocation_id, trace_dir=trace_dir)
-        if audit_scan is None or scan_client is None:
-            return
-        try:
-            audit_scan.checkpoint(scan_client)
-        except LabProbeRefused as err:
-            # NOT best-effort: swallowing this leaves the checkpoint's read recorded as the
-            # agent's, which is the silent unlabelled fallback this design forbids.
-            print(f"LAB PROBE REFUSED ({err.reason_code}) on the audit checkpoint: {err}")
-            raise
-        except Exception as err:  # noqa: BLE001 — a checkpoint is best-effort
-            # A missed checkpoint only narrows coverage, which fails closed on its own.
-            print(f"post-stage audit checkpoint skipped ({type(err).__name__}: {err})")
+    def _archiver(target: Path, pass_id: str) -> Callable[[ScenarioResult], None]:
+        def _after_scenario(result: ScenarioResult) -> None:
+            archive_scenario(target, result, invocation_id=pass_id, trace_dir=trace_dir)
+            if audit_scan is None or scan_client is None:
+                return
+            try:
+                audit_scan.checkpoint(scan_client)
+            except LabProbeRefused as err:
+                # NOT best-effort: swallowing this leaves the checkpoint's read recorded as the
+                # agent's, which is the silent unlabelled fallback this design forbids.
+                print(f"LAB PROBE REFUSED ({err.reason_code}) on the audit checkpoint: {err}")
+                raise
+            except Exception as err:  # noqa: BLE001 — a checkpoint is best-effort
+                # A missed checkpoint only narrows coverage, which fails closed on its own.
+                print(f"post-stage audit checkpoint skipped ({type(err).__name__}: {err})")
 
-    # 21. Run the suite, archiving each scenario and taking an audit page as it finishes.
+        return _after_scenario
+
+    # 21. Run the suite once per pass, archiving each scenario and taking an audit page as it
+    #     finishes. 22. Seal each pass's archive with its ``report.json`` marker, and only THEN
+    #     its top-level report, trajectories and briefings: a failure halfway leaves a full record.
+    reports: list[RunReport] = []
     try:
-        report, trajectories, briefings = run_all(
-            scenarios,
-            settings,
-            mcp_token=mcp_token,
-            invocation_id=invocation_id,
-            only_patterns=tuple(only_patterns),
-            on_result=_after_scenario,
-            model_role=model_role,
-            recorded_worlds=recorded_worlds,
-            rehearsal=rehearsal,
-            world_already_faulted=world_already_faulted,
-            alert_from_platform=alert_from_platform,
-        )
+        for repeat, pass_id in enumerate(pass_ids):
+            if repeats > 1:
+                print(f"pass {repeat + 1} of {repeats}: invocation {pass_id}")
+            target = _RUNS_DIR / pass_id
+            target.mkdir(parents=True, exist_ok=False)
+            (target / "trajectories").mkdir(exist_ok=False)
+            (target / "briefings").mkdir(exist_ok=False)
+            if trace_dir is not None:
+                (target / "traces").mkdir(exist_ok=False)
+            report, trajectories, briefings = run_all(
+                scenarios,
+                settings,
+                mcp_token=mcp_token,
+                invocation_id=pass_id,
+                only_patterns=tuple(only_patterns),
+                on_result=_archiver(target, pass_id),
+                model_role=model_role,
+                recorded_worlds=recorded_worlds,
+                rehearsal=rehearsal,
+                world_already_faulted=world_already_faulted,
+                alert_from_platform=alert_from_platform,
+                repeat=repeat,
+                repeat_of=invocation_id if repeats > 1 else None,
+                study=study,
+            )
+            ran_names = [o.scenario for o in report.outcomes]
+            archived = finalize_archive(target, report)
+            written_report = write_report(report)
+            write_trajectories(trajectories, timestamp=report.generated_at)
+            write_briefings(
+                briefings, ran_names, invocation_id=pass_id, timestamp=report.generated_at
+            )
+            _print_summary(report)
+            print(f"run archived: {_repo_relative(archived)} (immutable)")
+            print(f"report: {_repo_relative(written_report)}")
+            reports.append(report)
     finally:
         if scan_client is not None:
             scan_client.close()
-    ran_names = [o.scenario for o in report.outcomes]
-    # 22. Seal the archive with its ``report.json`` marker, and only THEN the top-level report,
-    #     trajectories and briefings: in that order a failure halfway still leaves a full record.
-    archived = finalize_archive(target, report)
-    written_report = write_report(report)
-    write_trajectories(trajectories, timestamp=report.generated_at)
-    write_briefings(
-        briefings, ran_names, invocation_id=invocation_id, timestamp=report.generated_at
-    )
-    _print_summary(report)
-    print(f"run archived: {_repo_relative(archived)} (immutable)")
-    print(f"report: {_repo_relative(written_report)}")
+    if repeats > 1:
+        print(
+            f"repeated invocation: {repeats} passes, one archive each — {', '.join(pass_ids)} "
+            f"(every row names pass 0, {invocation_id}, as repeat_of)"
+        )
 
     # 23. Assert from the platform's own audit log, not the agent's self-reported trajectory, that a
     #     read-only stage executed no Tier-1 action. This caught a stage holding write scope.
@@ -3942,9 +4088,12 @@ def main() -> int:
         print("post-stage audit: zero successful Tier-1 actions during the smoke stage")
 
     # 24. Choose the exit code, widest blast radius first, since only a dirty world reaches the NEXT
-    #     invocation: dirty world, then ungraded scenario, then a failure. All after the archive.
-    if (live or rehearsal) and (report.contaminated_scenarios or chaos_block_reason() is not None):
-        named = ", ".join(report.contaminated_scenarios) or (chaos_block_reason() or "")
+    #     invocation: dirty world, then ungraded scenario, then a failure. All after the archive,
+    #     and over every pass: one pass's failure is the invocation's.
+    contaminated = [name for report in reports for name in report.contaminated_scenarios]
+    ungraded = [entry for report in reports for entry in report.ungraded]
+    if (live or rehearsal) and (contaminated or chaos_block_reason() is not None):
+        named = ", ".join(contaminated) or (chaos_block_reason() or "")
         print(
             "TEARDOWN FAIL: the shared world is contaminated and further live runs "
             f"are blocked ({named}). This run's grades stand; the environment does not."
@@ -3956,13 +4105,13 @@ def main() -> int:
             "  uv run python -m evals.runner --clear-chaos-block"
         )
         return 10
-    if report.ungraded:
+    if ungraded:
         print(
-            f"WORLD FAIL: {len(report.ungraded)} scenario(s) could not be seeded and "
+            f"WORLD FAIL: {len(ungraded)} scenario(s) could not be seeded and "
             "were not graded — this is a statement about the environment, not the agent."
         )
         return 9
-    return 0 if report.failed == 0 else 1
+    return 0 if all(report.failed == 0 for report in reports) else 1
 
 
 if __name__ == "__main__":

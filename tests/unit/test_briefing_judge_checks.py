@@ -27,6 +27,7 @@ from evals.graders.llm_judge import BRIEFING_JUDGE_CHECKS, JUDGE_PROMPT, cited_c
 from evals.judge_calibration import labels
 from evals.judge_calibration.fakes import FakeJudgeClient, answers_for
 from evals.judge_calibration.harness import calibrate
+from evals.judge_calibration.label_leg import packet_of
 from evals.judge_calibration.roles import BRIEFING_JUDGE, BriefingSubject, briefing_verdict
 from evals.judge_calibration.traps import BRIEFING_CHECK_TRAPS, TrapCase, traps_for
 from incident_commander.llm.prompts.loader import load_prompt, raw_prompt
@@ -109,7 +110,13 @@ class TestTheRubricIsChecks:
         assert len(examples) == 1, (name, examples)
         ((label_id, stated),) = examples
         assert labels.briefing_path(label_id).is_file(), label_id
-        owner = {row["id"]: row["label"] for row in labels.read_lines(labels.LABELS_FILE)}
+        # Packet 1's label: the rubric was written from packet 1, and a later packet's label of
+        # a repeated briefing is a re-test, not the label the example quotes.
+        owner = {
+            row["id"]: row["label"]
+            for row in labels.read_lines(labels.LABELS_FILE)
+            if packet_of(row) == 1
+        }
         assert owner.get(label_id) == stated, (label_id, stated, owner.get(label_id))
 
     @pytest.mark.parametrize("name", BRIEFING_JUDGE_CHECKS)

@@ -1023,6 +1023,21 @@ def calibration_gate(arm: str, agent_model: str, *, root: Path = REPO_ROOT) -> d
     return gate
 
 
+def selector_number(
+    label: str, value: str, *, report_ids: Sequence[str], why_withheld: str = ""
+) -> str:
+    """One selector number and the calibration report it rests on, in one cell (O-55).
+
+    ``selected@8 = 9/12 [cal 4fc2722d286e]``: wherever the number is quoted, the report that
+    vouches for it goes with it. With no report the number is not shown at all and the reason
+    stands in its place — ``selected@8 withheld [<why>]`` — so a withheld cell still says why
+    (plan 02:243). The one renderer this report's oracle-gap section and ``oracle_gap`` use.
+    """
+    if not report_ids:
+        return f"{label} withheld [{why_withheld or WITHHELD}]"
+    return f"{label} = {value} [cal {', '.join(report_ids)}]"
+
+
 def selector_arm_key(strategy: str, config: Mapping[str, Any]) -> str:
     """The arm a selector number belongs to: strategy, generator and N.
 
@@ -1433,7 +1448,16 @@ def _gap_by(
         grouped.setdefault(key(row), []).append(row)
     out: list[dict[str, Any]] = []
     for name, members in sorted(grouped.items()):
-        entry: dict[str, Any] = {"group": name, "paired_runs": len(members), "at_k": []}
+        entry: dict[str, Any] = {
+            "group": name,
+            "paired_runs": len(members),
+            # The calibration report(s) the group's selector numbers rest on, in the same row
+            # as the numbers (O-55). One per arm in the group; empty means nothing vouches.
+            "calibration_report_ids": sorted(
+                {row["calibration_report_id"] for row in members if row["calibration_report_id"]}
+            ),
+            "at_k": [],
+        }
         for k in REPORTED_KS:
             scored = [
                 gap
@@ -2225,7 +2249,11 @@ def _render_candidate_rows(value: dict[str, Any]) -> list[str]:
 
 
 def _render_oracle_gap(value: dict[str, Any]) -> list[str]:
-    """The gap by world, family and difficulty, the scored count beside every number."""
+    """The gap by world, family and difficulty, the scored count beside every number.
+
+    Each selector number carries the calibration report it rests on in its own cell, through
+    ``selector_number`` — the renderer ``oracle_gap`` uses too (O-55).
+    """
     lines = [f"Calibration reports: {value['calibration_reports']}.", ""]
     for title, key in (
         ("world", "by_world"),
@@ -2242,8 +2270,18 @@ def _render_oracle_gap(value: dict[str, Any]) -> list[str]:
                         str(at["k"]),
                         str(at["scored_runs"]),
                         _number(at["pass_at_k"]),
-                        _number(at["selected_at_k"]),
-                        _number(at["oracle_gap"]),
+                        selector_number(
+                            f"selected@{at['k']}",
+                            _number(at["selected_at_k"]),
+                            report_ids=entry.get("calibration_report_ids", ()),
+                            why_withheld=SELECTOR_GATE_RULE,
+                        ),
+                        selector_number(
+                            f"oracle gap@{at['k']}",
+                            _number(at["oracle_gap"]),
+                            report_ids=entry.get("calibration_report_ids", ()),
+                            why_withheld=SELECTOR_GATE_RULE,
+                        ),
                     )
                     for entry in value[key]
                     for at in entry["at_k"]

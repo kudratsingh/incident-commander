@@ -1,0 +1,212 @@
+{
+  "scenario": "api_latency_healthy_control",
+  "incident_id": "84eaa8d6-8fcc-4e8d-be2a-cce6986409e7",
+  "checkpoints": [
+    {
+      "schema_version": 3,
+      "incident_id": "84eaa8d6-8fcc-4e8d-be2a-cce6986409e7",
+      "state": "triage",
+      "alert": {
+        "source": "monitoring.slo",
+        "severity": "critical",
+        "fingerprint": "job_dispatch_latency_above_objective",
+        "group": null,
+        "remediation_hint": null,
+        "dlq_scope": null,
+        "summary": "an external monitor reports the job dispatch latency objective above budget; jobs are being accepted but the share dispatched inside 30 seconds is reported below target"
+      },
+      "budget": {
+        "max_tool_calls": 10,
+        "tool_calls_used": 0,
+        "max_tokens": 200000,
+        "tokens_used": 0,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.0,
+        "max_usd": "1.00",
+        "usd_used": "0"
+      },
+      "evidence": [],
+      "hypotheses": [],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-10-11T11:12:45.887114Z",
+      "updated_at": "2026-10-11T11:12:45.887114Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "84eaa8d6-8fcc-4e8d-be2a-cce6986409e7",
+      "state": "investigating",
+      "alert": {
+        "source": "monitoring.slo",
+        "severity": "critical",
+        "fingerprint": "job_dispatch_latency_above_objective",
+        "group": null,
+        "remediation_hint": null,
+        "dlq_scope": null,
+        "summary": "an external monitor reports the job dispatch latency objective above budget; jobs are being accepted but the share dispatched inside 30 seconds is reported below target"
+      },
+      "budget": {
+        "max_tool_calls": 10,
+        "tool_calls_used": 0,
+        "max_tokens": 200000,
+        "tokens_used": 0,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.106819,
+        "max_usd": "1.00",
+        "usd_used": "0"
+      },
+      "evidence": [
+        {
+          "evidence_id": "613eb356-f005-4f57-8632-aace9465cb63",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "critical",
+            "dedup_key": "9f284aacac6f975bf6a39142946c818b"
+          },
+          "result_summary": "severity=critical classified as investigating",
+          "timestamp": "2026-10-11T11:12:45.993933Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-10-11T11:12:45.887114Z",
+      "updated_at": "2026-10-11T11:12:45.993933Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "84eaa8d6-8fcc-4e8d-be2a-cce6986409e7",
+      "state": "escalated",
+      "alert": {
+        "source": "monitoring.slo",
+        "severity": "critical",
+        "fingerprint": "job_dispatch_latency_above_objective",
+        "group": null,
+        "remediation_hint": null,
+        "dlq_scope": null,
+        "summary": "an external monitor reports the job dispatch latency objective above budget; jobs are being accepted but the share dispatched inside 30 seconds is reported below target"
+      },
+      "budget": {
+        "max_tool_calls": 10,
+        "tool_calls_used": 5,
+        "max_tokens": 200000,
+        "tokens_used": 105793,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 53.043721,
+        "max_usd": "1.00",
+        "usd_used": "0.277348"
+      },
+      "evidence": [
+        {
+          "evidence_id": "613eb356-f005-4f57-8632-aace9465cb63",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "critical",
+            "dedup_key": "9f284aacac6f975bf6a39142946c818b"
+          },
+          "result_summary": "severity=critical classified as investigating",
+          "timestamp": "2026-10-11T11:12:45.993933Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "dbeadc82-f0e8-4fd1-90cd-2eb9fd8881f1",
+          "tool_name": "get_consumer_lag",
+          "arguments": {
+            "consumer_group": "worker-dispatcher"
+          },
+          "result_summary": "{\"consumer_group\":\"worker-dispatcher\",\"lag\":0,\"lag_known\":true,\"source\":\"live\",\"cache_key\":\"kafka:consumer_lag:worker-dispatcher\",\"measured_at\":\"2026-10-11T11:12:52.189169Z\",\"age_seconds\":1,\"recent_samples\":[{\"lag\":0,\"measured_at\":\"2026-10-11T11:12:52.189169Z\"},{\"lag\":0,\"measured_at\":\"2026-10-11T11:12:47.006173Z\"},{\"lag\":0,\"measured_at\":\"2026-10-11T11:12:41.842335Z\"},{\"lag\":0,\"measured_at\":\"2026-10-11T11:12:36.654253Z\"},{\"lag\":0,\"measured_at\":\"2026-10-11T11:12:31.478591Z\"},{\"lag\":0,\"measured_at\":\"2026-10-11T11:12:26.260670Z\"},{\"lag\":0,\"measured_at\":\"2026-10-11T11:12:21.069414Z\"},{\"lag\":0,\"measured_at\":\"2026-10-11T11:12:15.922559Z\"},{\"lag\":0,\"measured_at\":\"2026-10-11T11:12:10.766979Z\"},{\"lag\":0,\"measured_at\":\"2026-10-11T11:12:05.602950Z\"},{\"lag\":0,\"measured_at\":\"2026-10-11T11:12:00.449164Z\"},{\"lag\":0,\"measured_at\":\"2026-10-11T11:11:55.334669Z\"},{\"lag\":0,\"measured_at\":\"2026-10-11T11:11:50.150398Z\"},{\"lag\":0,\"measured_at\":\"2026-10-11T11:11:44.944008Z\"},{\"lag\":0,\"measured_at\":\"2026-10-11T11:11:39.749393Z\"}],\"last_poll_at\":\"2026-10-11T11:12:52.192946Z\",\"last_poll_age_seconds\":1,\"polling\":true,\"poll_interval_seconds\":2.0}",
+          "timestamp": "2026-10-11T11:12:45.993959Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "65fd1020-ff06-4b92-99d3-dacb5f68a510",
+          "tool_name": "get_slo_status",
+          "arguments": {},
+          "result_summary": "{\"measured_at\":\"2026-10-11T11:13:01.629850Z\",\"objectives\":[{\"id\":\"job_completion_rate\",\"name\":\"Job completion rate\",\"description\":\"Share of jobs that reach COMPLETED rather than DEAD_LETTER. Cancelled jobs are excluded from the denominator.\",\"target\":0.99,\"window_hours\":24,\"total\":14,\"failed\":0,\"current_success_rate\":1.0,\"budget_remaining_pct\":100.0,\"burn_rate\":0.0,\"healthy\":true,\"fast_burn\":false},{\"id\":\"job_dispatch_latency\",\"name\":\"Job dispatch latency\",\"description\":\"Share of dispatched jobs that left PENDING within 30 seconds of creation. Waiting jobs (held by the DAG) and cancelled jobs (saga rollback, or a stranded dependency parent) are excluded — a job nobody decided to dispatch has no dispatch latency.\",\"target\":0.95,\"window_hours\":24,\"total\":14,\"failed\":0,\"current_success_rate\":1.0,\"budget_remaining_pct\":100.0,\"burn_rate\":0.0,\"healthy\":true,\"fast_burn\":false}],\"total\":2,\"fast_burn_threshold\":14.4}",
+          "timestamp": "2026-10-11T11:12:45.993959Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "3b381296-7086-4938-bc78-1d07ac0fb7d5",
+          "tool_name": "get_postgres_health",
+          "arguments": {},
+          "result_summary": "{\"ok\":true,\"ping_latency_ms\":1.636,\"active_connections\":1,\"dialect\":\"postgresql\",\"error\":null,\"pool_size\":5,\"pool_checked_out\":1,\"pool_overflow\":0,\"pool_max_overflow\":10,\"pool_wait_timeouts_1m\":0,\"pool_stats_unknown_reason\":null,\"longest_active_query_ms\":null,\"active_queries_over_slow_threshold\":0,\"slow_query_threshold_ms\":500.0,\"p95_query_ms_1m\":null,\"slow_query_count_1m\":null,\"query_stats_unknown_reason\":\"the PostgreSQL extension that records per-query timings is not installed on this database, so no per-query timing history exists\",\"pools\":[{\"process\":\"api_worker\",\"size\":5,\"checked_out\":0,\"overflow\":0,\"max_overflow\":10,\"wait_timeouts_1m\":0,\"written_at\":\"2026-10-11T11:13:03.717053Z\",\"reported_age_s\":7.069},{\"process\":\"mcp\",\"size\":5,\"checked_out\":0,\"overflow\":0,\"max_overflow\":10,\"wait_timeouts_1m\":0,\"written_at\":\"2026-10-11T11:13:01.033431Z\",\"reported_age_s\":9.753}],\"pool_gauges_unknown_reason\":null}",
+          "timestamp": "2026-10-11T11:12:45.993959Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "d7d51be4-ebd2-4c4b-aa24-4d4fa248ca57",
+          "tool_name": "get_circuit_breakers",
+          "arguments": {},
+          "result_summary": "{\"measured_at\":\"2026-10-11T11:13:19.388135Z\",\"breakers\":[{\"name\":\"bulk-api-sync\",\"state\":\"closed\",\"failure_count\":0,\"failure_threshold\":3,\"recovery_timeout_s\":30.0,\"last_state_change_at\":null,\"seconds_since_state_change\":null,\"last_failure_at\":null,\"last_failure_reason_class\":null,\"recorded_at\":\"2026-10-11T11:12:20.687410Z\",\"reported_age_s\":58.701}],\"total\":1,\"unknown_reason\":null}",
+          "timestamp": "2026-10-11T11:12:45.993959Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "e3d42b92-e8a9-4553-bf9e-85eabceae6be",
+          "tool_name": "_verdict_refused_missing_reads",
+          "arguments": {
+            "refused": "stop",
+            "missing_reads": [
+              "get_redis_health"
+            ],
+            "offered": [
+              "probe"
+            ],
+            "refusals_spent": 1
+          },
+          "result_summary": "stop refused: this incident's alert requires these reads before that verdict, and this run has not made them: get_redis_health. A conclusion about this alert has to rest on every place its problem could come from, not on the first reading that agreed with you. Your next steps offer only a probe of those reads; once all of them are in your evidence, `remediate` and `stop` are offered again and you conclude on everything you have read.",
+          "timestamp": "2026-10-11T11:12:45.993959Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "fcb875a0-72c6-4831-a92d-7a616b7b7801",
+          "tool_name": "get_redis_health",
+          "arguments": {},
+          "result_summary": "{\"ok\":true,\"ping_latency_ms\":0.49,\"connected_clients\":15,\"used_memory_bytes\":3042776,\"used_memory_human\":\"2.90M\",\"keyspace_hits\":129451,\"keyspace_misses\":6647737,\"error\":null}",
+          "timestamp": "2026-10-11T11:12:45.993959Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "be1dbc7a-049a-47d6-8236-a6618bc5f987",
+          "tool_name": "_planner_escalate",
+          "arguments": {
+            "reason": "max iterations (5) exceeded with no action taken: the top hypothesis was 'no_fault' / 'slo-job-dispatch-latency-already-healthy-at-read-time' at confidence 0.75, which is not an answer this run could have acted on autonomously, and the reads it took were get_circuit_breakers, get_consumer_lag, get_postgres_health, get_redis_health, get_slo_status. That ranking is this run's own conclusion — no cause outside it was established by those reads."
+          },
+          "result_summary": "max iterations (5) exceeded with no action taken: the top hypothesis was 'no_fault' / 'slo-job-dispatch-latency-already-healthy-at-read-time' at confidence 0.75, which is not an answer this run could have acted on autonomously, and the reads it took were get_circuit_breakers, get_consumer_lag, get_postgres_health, get_redis_health, get_slo_status. That ranking is this run's own conclusion — no cause outside it was established by those reads.",
+          "timestamp": "2026-10-11T11:13:38.930835Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [
+        {
+          "category": "no_fault",
+          "name": "slo-job-dispatch-latency-already-healthy-at-read-time",
+          "confidence": 0.75,
+          "reasoning": "get_slo_status shows job_dispatch_latency at 100% budget remaining, 0 burn rate, and healthy:true — the alerted condition appears already cleared, but Redis health is still unread per the state machine requirement."
+        },
+        {
+          "category": "redis_saturation",
+          "name": "redis-health-unread-possible-saturation",
+          "confidence": 0.15,
+          "reasoning": "Redis health has not been checked yet; saturation or memory pressure could affect caching of lag/dispatch metrics, though no other signals point to it."
+        },
+        {
+          "category": "transient_dependency",
+          "name": "external-monitor-transient-false-positive",
+          "confidence": 0.1,
+          "reasoning": "The external monitor reported the breach but all internal SLO readings are healthy, suggesting a transient or false-positive alert from the monitor."
+        }
+      ],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-10-11T11:12:45.887114Z",
+      "updated_at": "2026-10-11T11:13:38.930835Z"
+    }
+  ],
+  "invocation_id": "812756566b89"
+}

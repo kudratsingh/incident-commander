@@ -1272,7 +1272,8 @@ The `briefing_judge` leg against the owner's labels runs in three steps:
 
 1. **Label (free, the owner only).** Open the committed packet
    `evals/judge_calibration/labels/packet.<YYYYMMDD>.md` (a new one: `make label-packet`, which
-   refuses to replace an existing packet for the same day). After each briefing write `LABEL: useful`
+   refuses to replace an existing packet for the same day; packet 1 exists, so a new packet is
+   now drawn as the next section says). After each briefing write `LABEL: useful`
    or `LABEL: not_useful` and a one-line `REASON:`. Leave a block blank to skip it.
 2. **Import (free).** `make label-packet IMPORT=evals/judge_calibration/labels/packet.<YYYYMMDD>.md`
    appends one line per labelled block to `evals/judge_calibration/labels/briefings.jsonl` and
@@ -1284,6 +1285,35 @@ The `briefing_judge` leg against the owner's labels runs in three steps:
    `JUDGE_MODEL` every labelled briefing 5 times plus the six traps 5 times (110 calls) and writes the
    versioned report with its `label_agreement` leg. Without labels it refuses (exit 2) before any call.
    Try it free first: `make judge-calibration JUDGE=briefing_judge LABELS=1`.
+
+## Label packets after the first: drawn blind, with repeats (WO-R3-379)
+
+A later packet gives the briefing judge labels it has never been tuned on (INC-010, owner O-58),
+and its repeats measure how consistent the owner's own labels are. Free, no model:
+
+```bash
+make label-packet PACKET=2 REPEATS=3 SEED=<n> KEY_OUT=<path outside this repo>
+```
+
+It draws 13 briefings by packet 1's selection rule from the briefings no packet has shown and no
+label names (INC-002's briefing is not put first again: packet 1 already labelled it), adds 3 of
+the briefings an earlier packet labelled, chosen by the seed, and shuffles all 16 with the same
+seed. The packet, `evals/judge_calibration/labels/packet.<YYYYMMDD>.md`, gives its packet number
+and seed in the header, says "16 briefings; some may repeat an earlier packet", and says nothing
+more. No block says why it was picked, because a repeat's reason would give it away. Which three
+repeat is written only to `KEY_OUT`, as `{"packet": 2, "seed": n, "repeats": [...]}`. The command
+refuses a key path inside the repo, never replaces an existing key, and draws each packet number
+once. Hand the key to the coordinator to seal in the workspace hub, and leave it closed until the
+owner's labels for that packet are imported. The seed reproduces the draw, so anyone who runs the
+draw again can rebuild the key: keeping it sealed is a promise, not a lock.
+
+The owner fills the packet as before, and `make label-packet IMPORT=<filled packet>` appends its
+labels under the packet its header names. Every new line carries `packet`; a line from before
+packets reads as packet 1. A briefing may hold one label per packet, so a repeat's second label is
+appended, never refused. Inside one packet the old rules hold: a different label is refused and a
+correction needs `SUPERSEDES`. `labels.test_retest(1, 2)` lists the briefings labelled in both
+packets and whether the two labels agree; `labels.current_labels(packet=2)` is packet 2 alone, and
+without `packet` a briefing labelled twice keeps its first packet's label.
 
 ## Judge calibration: the selector leg on the arm's model (WO-R3-364)
 

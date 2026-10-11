@@ -82,7 +82,9 @@ help:
 	@echo "                   the judge legs keep JUDGE_MODEL"
 	@echo "                   LABELS=1 (with JUDGE=briefing_judge) adds the owner-label leg"
 	@echo "  label-packet     FREE: write the briefing labelling packet from committed archives;"
-	@echo "                   IMPORT=<filled packet> appends its labels (append-only)"
+	@echo "                   IMPORT=<filled packet> appends its labels (append-only)."
+	@echo "                   PACKET=2 REPEATS=3 SEED=<n> KEY_OUT=<path outside the repo>"
+	@echo "                   draws a later packet blind; the repeat key goes to KEY_OUT only"
 	@echo "  regrade-archive  re-grade one locked run archive under today's rules from its own"
 	@echo "                   trajectories; ARCHIVE=<run id> REQUIRED. Reads only, spends"
 	@echo "                   nothing, never touches the archive. WRITE=1 persists the report"
@@ -187,10 +189,15 @@ oracle-gap-report:
 
 # Owner labels for briefing usefulness (WO-R3-278). Free: picks 16 committed
 # briefings and writes evals/judge_calibration/labels/packet.<YYYYMMDD>.md.
-# IMPORT=<filled packet> appends its labels to briefings.jsonl (append-only).
+# IMPORT=<filled packet> appends its labels to briefings.jsonl (append-only),
+# under the packet its header names. PACKET=<n> (2 or more) draws a later packet
+# blind (WO-R3-379): new briefings no packet has shown, REPEATS=<k> labelled ones
+# back unmarked, shuffled by SEED=<n>; the repeat key goes to KEY_OUT only.
 .PHONY: label-packet
 label-packet:
-	uv run python -m evals.judge_calibration.label_packet $(if $(IMPORT),--import $(IMPORT),)
+	uv run python -m evals.judge_calibration.label_packet $(if $(IMPORT),--import $(IMPORT),) \
+		$(if $(PACKET),--packet $(PACKET),) $(if $(REPEATS),--repeats $(REPEATS),) \
+		$(if $(SEED),--seed $(SEED),) $(if $(KEY_OUT),--key-out $(KEY_OUT),)
 
 # Re-grade one locked archive under today's rules (WO-R3-265, INC-003). Reads
 # only: no model call, no platform, nothing spent, and the archive itself is

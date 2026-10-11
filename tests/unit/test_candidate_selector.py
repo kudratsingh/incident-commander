@@ -987,9 +987,14 @@ class TestNoSelectorNumberWithoutACalibrationReport:
         row.update(overrides)
         return row
 
-    def test_the_register_is_empty_today(self) -> None:
-        """WP-6.3 has not run, so no arm is calibrated. The gate is shut."""
-        assert dict(research_report.CALIBRATION_REPORTS) == {}
+    def test_the_register_holds_exactly_the_one_calibration_made_so_far(self) -> None:
+        """WP-6.3 ran once on the arm's own model (2026-10-11, report 36e12b915900, INC-009).
+
+        Every other arm is uncalibrated and the gate stays shut for it.
+        """
+        assert dict(research_report.CALIBRATION_REPORTS) == {
+            "candidate_selector/best_of_n_enumerated/n=8": "36e12b915900"
+        }
         assert research_report.calibration_report_for("anything") is None
 
     def test_every_selector_field_is_withheld_without_one(self) -> None:

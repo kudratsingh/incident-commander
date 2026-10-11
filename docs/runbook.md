@@ -1170,6 +1170,23 @@ the calibration report id in the same cell (`selected@8 = 9/12 [cal 4fc2722d286e
 it is withheld (`selected@8 withheld [<why>]`); the per-world table also says whether a world's
 repeats agreed (ADR 0079, amended by WO-R3-375).
 
+**The gap read three ways (owner O-57, WO-R3-376).** Per world and pooled, at the headline k, the
+report splits every scored run by what the selector did with the set it was given: **picked
+correct** (it chose, and the choice was right), **picked wrong** (it chose, and the choice was wrong
+or named no candidate), and **declined to pick**, shown in three parts — `probe_more` (it asked for
+another read), `escalate` (it handed the incident to a person) and `none` (a selector ran but its
+record names no decision; every record the agent writes names one, so a count there means a
+malformed or foreign trace). The three add up to n, the same n as selected@k in that row. Wrong
+picks are a selection problem; declines with the right answer in view are a commitment problem; the
+two have different fixes. The split counts every scored run, not only the gap — a wrong pick when no
+correct candidate was in the set is counted but is not part of the gap — so the pooled "gap by
+decision" line (the gap's runs only) stays beside it. Each number is its own cell through
+`research_report.selector_number`, with the calibration id or the reason it is withheld
+(`picked correct@8 = 5/12 [cal <id>]`, `declined to pick@8 = 4/12 (probe_more 3, escalate 1,
+none 0) [cal <id>]` — illustrative numbers); in the JSON it is `pick_split` on each `per_world` row
+and on `pooled`. The research report's oracle-gap section shows the same three numbers at every k,
+counted by the same function (`research_report.pick_split`).
+
 The free check refuses a placeholder recording id, a recording that does not exist, and a recording
 whose answer key says it does not describe its world (`applies: false`, ADR 0040) — before anything
 is spent. `YES_SPEND` must be exactly `1`. A paid batch runs the runner once with

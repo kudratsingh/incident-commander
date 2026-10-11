@@ -1282,7 +1282,8 @@ The `briefing_judge` leg against the owner's labels runs in three steps:
    again, which appends a new line and keeps the old one.
 3. **Measure (PAID, the owner's explicit yes for this run).**
    `make judge-calibration JUDGE=briefing_judge LABELS=1 LIVE=1 YES_SPEND=1 WRITE=1` asks the pinned
-   `JUDGE_MODEL` every labelled briefing 5 times plus the six traps 5 times (110 calls) and writes the
+   `JUDGE_MODEL` every labelled briefing 5 times plus the briefing traps 5 times (110 calls with
+   16 labels and the six traps of 2026-10-11; the traps are ten since WO-R3-378) and writes the
    versioned report with its `label_agreement` leg. Without labels it refuses (exit 2) before any call.
    Try it free first: `make judge-calibration JUDGE=briefing_judge LABELS=1`.
 
@@ -1314,6 +1315,34 @@ appended, never refused. Inside one packet the old rules hold: a different label
 correction needs `SUPERSEDES`. `labels.test_retest(1, 2)` lists the briefings labelled in both
 packets and whether the two labels agree; `labels.current_labels(packet=2)` is packet 2 alone, and
 without `packet` a briefing labelled twice keeps its first packet's label.
+
+## Judge calibration: held-out scoring of the briefing judge (WO-R3-378)
+
+Rubric v2 (`briefing_judge.md`, five named checks — [ADR 0082](ADR/0082-the-briefing-judge-is-checks-scored-on-a-held-out-packet.md))
+was written from packet 1's 16 labels, so its agreement counts only on a packet it was not written
+from (owner O-58). Once packet 2 exists (WO-R3-379) the label file holds two packets, and
+`make judge-calibration JUDGE=briefing_judge LABELS=1` without `PACKET=` refuses (exit 2) before any
+call. In order:
+
+1. **Label packet 2 (the owner) and import it (free)** — `make label-packet IMPORT=<filled packet 2>`.
+   The labels go into the file BEFORE the new rubric is run on them; each block of the report records
+   the first and last `labelled_at` it scored, so this is checkable afterwards.
+2. **Rehearse (free).** `make judge-calibration JUDGE=briefing_judge LABELS=1 PACKET=2 DEV_PACKET=1`
+   runs the scripted fake and prints the three blocks a paid run prints: `held-out packet 2` (the
+   number that counts, with `threshold … CLEARS / does not clear`), `NOT COUNTED` (packet 2's
+   briefings that packet 1 also labelled — never asked), `dev set packet 1 … NOT COUNTED`, and
+   `test-retest` (the owner's two labels on each repeat). Check the counted number is 13 and the
+   test-retest pairs are 3. `PACKET=1` is refused: the rubric quotes packet 1, so it is the dev set.
+3. **Score (PAID, its own yes).**
+   `make judge-calibration JUDGE=briefing_judge LABELS=1 PACKET=2 DEV_PACKET=1 LIVE=1 YES_SPEND=1 WRITE=1`
+   asks `JUDGE_MODEL` 13 held-out briefings, 16 dev briefings and 10 traps five times each (195 calls,
+   ≈ $0.30; ≈ $0.20 and 115 calls without `DEV_PACKET`). Commit the report in its own PR.
+4. **Report, do not register.** The harness says whether the held-out score clears
+   `HELD_OUT_AGREEMENT_THRESHOLD` (0.8, and better than always giving the majority label, with every
+   briefing answered). It changes nothing: `research_report.JUDGE_CALIBRATION_REPORTS` stays
+   `99181bf074ec` until the owner decides whether the judge leaves "measured" — and if it does not
+   clear, the finding is "the judge cannot be rubric-fixed" (O-58 item 5), an INCIDENTS row before
+   any further rubric edit.
 
 ## Judge calibration: the selector leg on the arm's model (WO-R3-364)
 

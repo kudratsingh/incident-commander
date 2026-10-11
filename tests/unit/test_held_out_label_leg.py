@@ -27,7 +27,8 @@ from typing import Any, Final
 
 import pytest
 
-from evals.graders.llm_judge import format_briefing_context
+from evals.artifacts import REPO_ROOT
+from evals.graders.llm_judge import JUDGE_PROMPT, format_briefing_context
 from evals.judge_calibration import __main__ as cli
 from evals.judge_calibration import label_leg, labels
 from evals.judge_calibration.fakes import FakeJudgeClient, answers_for, answers_for_labels
@@ -43,6 +44,7 @@ from evals.judge_calibration.label_leg import (
     packet_of,
 )
 from evals.judge_calibration.roles import BRIEFING_JUDGE
+from incident_commander.llm.prompts.loader import load_prompt
 
 _MODEL: Final[str] = "fake-judge"
 _AT: Final[datetime] = datetime(2026, 10, 11, 12, 0, tzinfo=UTC)
@@ -51,7 +53,7 @@ _AT: Final[datetime] = datetime(2026, 10, 11, 12, 0, tzinfo=UTC)
 _A: Final[str] = labels.INC_002_ID
 _B: Final[str] = "0db6fe722f7c:postgres_slow"
 _C: Final[str] = "759e198cdd27:remediate_consumer_lag_success"
-_D: Final[str] = "0db6fe722f7c:noise_low_severity"
+_D: Final[str] = "0db6fe722f7c:noise_missing_severity"
 _E: Final[str] = "0db6fe722f7c:failed_traces_scan"
 _F: Final[str] = "3c65c04326d4:dlq_replay_safe_success"
 
@@ -147,9 +149,32 @@ class TestTheHeldOutPacket:
         assert [row["id"] for row in value["rows"]] == [_D, _E, _F]
         assert (value["n"], value["labels_in_force"]) == (3, 3)
         assert value["not_counted"] == [
-            {"id": _A, "also_labelled_in": [1]},
-            {"id": _B, "also_labelled_in": [1]},
+            {"id": _A, "also_labelled_in": [1], "quoted_in_rubric": False},
+            # postgres_slow is also rubric v2's example for 'blind probe'.
+            {"id": _B, "also_labelled_in": [1], "quoted_in_rubric": True},
         ]
+
+    def test_the_packet_the_rubric_was_written_from_is_refused_as_held_out(
+        self, tmp_path: Path
+    ) -> None:
+        """Rubric v2 quotes five of packet 1's briefings: packet 1 is the dev set, by its bytes."""
+        quoted = "0db6fe722f7c:deploy_correlation"
+        assert quoted in load_prompt(JUDGE_PROMPT)
+        path = _write(tmp_path, [_row(quoted, "not_useful", None), *_two_packets()])
+        client = _agreeing_with(path)
+        with pytest.raises(NoLabelsError, match="written from this packet"):
+            label_agreement(client=client, model=_MODEL, reps=1, labels_path=path, packet=1)
+        assert client.calls == []
+
+    def test_a_quoted_briefing_repeated_in_a_later_packet_is_only_a_repeat(
+        self, tmp_path: Path
+    ) -> None:
+        """postgres_slow (_B) is quoted AND repeated: packet 2 is still held out, minus it."""
+        path = _write(tmp_path, _two_packets())
+        leg = label_agreement(
+            client=_agreeing_with(path), model=_MODEL, reps=1, labels_path=path, packet=2
+        )
+        assert [row["id"] for row in leg["value"]["rows"]] == [_D, _E, _F]
 
     def test_the_repeats_and_the_other_packet_are_never_asked(self, tmp_path: Path) -> None:
         """The dev set costs nothing unless it is asked for."""
@@ -270,11 +295,11 @@ class TestTheOwnersTestRetest:
 def _value(
     owner: list[str], judge: list[str], *, errors: int = 0, missing: int = 0
 ) -> dict[str, Any]:
-    rows = [
+    rows: list[dict[str, Any]] = [
         {"owner_label": o, "judge_label": j, "agrees": o == j}
         for o, j in zip(owner, judge, strict=True)
     ]
-    agree = sum(r["agrees"] for r in rows)
+    agree = sum(o == j for o, j in zip(owner, judge, strict=True))
     return {
         "n": len(rows),
         "agree": agree,
@@ -388,6 +413,6 @@ class TestTheReportAndTheCli:
         assert BRIEFING_JUDGE in capsys.readouterr().err
 
     def test_the_makefile_passes_both_packets(self) -> None:
-        text = (labels.REPO_ROOT / "Makefile").read_text()
+        text = (REPO_ROOT / "Makefile").read_text()
         assert "$(if $(PACKET),--packet $(PACKET),)" in text
         assert "$(if $(DEV_PACKET),--dev-packet $(DEV_PACKET),)" in text

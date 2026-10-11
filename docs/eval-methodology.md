@@ -2336,9 +2336,10 @@ records where this implementation departs from it and why.
 **Four legs, and a refusal is a result.**
 
 *The trap set.* Six hand-built cases per judge (§ 107 asks for five; each sixth is a regression case
-for a failure that already happened). Every case states the verdict it asserts and the argument for
-that verdict, so the ground truth belongs to the evaluator and depends on no run. This is the leg
-that cannot go circular.
+for a failure that already happened), and ten for `briefing_judge` since WO-R3-378: one more per check
+its rubric v2 added, each built from the shape of a briefing the owner labelled and never its text
+(ADR 0082). Every case states the verdict it asserts and the argument for that verdict, so the ground
+truth belongs to the evaluator and depends on no run. This is the leg that cannot go circular.
 
 *Self-agreement at N=5.* The same question asked five times, reporting the fraction of identical
 verdicts. Read it beside accuracy, as plan 03 § 109 says: low stability means the rubric is
@@ -2371,6 +2372,28 @@ an id already in it is refused, never replaced, and a correction is a new line c
 briefing N times, calls it useful when both floats clear `USEFUL_THRESHOLD`, and reports `label_agreement`:
 N, agree, disagree, both disagreement directions, stability, and a per-briefing table with the judge's
 two floats on every disagreement. It refuses to run with zero labels, and a model never writes a label.
+
+*The held-out rule* (WO-R3-378, owner O-58, [ADR 0082](ADR/0082-the-briefing-judge-is-checks-scored-on-a-held-out-packet.md)).
+The first label leg (`99181bf074ec`, 8/16, INC-010) led to a rubric rewrite, and a rubric written from
+16 labels and scored on the same 16 measures how well it was fitted, not how good the judge is. So
+labels carry the packet they were labelled in (WO-R3-379; a row without one is packet 1), and
+`PACKET=<p>` names the packet whose agreement COUNTS: its briefings that no other packet labelled — a
+briefing labelled elsewhere was in view when the rubric was written, so it is listed as not counted and
+not asked — and a packet holding a briefing the rubric quotes that no other packet labels is the one the
+rubric was written from, so it is refused as the held-out one. `DEV_PACKET=<d>` scores the dev set
+beside it in its own block marked NOT COUNTED. The owner's test-retest is read off the briefings
+labelled in both packets (the owner's own consistency is the ceiling on the judge's). Each number
+carries its self-agreement at N=5 and how many of the judge's `reasoning` strings name a rubric check.
+A label file holding more than one packet is refused without `PACKET=`, before any call, because
+"every label in force" would count the dev set. The harness reports whether the held-out score clears
+`HELD_OUT_AGREEMENT_THRESHOLD` (0.8 — on 13 briefings, 11 or more — and strictly better than always
+giving the packet's majority label, with every briefing answered) and does nothing else with it: the
+owner decides whether the judge's numbers leave "measured", and the register is not touched.
+
+*Rubric v2 is checks* (same ADR). `briefing_judge.md` replaced its adjective ladders with five named
+checks applied in order — `invented fact`, `derived, not copied`, `blind probe`, `a guess is not a
+finding`, `look at X, do nothing` — each one sentence with one example from the owner's labels, and the
+judge's `reasoning` names the check that decided each score. The shared reading rules are unchanged.
 
 **Stability is measured, not set.** Plan 03 § 9.1 asks for temperature 0. No judge call in this repo
 sends a temperature and none may be made to require one (owner decision O-24, ADR 0048):
@@ -2407,6 +2430,9 @@ reviewed. What makes it checkable after the fact is that every calibration repor
 and the line count of the exact prompt bytes it measured — a delta between two calibrations is
 attributable only if each says which rubric it was about. A packet that both edits a rubric and
 calibrates it leaves its own first number un-attributable, which is why WP-6.3 changed no rubric line.
+One exception, ADR 0082: a rewrite the owner orders as one change lands as one change, because its
+rerun is a held-out label packet — five per-line reruns on the 16 labels it was written from would be
+five measurements of fit.
 
 **`plan_approval_judge` is not calibrated because it does not exist** (divergence B6). Every
 approve/refuse decision about a remediation plan is deterministic guard code, by design, because

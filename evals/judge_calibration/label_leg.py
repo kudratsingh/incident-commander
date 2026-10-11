@@ -8,9 +8,11 @@ Held-out scoring (WO-R3-378, owner O-58, ADR 0082). Label rows carry the ``packe
 labelled in (WO-R3-379; a row without one is packet 1). ``packet`` names the packet whose
 agreement COUNTS, and only its briefings that no other packet labelled are counted: a briefing
 labelled elsewhere was in view when the rubric was written, so it is test-retest evidence about
-the owner, not held-out evidence about the judge. ``dev_packet`` is scored beside it and marked
-``counted: false``. A label file holding more than one packet is refused unless one is named,
-because "all labels in force" would put the dev set into the number O-58 says it must not enter.
+the owner, not held-out evidence about the judge. A packet holding a briefing the rubric quotes
+as an example and no other packet labels is the packet the rubric was written from, and is
+refused as the held-out one. ``dev_packet`` is scored beside it and marked ``counted: false``.
+A label file holding more than one packet is refused unless one is named, because "all labels
+in force" would put the dev set into the number O-58 says it must not enter.
 ``HELD_OUT_AGREEMENT_THRESHOLD`` is reported, never acted on: the owner decides.
 """
 
@@ -23,10 +25,17 @@ from pathlib import Path
 from typing import Any, Final
 
 from evals.artifacts import REPO_ROOT
-from evals.graders.llm_judge import USEFUL_THRESHOLD, JudgeScore, cited_checks, judge_briefing
+from evals.graders.llm_judge import (
+    JUDGE_PROMPT,
+    USEFUL_THRESHOLD,
+    JudgeScore,
+    cited_checks,
+    judge_briefing,
+)
 from evals.judge_calibration import labels
 from evals.judge_calibration.roles import BRIEFING_JUDGE, is_approval, score_verdict
 from incident_commander.llm.client import LLMClientProtocol, LLMError
+from incident_commander.llm.prompts.loader import load_prompt
 
 LEG: Final[str] = "label agreement: the judge's verdict vs the owner's useful / not_useful label"
 
@@ -341,6 +350,16 @@ def label_agreement(
         label_id: [p for p, in_force in by_packet.items() if p != packet and label_id in in_force]
         for label_id in scored
     }
+    rubric = load_prompt(JUDGE_PROMPT)
+    quoted = {label_id: label_id in rubric for label_id in scored}
+    written_from = [i for i in scored if quoted[i] and not elsewhere[i]]
+    if written_from:
+        raise NoLabelsError(
+            f"refusing the label leg: the rubric quotes {len(written_from)} briefing(s) that only "
+            f"packet {packet} labels ({', '.join(written_from)}), so it was written from this "
+            "packet: it is a dev set — name it with --dev-packet (DEV_PACKET=) beside a packet "
+            "the rubric has not seen (O-58, ADR 0082)"
+        )
     held_out = {i: row for i, row in scored.items() if not elsewhere[i]}
     if not held_out:
         raise NoLabelsError(
@@ -355,7 +374,7 @@ def label_agreement(
         "packet": packet,
         "counted": True,
         "not_counted": [
-            {"id": label_id, "also_labelled_in": others}
+            {"id": label_id, "also_labelled_in": others, "quoted_in_rubric": quoted[label_id]}
             for label_id, others in elsewhere.items()
             if others
         ],

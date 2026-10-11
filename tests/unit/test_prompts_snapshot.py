@@ -193,8 +193,8 @@ _EXPECTED_HASHES: Final[dict[str, str]] = {
     # then `derived, not copied`, `blind probe`, `a guess is not a finding` and `look at X, do
     # nothing`), each with one example from the owner's labels, and `reasoning` names the check
     # that decided each score. The shared rules are kept word for word, so no other hash moves.
-    # The calibration report's own rubric sha (over the served lines) moves 6140102d… → 057592a7….
-    "briefing_judge": ("1ab64ae33b2cf32d821592c3ce36d3bc9fa1772487e6647ccbdc2fec113c93fc"),
+    # The calibration report's own rubric sha (over the served lines) moves 6140102d… → 20230ebc….
+    "briefing_judge": ("9f684d7446ce8fbc4904eeaf0366be65a9a4f61d8d314ce781d0a3dc7af4e963"),
     # Moved by WO-R3-226 / ADR 0056: two sentences cited ADR 0008 for "you get one Tier-1
     # call", which is now true of a PLAN and not of a run. The rules themselves are
     # unchanged — a plan still proposes exactly one action. Moved again by WO-R3-284 /

@@ -32,7 +32,7 @@ _PACKET_1_FILE: Final[str] = "packet.20261008.md"
 
 #: sha256 over the 16 lines the owner's first import wrote (cmd #369). The file is append-only,
 #: so these bytes never change, whatever later packets add below them.
-_PACKET_1_ROWS_SHA: Final[str] = "TO-BE-PINNED"
+_PACKET_1_ROWS_SHA: Final[str] = "6537aceda8c166653a559bb5d63b9a7e341924ad12d5183bf5687ff12193c3c9"
 
 
 def _row(

@@ -32,6 +32,7 @@ from typing import Any, Final
 from uuid import uuid4
 
 from evals import artifacts
+from evals.graders.llm_judge import BRIEFING_JUDGE_CHECKS
 from evals.judge_calibration.label_leg import label_agreement
 from evals.judge_calibration.roles import (
     ABSENT_ROLES,
@@ -199,9 +200,11 @@ PROTOCOL: Final[str] = (
     "plan 03 § 9 (WP-6.3). Four legs: a hand-built trap set whose verdicts the "
     "evaluator asserts; self-agreement over N identical asks; an independent "
     "ground-truth leg where one exists; and a stated refusal where one does not. "
-    "Rubric edits are ONE LINE AT A TIME with a rerun (plan 03 § 110), which is "
-    "why rubric.sha256 is here: a delta between two calibrations is attributable "
-    "only if each says which rubric bytes it measured. No selector or judge number "
+    "Rubric edits are ONE LINE AT A TIME with a rerun (plan 03 § 110), or, where "
+    "the owner orders a rewrite, ONE change scored on a held-out label packet "
+    "(ADR 0082), which is why rubric.sha256 is here: a delta between two "
+    "calibrations is attributable only if each says which rubric bytes it "
+    "measured. No selector or judge number "
     "is reported anywhere until its id appears in "
     "research_report.CALIBRATION_REPORTS or JUDGE_CALIBRATION_REPORTS "
     "(plan 02:243, plan 04:169)."
@@ -318,7 +321,7 @@ def _self_agreement(outcomes: Sequence[TrapOutcome], *, reps: int) -> dict[str, 
 def _rubric(judge: str) -> dict[str, Any]:
     lines = rubric_of(judge)
     body = "\n".join(lines)
-    return {
+    rubric: dict[str, Any] = {
         "prompt": role(judge).prompt,
         "sha256": hashlib.sha256(body.encode("utf-8")).hexdigest(),
         "lines": len(lines),
@@ -326,9 +329,14 @@ def _rubric(judge: str) -> dict[str, Any]:
             "a rubric edit lands one line at a time with a rerun (plan 03 § 110); a "
             "delta between two calibrations is attributable only if this hash "
             "differs by a change a reviewer can see. The convention is in "
-            "docs/eval-methodology.md and ADR 0052"
+            "docs/eval-methodology.md and ADR 0052; an owner-ordered rewrite lands "
+            "as one change scored on a held-out packet instead (ADR 0082)"
         ),
     }
+    if judge == BRIEFING_JUDGE:
+        # Rubric v2 (WO-R3-378): the checks this rubric applies, in order, by name.
+        rubric["checks"] = list(BRIEFING_JUDGE_CHECKS)
+    return rubric
 
 
 def _determinism(client_kind: str) -> dict[str, Any]:
@@ -364,15 +372,21 @@ def calibrate(
     report_id: str | None = None,
     labels: Path | None = None,
     model_role: ModelRole | None = None,
+    packet: int | None = None,
+    dev_packet: int | None = None,
 ) -> CalibrationReport:
     """Calibrate one judge and return its report. Writes nothing.
 
     ``client_kind`` is declared by the caller, not sniffed; ``reps`` below 1 is refused.
     ``labels`` (``briefing_judge`` only) adds the owner-label leg; zero labels refuses.
+    ``packet`` / ``dev_packet`` name the held-out packet whose agreement counts and the dev
+    packet shown beside it, not counted (WO-R3-378, ADR 0082); both need ``labels``.
     ``model_role`` (``candidate_selector`` only) records the run role ``model`` came from.
     """
     if reps < 1:
         raise ValueError(f"reps must be at least 1; got {reps}")
+    if (packet is not None or dev_packet is not None) and labels is None:
+        raise ValueError("a label packet needs the owner labels: pass labels= as well")
     if model_role is not None and judge != CANDIDATE_SELECTOR:
         raise ValueError(
             f"{judge} is asked on JUDGE_MODEL: a run role names the model a run's "
@@ -381,7 +395,15 @@ def calibrate(
     if labels is not None and judge != BRIEFING_JUDGE:
         raise ValueError(f"owner labels exist for {BRIEFING_JUDGE} only, not {judge}")
     labelled = (
-        label_agreement(client=client, model=model, reps=reps, labels_path=labels, root=root)
+        label_agreement(
+            client=client,
+            model=model,
+            reps=reps,
+            labels_path=labels,
+            root=root,
+            packet=packet,
+            dev_packet=dev_packet,
+        )
         if labels is not None
         else None
     )

@@ -1316,6 +1316,29 @@ correction needs `SUPERSEDES`. `labels.test_retest(1, 2)` lists the briefings la
 packets and whether the two labels agree; `labels.current_labels(packet=2)` is packet 2 alone, and
 without `packet` a briefing labelled twice keeps its first packet's label.
 
+## Judge calibration: the selector leg on the arm's model (WO-R3-364)
+
+A run calls its `candidate_selector` on the run's own model (`BENCHMARK_MODEL` on a benchmark run),
+while every leg of `make judge-calibration` asks `JUDGE_MODEL` unless told otherwise. A selector
+calibration counts only for an arm that ran on the model it measured: `research_report` and
+`oracle_gap` read the register through one gate, `research_report.calibration_gate`, which refuses a
+report whose `model` is not the arm's model and names the report and both models. So the selector
+leg takes the switch the runner takes:
+
+```bash
+make judge-calibration JUDGE=candidate_selector MODEL_ROLE=benchmark      # FREE: the fake; prints the setting a live run reads
+make judge-calibration JUDGE=candidate_selector MODEL_ROLE=benchmark LIVE=1 YES_SPEND=1 WRITE=1   # PAID ≈ $0.30, the owner's yes
+```
+
+`MODEL_ROLE` reaches this target only when it is given (command line, environment or `.env`); the
+`development` fallback of the eval targets does not apply, so without it the selector leg asks
+`JUDGE_MODEL` as before and its summary says so. `action_verifier` and `briefing_judge` ask
+`JUDGE_MODEL` whatever role is given. The paid run asks the selector's six traps five times each
+(30 calls). The report records `model` (the id that answered), `model_role` and `model_setting`.
+Before registering it: check `model` is the model the arm's selector runs on (`claude-sonnet-4-6`
+for the oracle-gap arm today), then add the id to the calibration register in
+`evals/research_report.py` under `candidate_selector/best_of_n_enumerated/n=8`, in its own PR.
+
 ## Judge calibration: held-out scoring of the briefing judge (WO-R3-378)
 
 Rubric v2 (`briefing_judge.md`, five named checks — [ADR 0082](ADR/0082-the-briefing-judge-is-checks-scored-on-a-held-out-packet.md))
@@ -1343,29 +1366,6 @@ call. In order:
    `99181bf074ec` until the owner decides whether the judge leaves "measured" — and if it does not
    clear, the finding is "the judge cannot be rubric-fixed" (O-58 item 5), an INCIDENTS row before
    any further rubric edit.
-
-## Judge calibration: the selector leg on the arm's model (WO-R3-364)
-
-A run calls its `candidate_selector` on the run's own model (`BENCHMARK_MODEL` on a benchmark run),
-while every leg of `make judge-calibration` asks `JUDGE_MODEL` unless told otherwise. A selector
-calibration counts only for an arm that ran on the model it measured: `research_report` and
-`oracle_gap` read the register through one gate, `research_report.calibration_gate`, which refuses a
-report whose `model` is not the arm's model and names the report and both models. So the selector
-leg takes the switch the runner takes:
-
-```bash
-make judge-calibration JUDGE=candidate_selector MODEL_ROLE=benchmark      # FREE: the fake; prints the setting a live run reads
-make judge-calibration JUDGE=candidate_selector MODEL_ROLE=benchmark LIVE=1 YES_SPEND=1 WRITE=1   # PAID ≈ $0.30, the owner's yes
-```
-
-`MODEL_ROLE` reaches this target only when it is given (command line, environment or `.env`); the
-`development` fallback of the eval targets does not apply, so without it the selector leg asks
-`JUDGE_MODEL` as before and its summary says so. `action_verifier` and `briefing_judge` ask
-`JUDGE_MODEL` whatever role is given. The paid run asks the selector's six traps five times each
-(30 calls). The report records `model` (the id that answered), `model_role` and `model_setting`.
-Before registering it: check `model` is the model the arm's selector runs on (`claude-sonnet-4-6`
-for the oracle-gap arm today), then add the id to the calibration register in
-`evals/research_report.py` under `candidate_selector/best_of_n_enumerated/n=8`, in its own PR.
 
 ## Debugging one scenario
 

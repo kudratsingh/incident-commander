@@ -1,0 +1,677 @@
+{
+  "report_id": "99181bf074ec",
+  "judge": "briefing_judge",
+  "what_it_decides": "how grounded and how actionable one escalation briefing is. Informational: the run is already graded on five deterministic dimensions by the time this is called, and nothing passes or fails on it. INC-002 is this judge scoring an honest briefing 0.0 for groundedness.",
+  "generated_at": "2026-10-11T06:32:07.536747+00:00",
+  "model": "claude-haiku-4-5",
+  "model_role": null,
+  "model_setting": "JUDGE_MODEL",
+  "judge_client": "live",
+  "reps": 5,
+  "protocol": "plan 03 \u00a7 9 (WP-6.3). Four legs: a hand-built trap set whose verdicts the evaluator asserts; self-agreement over N identical asks; an independent ground-truth leg where one exists; and a stated refusal where one does not. Rubric edits are ONE LINE AT A TIME with a rerun (plan 03 \u00a7 110), which is why rubric.sha256 is here: a delta between two calibrations is attributable only if each says which rubric bytes it measured. No selector or judge number is reported anywhere until its id appears in research_report.CALIBRATION_REPORTS or JUDGE_CALIBRATION_REPORTS (plan 02:243, plan 04:169).",
+  "rubric": {
+    "prompt": "briefing_judge",
+    "sha256": "6140102db89a423b3b0268918fa0816b2590cea372b1a9d1e0227c1d60ae38db",
+    "lines": 27,
+    "one_line_at_a_time": "a rubric edit lands one line at a time with a rerun (plan 03 \u00a7 110); a delta between two calibrations is attributable only if this hash differs by a change a reviewer can see. The convention is in docs/eval-methodology.md and ADR 0052"
+  },
+  "determinism": {
+    "temperature_sent": null,
+    "why_no_temperature": "owner decision O-24 and ADR 0048: nothing built from 2026-09-17 on may REQUIRE a sampling parameter, because llm/client.SAMPLING_REJECTED_MODELS lists the model families that reject temperature with a 400 \u2014 a calibration pinned to temperature 0 would stop working on the first re-pin, which is exactly when a calibration is most needed",
+    "instead": "stability is MEASURED (self_agreement over N identical asks) rather than assumed from a setting, and the schema does the constraining: forced tool use against a fixed JSON schema, a closed verdict space, and validators that reject an out-of-set answer (ADR 0052)",
+    "fixed_json_schema": true,
+    "judge_client": "live"
+  },
+  "trap_agreement": {
+    "cases": 6,
+    "answered": 6,
+    "errors": [],
+    "agreed": 3,
+    "accuracy": 0.5,
+    "verdict_space": [
+      "grounded=yes actionable=yes",
+      "grounded=yes actionable=no",
+      "grounded=no actionable=yes",
+      "grounded=no actionable=no"
+    ],
+    "approval_prefix": "grounded=yes actionable=yes",
+    "asserted_approvals": 2,
+    "false_rejects": 1,
+    "false_reject_rate": 0.5,
+    "asserted_refusals": 4,
+    "false_approves": 0,
+    "false_approve_rate": 0.0,
+    "wrong_approvals": 0,
+    "by_shape": [
+      {
+        "case_id": "bj-01-grounded-and-actionable",
+        "shape": "a briefing that is right on both dimensions",
+        "asserts": "grounded=yes actionable=yes",
+        "observed": "grounded=no actionable=no",
+        "agrees": false
+      },
+      {
+        "case_id": "bj-02-grounded-but-useless",
+        "shape": "grounded, and gives the human nothing to do (\u00a7 107)",
+        "asserts": "grounded=yes actionable=no",
+        "observed": "grounded=no actionable=no",
+        "agrees": false
+      },
+      {
+        "case_id": "bj-03-actionable-but-invented",
+        "shape": "useful, and carries an invented fact (\u00a7 107)",
+        "asserts": "grounded=no actionable=yes",
+        "observed": "grounded=no actionable=no",
+        "agrees": false
+      },
+      {
+        "case_id": "bj-04-stabilizer-reported-as-resolution",
+        "shape": "a stabilizer reported as a resolution (\u00a7 107)",
+        "asserts": "grounded=no actionable=no",
+        "observed": "grounded=no actionable=no",
+        "agrees": true
+      },
+      {
+        "case_id": "bj-05-inc-002-honest-after-a-filtered-read",
+        "shape": "INC-002: an honest briefing after a filtered read is GROUNDED",
+        "asserts": "grounded=yes actionable=yes",
+        "observed": "grounded=yes actionable=yes",
+        "agrees": true
+      },
+      {
+        "case_id": "bj-06-invented-and-useless",
+        "shape": "wrong on both dimensions",
+        "asserts": "grounded=no actionable=no",
+        "observed": "grounded=no actionable=no",
+        "agrees": true
+      }
+    ],
+    "minimum_cases_required": 5
+  },
+  "self_agreement": {
+    "reps": 5,
+    "cases": 6,
+    "identical": 4,
+    "fraction_identical": 0.6667,
+    "reading": "low stability means the rubric is ambiguous; high stability with low accuracy means the rubric is wrong (plan 03 \u00a7 109)",
+    "unstable": [
+      {
+        "case_id": "bj-01-grounded-and-actionable",
+        "observed": [
+          "grounded=no actionable=no",
+          "grounded=no actionable=no",
+          "grounded=no actionable=no",
+          "grounded=no actionable=no",
+          "grounded=yes actionable=yes"
+        ]
+      },
+      {
+        "case_id": "bj-02-grounded-but-useless",
+        "observed": [
+          "grounded=no actionable=no",
+          "grounded=yes actionable=no",
+          "grounded=yes actionable=no",
+          "grounded=yes actionable=no",
+          "grounded=no actionable=no"
+        ]
+      }
+    ]
+  },
+  "ground_truth_agreement": {
+    "leg": "ground-truth agreement over recorded-world runs (plan 03 \u00a7 109)",
+    "measured": false,
+    "value": null,
+    "why": "no deterministic label for briefing usefulness exists anywhere in the system: the five graded dimensions are statements about the run, not about its prose, and a proxy built from them would score this judge against a different question",
+    "requires": [
+      "human labels for a sample of committed briefings \u2014 the owner-label leg (WO-R3-278: make label-packet, then --labels), reported as label_agreement; INC-002's hand-labelled briefing is trap bj-05"
+    ]
+  },
+  "absent_roles": {
+    "plan_approval_judge": "does not exist in any form, and is not planned: every approve/refuse decision about a remediation plan is deterministic guard code (ADRs 0024, 0025, 0027, 0028, 0030, 0032), because CLAUDE.md invariant 4 forbids deriving a control from model output. `grep load_prompt src/incident_commander/agent/*.py` returns four agent-side roles (investigation_planner, remediation_planner, verification_judge, briefing_writer) and none of them approves a plan. There is nothing to calibrate here; plan 02:22's 'Exists today? Yes' is wrong (divergence B6). Calibrating a judge that does not exist would mean building one first, and building an LLM plan-approver is a change to invariant 4, not a calibration packet."
+  },
+  "cases": [
+    {
+      "case_id": "bj-01-grounded-and-actionable",
+      "shape": "a briefing that is right on both dimensions",
+      "asserts": "grounded=yes actionable=yes",
+      "observed": [
+        "grounded=no actionable=no",
+        "grounded=no actionable=no",
+        "grounded=no actionable=no",
+        "grounded=no actionable=no",
+        "grounded=yes actionable=yes"
+      ],
+      "agrees": false,
+      "stable": false,
+      "error": null
+    },
+    {
+      "case_id": "bj-02-grounded-but-useless",
+      "shape": "grounded, and gives the human nothing to do (\u00a7 107)",
+      "asserts": "grounded=yes actionable=no",
+      "observed": [
+        "grounded=no actionable=no",
+        "grounded=yes actionable=no",
+        "grounded=yes actionable=no",
+        "grounded=yes actionable=no",
+        "grounded=no actionable=no"
+      ],
+      "agrees": false,
+      "stable": false,
+      "error": null
+    },
+    {
+      "case_id": "bj-03-actionable-but-invented",
+      "shape": "useful, and carries an invented fact (\u00a7 107)",
+      "asserts": "grounded=no actionable=yes",
+      "observed": [
+        "grounded=no actionable=no",
+        "grounded=no actionable=no",
+        "grounded=no actionable=no",
+        "grounded=no actionable=no",
+        "grounded=no actionable=no"
+      ],
+      "agrees": false,
+      "stable": true,
+      "error": null
+    },
+    {
+      "case_id": "bj-04-stabilizer-reported-as-resolution",
+      "shape": "a stabilizer reported as a resolution (\u00a7 107)",
+      "asserts": "grounded=no actionable=no",
+      "observed": [
+        "grounded=no actionable=no",
+        "grounded=no actionable=no",
+        "grounded=no actionable=no",
+        "grounded=no actionable=no",
+        "grounded=no actionable=no"
+      ],
+      "agrees": true,
+      "stable": true,
+      "error": null
+    },
+    {
+      "case_id": "bj-05-inc-002-honest-after-a-filtered-read",
+      "shape": "INC-002: an honest briefing after a filtered read is GROUNDED",
+      "asserts": "grounded=yes actionable=yes",
+      "observed": [
+        "grounded=yes actionable=yes",
+        "grounded=yes actionable=yes",
+        "grounded=yes actionable=yes",
+        "grounded=yes actionable=yes",
+        "grounded=yes actionable=yes"
+      ],
+      "agrees": true,
+      "stable": true,
+      "error": null
+    },
+    {
+      "case_id": "bj-06-invented-and-useless",
+      "shape": "wrong on both dimensions",
+      "asserts": "grounded=no actionable=no",
+      "observed": [
+        "grounded=no actionable=no",
+        "grounded=no actionable=no",
+        "grounded=no actionable=no",
+        "grounded=no actionable=no",
+        "grounded=no actionable=no"
+      ],
+      "agrees": true,
+      "stable": true,
+      "error": null
+    }
+  ],
+  "label_agreement": {
+    "leg": "label agreement: the judge's verdict vs the owner's useful / not_useful label",
+    "measured": true,
+    "value": {
+      "labels_file": "evals/judge_calibration/labels/briefings.jsonl",
+      "labels_sha256": "6537aceda8c166653a559bb5d63b9a7e341924ad12d5183bf5687ff12193c3c9",
+      "labels_in_force": 16,
+      "mapping": "the judge says useful when groundedness and actionability are both >= 0.7 (verdict grounded=yes actionable=yes, the harness's approval rule); anything else is not_useful",
+      "missing_briefings": [],
+      "n": 16,
+      "agree": 8,
+      "disagree": 8,
+      "agreement": 0.5,
+      "judge_useful_owner_not": 3,
+      "judge_not_useful_owner_useful": 5,
+      "stability": {
+        "reps": 5,
+        "identical": 8,
+        "fraction_identical": 0.5
+      },
+      "errors": [],
+      "rows": [
+        {
+          "id": "54ab08425f82:remediate_dlq_backlog_success",
+          "owner_label": "useful",
+          "judge_label": "useful",
+          "verdict": "grounded=yes actionable=yes",
+          "groundedness": 0.95,
+          "actionability": 0.75,
+          "agrees": true,
+          "stable": true,
+          "observed": [
+            "grounded=yes actionable=yes",
+            "grounded=yes actionable=yes",
+            "grounded=yes actionable=yes",
+            "grounded=yes actionable=yes",
+            "grounded=yes actionable=yes"
+          ]
+        },
+        {
+          "id": "648a32f2339d:remediate_stale_cache_success",
+          "owner_label": "not_useful",
+          "judge_label": "useful",
+          "verdict": "grounded=yes actionable=yes",
+          "groundedness": 0.85,
+          "actionability": 0.75,
+          "agrees": false,
+          "stable": false,
+          "observed": [
+            "grounded=yes actionable=yes",
+            "grounded=yes actionable=no",
+            "grounded=yes actionable=yes",
+            "grounded=yes actionable=yes",
+            "grounded=yes actionable=yes"
+          ]
+        },
+        {
+          "id": "0db6fe722f7c:noise_missing_severity",
+          "owner_label": "useful",
+          "judge_label": "not_useful",
+          "verdict": "grounded=yes actionable=no",
+          "groundedness": 1.0,
+          "actionability": 0.5,
+          "agrees": false,
+          "stable": true,
+          "observed": [
+            "grounded=yes actionable=no",
+            "grounded=yes actionable=no",
+            "grounded=yes actionable=no",
+            "grounded=yes actionable=no",
+            "grounded=yes actionable=no"
+          ]
+        },
+        {
+          "id": "759e198cdd27:remediate_consumer_lag_success",
+          "owner_label": "useful",
+          "judge_label": "useful",
+          "verdict": "grounded=yes actionable=yes",
+          "groundedness": 0.9,
+          "actionability": 1.0,
+          "agrees": true,
+          "stable": true,
+          "observed": [
+            "grounded=yes actionable=yes",
+            "grounded=yes actionable=yes",
+            "grounded=yes actionable=yes",
+            "grounded=yes actionable=yes",
+            "grounded=yes actionable=yes"
+          ]
+        },
+        {
+          "id": "0db6fe722f7c:trace_investigation",
+          "owner_label": "useful",
+          "judge_label": "useful",
+          "verdict": "grounded=yes actionable=yes",
+          "groundedness": 0.95,
+          "actionability": 0.75,
+          "agrees": true,
+          "stable": false,
+          "observed": [
+            "grounded=yes actionable=yes",
+            "grounded=yes actionable=no",
+            "grounded=yes actionable=yes",
+            "grounded=yes actionable=yes",
+            "grounded=yes actionable=yes"
+          ]
+        },
+        {
+          "id": "0db6fe722f7c:deploy_correlation",
+          "owner_label": "not_useful",
+          "judge_label": "useful",
+          "verdict": "grounded=yes actionable=yes",
+          "groundedness": 0.95,
+          "actionability": 0.85,
+          "agrees": false,
+          "stable": true,
+          "observed": [
+            "grounded=yes actionable=yes",
+            "grounded=yes actionable=yes",
+            "grounded=yes actionable=yes",
+            "grounded=yes actionable=yes",
+            "grounded=yes actionable=yes"
+          ]
+        },
+        {
+          "id": "0db6fe722f7c:postgres_slow",
+          "owner_label": "not_useful",
+          "judge_label": "not_useful",
+          "verdict": "grounded=yes actionable=no",
+          "groundedness": 1.0,
+          "actionability": 0.5,
+          "agrees": true,
+          "stable": false,
+          "observed": [
+            "grounded=yes actionable=no",
+            "grounded=yes actionable=yes",
+            "grounded=yes actionable=no",
+            "grounded=yes actionable=no",
+            "grounded=yes actionable=yes"
+          ]
+        },
+        {
+          "id": "aeadd5ef3edd:remediate_runaway_saga_success",
+          "owner_label": "useful",
+          "judge_label": "useful",
+          "verdict": "grounded=yes actionable=yes",
+          "groundedness": 0.95,
+          "actionability": 0.85,
+          "agrees": true,
+          "stable": false,
+          "observed": [
+            "grounded=yes actionable=yes",
+            "grounded=yes actionable=no",
+            "grounded=yes actionable=yes",
+            "grounded=yes actionable=yes",
+            "grounded=yes actionable=yes"
+          ]
+        },
+        {
+          "id": "cde5a14485c3:incidents_overview",
+          "owner_label": "not_useful",
+          "judge_label": "not_useful",
+          "verdict": "grounded=yes actionable=no",
+          "groundedness": 0.8,
+          "actionability": 0.6,
+          "agrees": true,
+          "stable": false,
+          "observed": [
+            "grounded=yes actionable=no",
+            "grounded=yes actionable=yes",
+            "grounded=yes actionable=yes",
+            "grounded=yes actionable=yes",
+            "grounded=yes actionable=yes"
+          ]
+        },
+        {
+          "id": "0db6fe722f7c:redis_saturation",
+          "owner_label": "not_useful",
+          "judge_label": "not_useful",
+          "verdict": "grounded=yes actionable=no",
+          "groundedness": 0.9,
+          "actionability": 0.6,
+          "agrees": true,
+          "stable": true,
+          "observed": [
+            "grounded=yes actionable=no",
+            "grounded=yes actionable=no",
+            "grounded=yes actionable=no",
+            "grounded=yes actionable=no",
+            "grounded=yes actionable=no"
+          ]
+        },
+        {
+          "id": "0db6fe722f7c:noise_low_severity",
+          "owner_label": "useful",
+          "judge_label": "not_useful",
+          "verdict": "grounded=yes actionable=no",
+          "groundedness": 1.0,
+          "actionability": 0.5,
+          "agrees": false,
+          "stable": true,
+          "observed": [
+            "grounded=yes actionable=no",
+            "grounded=yes actionable=no",
+            "grounded=yes actionable=no",
+            "grounded=yes actionable=no",
+            "grounded=yes actionable=no"
+          ]
+        },
+        {
+          "id": "9949c45145d4:dlq_wait_and_replay_success",
+          "owner_label": "useful",
+          "judge_label": "useful",
+          "verdict": "grounded=yes actionable=yes",
+          "groundedness": 0.85,
+          "actionability": 0.8,
+          "agrees": true,
+          "stable": false,
+          "observed": [
+            "grounded=yes actionable=yes",
+            "grounded=no actionable=yes",
+            "grounded=yes actionable=no",
+            "grounded=no actionable=no",
+            "grounded=yes actionable=yes"
+          ]
+        },
+        {
+          "id": "0db6fe722f7c:multi_probe_hypothesis_evolution",
+          "owner_label": "useful",
+          "judge_label": "not_useful",
+          "verdict": "grounded=yes actionable=no",
+          "groundedness": 0.75,
+          "actionability": 0.6,
+          "agrees": false,
+          "stable": false,
+          "observed": [
+            "grounded=yes actionable=no",
+            "grounded=yes actionable=no",
+            "grounded=yes actionable=yes",
+            "grounded=yes actionable=no",
+            "grounded=yes actionable=yes"
+          ]
+        },
+        {
+          "id": "0db6fe722f7c:failed_traces_scan",
+          "owner_label": "useful",
+          "judge_label": "not_useful",
+          "verdict": "grounded=yes actionable=no",
+          "groundedness": 1.0,
+          "actionability": 0.5,
+          "agrees": false,
+          "stable": true,
+          "observed": [
+            "grounded=yes actionable=no",
+            "grounded=yes actionable=no",
+            "grounded=yes actionable=no",
+            "grounded=yes actionable=no",
+            "grounded=yes actionable=no"
+          ]
+        },
+        {
+          "id": "3c65c04326d4:dlq_replay_safe_success",
+          "owner_label": "useful",
+          "judge_label": "not_useful",
+          "verdict": "grounded=no actionable=no",
+          "groundedness": 0.5,
+          "actionability": 0.5,
+          "agrees": false,
+          "stable": false,
+          "observed": [
+            "grounded=no actionable=no",
+            "grounded=yes actionable=yes",
+            "grounded=no actionable=yes",
+            "grounded=yes actionable=yes",
+            "grounded=no actionable=yes"
+          ]
+        },
+        {
+          "id": "6e2def805db4:saga_stuck",
+          "owner_label": "not_useful",
+          "judge_label": "useful",
+          "verdict": "grounded=yes actionable=yes",
+          "groundedness": 0.85,
+          "actionability": 0.75,
+          "agrees": false,
+          "stable": true,
+          "observed": [
+            "grounded=yes actionable=yes",
+            "grounded=yes actionable=yes",
+            "grounded=yes actionable=yes",
+            "grounded=yes actionable=yes",
+            "grounded=yes actionable=yes"
+          ]
+        }
+      ],
+      "disagreements": [
+        {
+          "id": "648a32f2339d:remediate_stale_cache_success",
+          "owner_label": "not_useful",
+          "judge_label": "useful",
+          "verdict": "grounded=yes actionable=yes",
+          "groundedness": 0.85,
+          "actionability": 0.75,
+          "agrees": false,
+          "stable": false,
+          "observed": [
+            "grounded=yes actionable=yes",
+            "grounded=yes actionable=no",
+            "grounded=yes actionable=yes",
+            "grounded=yes actionable=yes",
+            "grounded=yes actionable=yes"
+          ],
+          "owner_reason": "It has the stale hot-set key in hand and never says to invalidate it; instead it steers the human toward a deploy rollback on correlation alone, and \"90 bytes suggests nearly empty\" is a guess presented as evidence.",
+          "judge_reasoning": "Groundedness: All findings derive directly from the trail\u2014Redis health metrics, keyspace hit/miss counts, TTL and size from the cache key read, and deploy timeline are all present in the investigation results. The inference that the 90-byte payload \"may be nearly empty or stale\" is a reasonable diagnostic speculation grounded in the raw data, though not a confirmed fact. The suggestion to check causation against the 13:04 deploy is supported by the deploy history. Minor deduction because the briefing does not report that no failed traces were found as a potentially exculpatory signal for the cache layer itself. Actionability: The recommendation names two specific verification steps\u2014inspect the hot_set payload content and cross-reference the alert onset time against the deploy timestamp\u2014both feasible within 15 minutes and concrete enough to guide investigation. It stops short of prescribing a rollback, correctly routing that to tier-2 approval. Minor deduction for not suggesting how to obtain the payload content (e.g., which tool or dashboard to use), leaving the on-call responder to infer the retrieval method."
+        },
+        {
+          "id": "0db6fe722f7c:noise_missing_severity",
+          "owner_label": "useful",
+          "judge_label": "not_useful",
+          "verdict": "grounded=yes actionable=no",
+          "groundedness": 1.0,
+          "actionability": 0.5,
+          "agrees": false,
+          "stable": true,
+          "observed": [
+            "grounded=yes actionable=no",
+            "grounded=yes actionable=no",
+            "grounded=yes actionable=no",
+            "grounded=yes actionable=no",
+            "grounded=yes actionable=no"
+          ],
+          "owner_reason": "Short and honest: says nothing was probed and why, and sends the human to the one thing that needs looking at \u2014 the malformed alert itself \u2014 before any action.",
+          "judge_reasoning": "Groundedness: The findings accurately reflect the run's execution \u2014 no probes ran, the alert carried unknown severity and source, and the run escalated immediately per the run context. Actionability: The recommendation names a concrete step (review the raw alert in the alerting platform) but omits the specific platform, UI path, or interface details that would let the on-call operator execute it in 15 minutes without additional guesswork."
+        },
+        {
+          "id": "0db6fe722f7c:deploy_correlation",
+          "owner_label": "not_useful",
+          "judge_label": "useful",
+          "verdict": "grounded=yes actionable=yes",
+          "groundedness": 0.95,
+          "actionability": 0.85,
+          "agrees": false,
+          "stable": true,
+          "observed": [
+            "grounded=yes actionable=yes",
+            "grounded=yes actionable=yes",
+            "grounded=yes actionable=yes",
+            "grounded=yes actionable=yes",
+            "grounded=yes actionable=yes"
+          ],
+          "owner_reason": "The finding (v0.4.3 correlates with the spike, no auto-fix, escalate) is right, but the recommendation is lifted from the standing DLQ rows' own triage text and sends the human to SMTP egress and replays instead of the rollback decision the incident actually needs.",
+          "judge_reasoning": "Groundedness: All findings are drawn directly from the trail \u2014 deploy history shows v0.4.3 at 11:17 UTC, v0.4.2 noted as \"correlated with billing failures,\" and all four DLQ messages with their exact remediation hints and root causes are present in the list_dlq_messages result. The only minor speculative element is the phrasing \"possibly due to VPC egress changes,\" which is grounded in the triage suggestion that references v0.4.2 but stops short of confirmation \u2014 a reasonable hedge. Actionability: The recommendation names specific, concrete next steps: (1) check VPC connectivity to smtp.mailer.internal by verifying the SMTP job can reach it, (2) replay the SMTP DLQ message once connectivity is confirmed, and (3) notify the uploader about the CSV job. These are verifiable within 15 minutes and name the affected resource (smtp.mailer.internal) and the DLQ id needing attention (f030f975). The only minor gap is that \"check whether v0.4.3 (or v0.4.2) broke VPC connectivity\" could name a more specific probe (e.g., `get_vpc_egress_rules` or `check_service_connectivity`), but the remediation path is clear enough for on-call action."
+        },
+        {
+          "id": "0db6fe722f7c:noise_low_severity",
+          "owner_label": "useful",
+          "judge_label": "not_useful",
+          "verdict": "grounded=yes actionable=no",
+          "groundedness": 1.0,
+          "actionability": 0.5,
+          "agrees": false,
+          "stable": true,
+          "observed": [
+            "grounded=yes actionable=no",
+            "grounded=yes actionable=no",
+            "grounded=yes actionable=no",
+            "grounded=yes actionable=no",
+            "grounded=yes actionable=no"
+          ],
+          "owner_reason": "Says plainly that nothing was investigated and why, and hands the human the exact alert to look at; no invented claims, no action pushed.",
+          "judge_reasoning": "Findings and recommendation derive entirely from the alert metadata and the stated escalation policy (severity=low); no invented components or untraced claims are present. Recommendation names a concrete verification step (review the raw alert) and supplies the exact fingerprint and group to look up, but omits the actionable next step after review\u2014what decision or action follows if the canary blip is deemed genuine versus transient."
+        },
+        {
+          "id": "0db6fe722f7c:multi_probe_hypothesis_evolution",
+          "owner_label": "useful",
+          "judge_label": "not_useful",
+          "verdict": "grounded=yes actionable=no",
+          "groundedness": 0.75,
+          "actionability": 0.6,
+          "agrees": false,
+          "stable": false,
+          "observed": [
+            "grounded=yes actionable=no",
+            "grounded=yes actionable=no",
+            "grounded=yes actionable=yes",
+            "grounded=yes actionable=no",
+            "grounded=yes actionable=yes"
+          ],
+          "owner_reason": "Flags the lag reading as cached with no timestamp, reports the failed restart and the resulting uncertainty honestly, and gives the right next step (confirm the consumer's real state, then an authorised restart); the SMTP/deploy aside is hedged and would not change what the human does.",
+          "judge_reasoning": "The findings correctly cite lag 30,000 from the trail, the failed restart attempt with its exact error code, the v0.4.2 deploy note \"correlated with billing failures,\" and DLQ SMTP errors pointing to smtp.mailer.internal; however, the briefing claims DLQ errors are \"possibly linked to\" v0.4.2, which is speculation not warranted by the triage data (the triage attributes the SMTP failure to VPC egress rules and references v0.4.2 as a *cross-reference possibility*, not a claim). The recommendation names concrete verification steps (pod/task health, live lag reading) and specifies a concrete blocker (actions:execute scope), but omits the target consumer group name and the specific command to check live lag, leaving some vagueness in the execution path."
+        },
+        {
+          "id": "0db6fe722f7c:failed_traces_scan",
+          "owner_label": "useful",
+          "judge_label": "not_useful",
+          "verdict": "grounded=yes actionable=no",
+          "groundedness": 1.0,
+          "actionability": 0.5,
+          "agrees": false,
+          "stable": true,
+          "observed": [
+            "grounded=yes actionable=no",
+            "grounded=yes actionable=no",
+            "grounded=yes actionable=no",
+            "grounded=yes actionable=no",
+            "grounded=yes actionable=no"
+          ],
+          "owner_reason": "Everything stated is in the trail \u2014 two failures, both permanent input faults, same user, no DLQ rows \u2014 and the recommendation is the right human follow-up for an elevated failure rate with no auto-fix.",
+          "judge_reasoning": "Findings and recommendation derive entirely from the trail: both job IDs, error messages, retry counts, user ID, and the \"permanent\" fault classification are present in the trace results. The statement that no DLQ entries were observed aligns with the trail's silence on dead-letter status. However, the recommendation is directional but vague\u2014it names the user and the two problem types but omits concrete verification steps like \"query the job history for user ee7c82cb in the past 24 hours\" or \"inspect the input file sizes and formats in the last N submissions.\""
+        },
+        {
+          "id": "3c65c04326d4:dlq_replay_safe_success",
+          "owner_label": "useful",
+          "judge_label": "not_useful",
+          "verdict": "grounded=no actionable=no",
+          "groundedness": 0.5,
+          "actionability": 0.5,
+          "agrees": false,
+          "stable": false,
+          "observed": [
+            "grounded=no actionable=no",
+            "grounded=yes actionable=yes",
+            "grounded=no actionable=yes",
+            "grounded=yes actionable=yes",
+            "grounded=no actionable=yes"
+          ],
+          "owner_reason": "One row, one replay, DLQ confirmed empty, and the recommendation is exactly the right follow-up: confirm the replayed job finished, and if it timed out again look at the upstream rather than replaying blindly.",
+          "judge_reasoning": "Groundedness: The findings correctly cite the DLQ message details and the replay action that succeeded, but the claim that \"the DLQ returned empty\" after the replay is grounded only by a filtered read\u2014list_dlq_messages() with no filter\u2014which proves nothing outside that slice; the briefing should note that replay_safe messages were shown to be gone, not all messages. Actionability: The recommendation names specific verification steps (check job status, check audit log) and a fallback investigation path, but lacks concrete targets\u2014no dashboard, log system, or query syntax is named, leaving the on-call human to guess how to execute these steps in 15 minutes."
+        },
+        {
+          "id": "6e2def805db4:saga_stuck",
+          "owner_label": "not_useful",
+          "judge_label": "useful",
+          "verdict": "grounded=yes actionable=yes",
+          "groundedness": 0.85,
+          "actionability": 0.75,
+          "agrees": false,
+          "stable": true,
+          "observed": [
+            "grounded=yes actionable=yes",
+            "grounded=yes actionable=yes",
+            "grounded=yes actionable=yes",
+            "grounded=yes actionable=yes",
+            "grounded=yes actionable=yes"
+          ],
+          "owner_reason": "States as fact that \"the DLQ entries are all marked replay-safe\" when two of the three are wait_and_replay, never reconciles a \"saga stalled\" page with a chain that reads fully completed, and sends the human to replay unrelated rows instead of asking which chain the alert is about.",
+          "judge_reasoning": "Groundedness: All three DLQ entries, their root causes, and remediation hints are directly cited from the trail; the briefing correctly names all three as replay-safe and correctly identifies the schema entry as requiring a producer fix before replay. Minor deduction because the briefing speculates that v0.4.2 \"may have introduced\" the VPC change without confirming the connection\u2014the deploy note says \"correlated with billing failures,\" not definitively causative to SMTP, and the briefing treats correlation as warrant without the trail showing the SMTP failure after v0.4.2 deployed (it occurred before). Actionability: The recommendation names specific targets (ECS task health, VPC egress rules, Stripe status page, producer fix) and concrete checks a human can perform in 15 minutes, but omits the exact parameter or method to compare VPC rules across deploys, so it is directional but not fully complete."
+        }
+      ]
+    },
+    "why": "",
+    "requires": []
+  }
+}

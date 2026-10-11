@@ -5,7 +5,8 @@ pilot ``oracle_gap_pilot.json``) once per pass, each pinned to its recording, un
 ``candidate_selector`` arm; ``REPEATS=N`` makes N passes in the one runner invocation (WO-R3-375).
 The report gives pass@k, selected@k and oracle_gap@k (plan 03 § 7.3) per world, per run and
 pooled, with n beside every number and the calibration report id beside every selector number
-(O-55). Why this sample and what it cannot claim: the hub's
+(O-55); per world and pooled it also splits the scored runs three ways — picked correct, picked
+wrong, declined to pick (O-57). Why this sample and what it cannot claim: the hub's
 ``docs/plans/research-buildout-v2.1/samples/oracle-gap.md``.
 """
 
@@ -426,8 +427,25 @@ def gap_interval(rows: Sequence[RunRow], k: int) -> list[float] | None:
     return [round(low, 4), round(high, 4)]
 
 
+def pick_split(rows: Sequence[RunRow], k: int) -> dict[str, Any]:
+    """The owner's three numbers at k (O-57): picked correct / picked wrong / declined to pick.
+
+    Over the same scored runs as ``at_k``'s n, so the three sum to it; declined is shown as
+    ``probe_more``, ``escalate`` and ``none`` (``research_report.NO_DECISION``). One counting
+    rule, ``research_report.pick_split``, which the research report's oracle-gap section uses too.
+    """
+    scored = [row for row in rows if row.gap.get(k) is not None]
+    return {"k": k} | research_report.pick_split(
+        (row.decision, row.selected_hit.get(k)) for row in scored
+    )
+
+
 def gap_by_decision(rows: Sequence[RunRow], k: int) -> dict[str, int]:
-    """The runs that lost an available answer, by what the selector did at the deciding step."""
+    """The runs that lost an available answer, by what the selector did at the deciding step.
+
+    Kept beside ``pick_split``: this one counts the gap's runs only (a correct candidate was in
+    view and not taken), ``pick_split`` every scored run.
+    """
     counted: dict[str, int] = {}
     for row in rows:
         if row.gap.get(k) == 1:
@@ -486,6 +504,7 @@ def summarise(rows: Sequence[RunRow], *, headline_k: int) -> dict[str, Any]:
                 "recording": recording,
                 "runs": len(members),
                 "at_k": [at_k(members, k) for k in REPORTED_KS],
+                "pick_split": pick_split(members, headline_k),
                 "agreement": agreement(members, headline_k),
                 "per_run": per_run(members, headline_k),
             }
@@ -497,6 +516,7 @@ def summarise(rows: Sequence[RunRow], *, headline_k: int) -> dict[str, Any]:
             "at_k": [
                 at_k(rows, k) | {"gap_interval_95": gap_interval(rows, k)} for k in REPORTED_KS
             ],
+            "pick_split": pick_split(rows, headline_k),
             "gap_by_decision": {"k": headline_k, "counts": gap_by_decision(rows, headline_k)},
             "selector_vs_top_candidate": {
                 "k": headline_k,
@@ -517,6 +537,13 @@ _SELECTOR_FIELDS: Final[tuple[str, ...]] = (
 _RUN_SELECTOR_FIELDS: Final[tuple[str, ...]] = ("selected_hit", "gap", "decision")
 _AGREEMENT_SELECTOR_FIELDS: Final[tuple[str, ...]] = ("selected_at_k_agree",)
 _SPLIT_SELECTOR_FIELDS: Final[tuple[str, ...]] = ("counts",)
+#: The three numbers of ``pick_split``; its ``n`` (how many runs were scored) is not withheld.
+_PICK_SELECTOR_FIELDS: Final[tuple[str, ...]] = (
+    "picked_correct",
+    "picked_wrong",
+    "declined",
+    "declined_total",
+)
 
 
 def beside_calibration(summary: dict[str, Any], calibration: Mapping[str, Any]) -> dict[str, Any]:
@@ -546,6 +573,7 @@ def beside_calibration(summary: dict[str, Any], calibration: Mapping[str, Any]) 
             world
             | {
                 "at_k": [stamped(entry, _SELECTOR_FIELDS) for entry in world["at_k"]],
+                "pick_split": stamped(world["pick_split"], _PICK_SELECTOR_FIELDS),
                 "agreement": stamped(world["agreement"], _AGREEMENT_SELECTOR_FIELDS),
                 "per_run": [stamped(run, _RUN_SELECTOR_FIELDS) for run in world["per_run"]],
             }
@@ -554,6 +582,7 @@ def beside_calibration(summary: dict[str, Any], calibration: Mapping[str, Any]) 
         "pooled": pooled
         | {
             "at_k": [stamped(entry, _SELECTOR_FIELDS) for entry in pooled["at_k"]],
+            "pick_split": stamped(pooled["pick_split"], _PICK_SELECTOR_FIELDS),
             "gap_by_decision": stamped(pooled["gap_by_decision"], _SPLIT_SELECTOR_FIELDS),
             "selector_vs_top_candidate": stamped(
                 pooled["selector_vs_top_candidate"], _SPLIT_SELECTOR_FIELDS
@@ -591,6 +620,9 @@ def limits(document: Mapping[str, Any]) -> list[str]:
         "then mostly a statement about the selector.",
         "A gap counts every run whose correct candidate was available and not taken, "
         "including a selector that escalated or asked for more; the split by decision says which.",
+        "The three-way split (picked correct / picked wrong / declined to pick) counts every "
+        "scored run, not only the gap: a wrong pick or a decline with no correct candidate in the "
+        "set is counted there and is not part of the gap.",
         f"{len(document['excluded'])} run(s) are excluded and listed with the reason; none is "
         "counted as a miss.",
         "Repeats of one world are the same recorded world replayed again (only the model's own "
@@ -668,6 +700,13 @@ def _cell(value: Any) -> str:
     return str(value)
 
 
+#: The declined-to-pick column's parts, in the order the cell lists them.
+_DECLINED_COLUMNS: Final[tuple[str, ...]] = (
+    *research_report.DECLINED_DECISIONS,
+    research_report.NO_DECISION,
+)
+
+
 def _verdict(hit: Any) -> str:
     """A run's verdict at k, in words."""
     return "—" if hit is None else ("hit" if hit is True else "miss" if hit is False else str(hit))
@@ -685,6 +724,17 @@ def _selector(label: str, value: str, row: Mapping[str, Any]) -> str:
         value,
         report_ids=(report_id,) if report_id else (),
         why_withheld=row.get("withheld_because", ""),
+    )
+
+
+def _picks(split: Mapping[str, Any]) -> tuple[str, str, str]:
+    """The three numbers of one split (O-57), each in its own cell beside its calibration id."""
+    report_id = split.get("calibration_report_id")
+    return research_report.pick_cells(
+        split,
+        split["k"],
+        report_ids=(report_id,) if report_id else (),
+        why_withheld=split.get("withheld_because", ""),
     )
 
 
@@ -757,6 +807,19 @@ def render_markdown(document: Mapping[str, Any]) -> str:
             + _selector(f"gap interval@{at}", _cell(entry["gap_interval_95"]), entry)
             + " |"
         )
+    picks = pooled["pick_split"]
+    declined_header = f"declined to pick ({', '.join(_DECLINED_COLUMNS)})"
+    lines += [
+        "",
+        f"Every scored run at k={picks['k']}, three ways — what the selector did with the set "
+        "(O-57):",
+        "",
+        f"| n | picked correct | picked wrong | {declined_header} |",
+        "|---|---|---|---|",
+        f"| {picks['n']} | " + " | ".join(_picks(picks)) + " |",
+        "",
+        research_report.NO_DECISION_NOTE,
+    ]
     split = pooled["gap_by_decision"]
     versus = pooled["selector_vs_top_candidate"]
     lines += [
@@ -770,8 +833,9 @@ def render_markdown(document: Mapping[str, Any]) -> str:
         f"## Per world (k={k})",
         "",
         "| scenario | recording | runs | n | pass@k | selected@k | oracle gap"
+        f" | picked correct | picked wrong | {declined_header}"
         " | repeats agree on pass@k | repeats agree on selected@k |",
-        "|---|---|---|---|---|---|---|---|---|",
+        "|---|---|---|---|---|---|---|---|---|---|---|---|",
     ]
     for world in document["summary"]["per_world"]:
         entry = next(item for item in world["at_k"] if item["k"] == k)
@@ -783,6 +847,8 @@ def render_markdown(document: Mapping[str, Any]) -> str:
             + _selector(f"selected@{k}", f"{entry['selected_at_k']}/{entry['n']}", entry)
             + " | "
             + _selector(f"oracle gap@{k}", f"{entry['oracle_gap']}/{entry['n']}", entry)
+            + " | "
+            + " | ".join(_picks(world["pick_split"]))
             + f" | {_agree(agreement['pass_at_k_agree'])}"
             " | "
             + _selector(f"selected@{k} agree", _agree(agreement["selected_at_k_agree"]), agreement)

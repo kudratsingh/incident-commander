@@ -44,7 +44,7 @@ from evals.runner import RunReport, ScenarioOutcome
 from evals.scenarios.loader import load_scenarios
 from evals.tracing import TraceKind
 from incident_commander.agent.hypothesis import HypothesisCategory
-from incident_commander.agent.selection import SELECTOR_ROLE
+from incident_commander.agent.selection import SELECTOR_ROLE, SelectionDecision
 
 REPO_ROOT: Final[Path] = Path(__file__).resolve().parents[1]
 
@@ -1054,6 +1054,48 @@ def selector_number(
     return f"{label} = {value} [cal {', '.join(report_ids)}]"
 
 
+def pick_cells(
+    split: Mapping[str, Any], k: int, *, report_ids: Sequence[str], why_withheld: str = ""
+) -> tuple[str, str, str]:
+    """The owner's three numbers (``pick_split``) as three cells, each through ``selector_number``.
+
+    ``picked correct@8 = 5/12 [cal …]``, ``picked wrong@8 = 3/12 [cal …]``, ``declined to
+    pick@8 = 4/12 (probe_more 3, escalate 1, none 0) [cal …]`` (O-57). With nothing scored at
+    this k each reads ``—`` rather than ``0/0``; withheld, each says why in its own cell.
+    """
+    n = split["n"]
+
+    def share(key: str) -> str:
+        return "—" if not n else f"{split[key]}/{n}"
+
+    declined = split["declined"]
+    each = (
+        f" ({', '.join(f'{name} {count}' for name, count in declined.items())})"
+        if n and isinstance(declined, Mapping)
+        else ""
+    )
+    return (
+        selector_number(
+            f"picked correct@{k}",
+            share("picked_correct"),
+            report_ids=report_ids,
+            why_withheld=why_withheld,
+        ),
+        selector_number(
+            f"picked wrong@{k}",
+            share("picked_wrong"),
+            report_ids=report_ids,
+            why_withheld=why_withheld,
+        ),
+        selector_number(
+            f"declined to pick@{k}",
+            share("declined_total") + each,
+            report_ids=report_ids,
+            why_withheld=why_withheld,
+        ),
+    )
+
+
 def selector_arm_key(strategy: str, config: Mapping[str, Any]) -> str:
     """The arm a selector number belongs to: strategy, generator and N.
 
@@ -1451,13 +1493,67 @@ def _oracle_gap(root: Path, sources: Sequence[Source]) -> dict[str, Any]:
     }
 
 
+#: The decisions that decline to pick: the selector asked for another read, or handed the incident
+#: to a person (O-57). ``select`` is the one decision that picks.
+DECLINED_DECISIONS: Final[tuple[str, ...]] = (
+    SelectionDecision.PROBE_MORE.value,
+    SelectionDecision.ESCALATE.value,
+)
+#: The declined bucket for a selector that ran on the deciding step and whose record names none of
+#: the three decisions. Every record the agent writes names one (``SelectorRecord.decision`` is
+#: required), so a count here means a malformed or foreign trace; it is shown, never folded in.
+NO_DECISION: Final[str] = "none"
+#: What the ``none`` count means, in the words both reports print beneath the split.
+NO_DECISION_NOTE: Final[str] = (
+    f"`{NO_DECISION}` under declined to pick counts a selector that ran on the deciding step and "
+    "named no decision; every record the agent writes names one, so a count there means a "
+    "malformed or foreign trace."
+)
+
+
+def pick_split(runs: Iterable[tuple[str, bool | None]]) -> dict[str, Any]:
+    """What the selector did with each scored run, three ways — the owner's split (O-57).
+
+    ``runs`` is each scored run's deciding-step decision and its selected@k verdict at one k.
+    Picked correct: the pick hit. Picked wrong: it decided ``select`` and missed (a wrong
+    candidate, or a selection naming none). Declined to pick: ``probe_more``, ``escalate``, or
+    ``none`` (``NO_DECISION``), each counted. Every run lands in exactly one, so the three sum to
+    n. The split covers every scored run, not only the gap: a wrong pick or a decline with no
+    correct candidate in the set is counted here, and is not part of the gap.
+    """
+    correct = wrong = 0
+    declined = dict.fromkeys((*DECLINED_DECISIONS, NO_DECISION), 0)
+    n = 0
+    for decision, hit in runs:
+        if hit is None:
+            raise ValueError(
+                f"a run whose selected@k is not scored (decision {decision!r}) has no place in "
+                "the split; pass only the runs the gap scores"
+            )
+        n += 1
+        if hit:
+            correct += 1
+        elif decision == SelectionDecision.SELECT.value:
+            wrong += 1
+        else:
+            declined[decision if decision in DECLINED_DECISIONS else NO_DECISION] += 1
+    return {
+        "n": n,
+        "picked_correct": correct,
+        "picked_wrong": wrong,
+        "declined": declined,
+        "declined_total": sum(declined.values()),
+    }
+
+
 def _gap_by(
     rows: Sequence[dict[str, Any]], key: Callable[[dict[str, Any]], str]
 ) -> list[dict[str, Any]]:
     """The gap at each k, grouped, with the paired count that produced it.
 
     Plan 03 § 12's reason: a gap of 1.0 over one paired trial and over fifty are not
-    the same claim, and only one is a finding.
+    the same claim, and only one is a finding. Each k also carries ``pick_split`` over the
+    same scored runs: picked correct / picked wrong / declined to pick (O-57).
     """
     grouped: dict[str, list[dict[str, Any]]] = {}
     for row in rows:
@@ -1475,12 +1571,13 @@ def _gap_by(
             "at_k": [],
         }
         for k in REPORTED_KS:
-            scored = [
-                gap
+            paired = [
+                (row.get("selector_decision") or "", gap)
                 for row in members
                 for gap in row["oracle_gap_at_k"]
                 if gap["k"] == k and gap["gap"] is not None
             ]
+            scored = [gap for _, gap in paired]
             entry["at_k"].append(
                 {
                     "k": k,
@@ -1497,6 +1594,9 @@ def _gap_by(
                     ),
                     "oracle_gap": (
                         None if not scored else sum(gap["gap"] for gap in scored) / len(scored)
+                    ),
+                    "pick_split": pick_split(
+                        (decision, gap["selected_hit"]) for decision, gap in paired
                     ),
                 }
             )
@@ -2268,7 +2368,8 @@ def _render_oracle_gap(value: dict[str, Any]) -> list[str]:
     """The gap by world, family and difficulty, the scored count beside every number.
 
     Each selector number carries the calibration report it rests on in its own cell, through
-    ``selector_number`` — the renderer ``oracle_gap`` uses too (O-55).
+    ``selector_number`` — the renderer ``oracle_gap`` uses too (O-55) — and so do the three
+    numbers of the owner's split, through ``pick_cells`` (O-57).
     """
     lines = [f"Calibration reports: {value['calibration_reports']}.", ""]
     for title, key in (
@@ -2278,7 +2379,18 @@ def _render_oracle_gap(value: dict[str, Any]) -> list[str]:
     ):
         lines.extend(
             _table(
-                (title, "paired runs", "k", "n scored", "pass@k", "selected@k", "oracle gap"),
+                (
+                    title,
+                    "paired runs",
+                    "k",
+                    "n scored",
+                    "pass@k",
+                    "selected@k",
+                    "oracle gap",
+                    "picked correct",
+                    "picked wrong",
+                    f"declined to pick ({', '.join((*DECLINED_DECISIONS, NO_DECISION))})",
+                ),
                 (
                     (
                         f"`{entry['group']}`",
@@ -2298,12 +2410,19 @@ def _render_oracle_gap(value: dict[str, Any]) -> list[str]:
                             report_ids=entry.get("calibration_report_ids", ()),
                             why_withheld=SELECTOR_GATE_RULE,
                         ),
+                        *pick_cells(
+                            at["pick_split"],
+                            at["k"],
+                            report_ids=entry.get("calibration_report_ids", ()),
+                            why_withheld=SELECTOR_GATE_RULE,
+                        ),
                     )
                     for entry in value[key]
                     for at in entry["at_k"]
                 ),
             )
         )
+    lines += [NO_DECISION_NOTE, ""]
     return lines
 
 

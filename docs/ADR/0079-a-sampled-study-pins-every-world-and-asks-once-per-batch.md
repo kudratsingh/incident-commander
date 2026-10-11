@@ -143,3 +143,13 @@ command; the free check prints the runner command with `--repeats N` and the tot
 
 Nothing here was run against a model; the pilot itself (12 recorded runs, ≈ $3.60) is a separate
 paid ask.
+
+**Note 2026-10-11 — the three-way split (WO-R3-376, owner O-57).** The rule in point 4 also covers
+the owner's split of the gap, added per world and pooled at the headline k: picked correct / picked
+wrong / declined to pick (`probe_more`, `escalate`, and `none` for a selector record naming no
+decision, each counted). Each of the three is its own cell through `selector_number`, and in JSON
+the `pick_split` row carries `calibration_report_id` or `withheld_because` like every other selector
+row; its `n` is not withheld, as no run count is. One counting function,
+`research_report.pick_split`, serves this report and the research report's oracle-gap section. The
+pooled `gap_by_decision` is kept unchanged beside it: it counts the gap's runs only, the split every
+scored run. No decision above changes.

@@ -959,7 +959,15 @@ ENUMERATING_SET_SIZE: Final[int] = 2
 #: a reviewer should see in a diff; deriving it from disk would let the gate open
 #: itself. Pinned both ways by
 #: ``test_candidate_selector.py::TestNoSelectorNumberWithoutACalibrationReport``.
-CALIBRATION_REPORTS: Final[Mapping[str, str]] = MappingProxyType({})
+CALIBRATION_REPORTS: Final[Mapping[str, str]] = MappingProxyType(
+    {
+        # 2026-10-11 05:23Z, live, claude-sonnet-4-6 (role benchmark, BENCHMARK_MODEL):
+        # traps 3/6, false reject 3/4, stability 6/6 — the selector asks for more reads
+        # where the traps expect a selection (INC-009). Registered as measured (owner
+        # O-54); every selector number carries this id.
+        "candidate_selector/best_of_n_enumerated/n=8": "36e12b915900",
+    }
+)
 
 
 #: The same register one role further out, for the JUDGE: plan 02:243's argument does

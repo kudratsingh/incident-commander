@@ -1,0 +1,62 @@
+{
+  "incident_id": "84eaa8d6-8fcc-4e8d-be2a-cce6986409e7",
+  "final_state": "escalated",
+  "alert_summary": "source=monitoring.slo severity=critical fingerprint=job_dispatch_latency_above_objective",
+  "escalation_reason": "max iterations (5) exceeded with no action taken: the top hypothesis was 'no_fault' / 'slo-job-dispatch-latency-already-healthy-at-read-time' at confidence 0.75, which is not an answer this run could have acted on autonomously, and the reads it took were get_circuit_breakers, get_consumer_lag, get_postgres_health, get_redis_health, get_slo_status. That ranking is this run's own conclusion — no cause outside it was established by those reads.",
+  "attempted_action": null,
+  "incidents": {
+    "primary": {
+      "category": "no_fault",
+      "name": "slo-job-dispatch-latency-already-healthy-at-read-time",
+      "confidence": 0.75,
+      "addressed": false
+    },
+    "secondary": [],
+    "unresolved_extra": [
+      {
+        "category": "no_fault",
+        "name": "slo-job-dispatch-latency-already-healthy-at-read-time",
+        "confidence": 0.75,
+        "addressed": false
+      }
+    ]
+  },
+  "attribution": null,
+  "investigation_trail": [
+    {
+      "tool": "get_consumer_lag",
+      "summary": "{\"consumer_group\":\"worker-dispatcher\",\"lag\":0,\"lag_known\":true,\"source\":\"live\",\"cache_key\":\"kafka:consumer_lag:worker-dispatcher\",\"measured_at\":\"2026-10-11T11:12:52.189169Z\",\"age_seconds\":1,\"recent_samples\":[{\"lag\":0,\"measured_at\":\"2026-10-11T11:12:52.189169Z\"},{\"lag\":0,\"measured_at\":\"2026-10-11T11:12:47.006173Z\"},{\"lag\":0,\"measured_at\":\"2026-10-11T11:12:41.842335Z\"},{\"lag\":0,\"measured_at\":\"2026-10-11T11:12:36.654253Z\"},{\"lag\":0,\"measured_at\":\"2026-10-11T11:12:31.478591Z\"},{\"lag\":0,\"measured_at\":\"2026-10-11T11:12:26.260670Z\"},{\"lag\":0,\"measured_at\":\"2026-10-11T11:12:21.069414Z\"},{\"lag\":0,\"measured_at\":\"2026-10-11T11:12:15.922559Z\"},{\"lag\":0,\"measured_at\":\"2026-10-11T11:12:10.766979Z\"},{\"lag\":0,\"measured_at\":\"2026-10-11T11:12:05.602950Z\"},{\"lag\":0,\"measured_at\":\"2026-10-11T11:12:00.449164Z\"},{\"lag\":0,\"measured_at\":\"2026-10-11T11:11:55.334669Z\"},{\"lag\":0,\"measured_at\":\"2026-10-11T11:11:50.150398Z\"},{\"lag\":0,\"measured_at\":\"2026-10-11T11:11:44.944008Z\"},{\"lag\":0,\"measured_at\":\"2026-10-11T11:11:39.749393Z\"}],\"last_poll_at\":\"2026-10-11T11:12:52.192946Z\",\"last_poll_age_seconds\":1,\"polling\":true,\"poll_interval_seconds\":2.0}",
+      "arguments": {
+        "consumer_group": "worker-dispatcher"
+      }
+    },
+    {
+      "tool": "get_slo_status",
+      "summary": "{\"measured_at\":\"2026-10-11T11:13:01.629850Z\",\"objectives\":[{\"id\":\"job_completion_rate\",\"name\":\"Job completion rate\",\"description\":\"Share of jobs that reach COMPLETED rather than DEAD_LETTER. Cancelled jobs are excluded from the denominator.\",\"target\":0.99,\"window_hours\":24,\"total\":14,\"failed\":0,\"current_success_rate\":1.0,\"budget_remaining_pct\":100.0,\"burn_rate\":0.0,\"healthy\":true,\"fast_burn\":false},{\"id\":\"job_dispatch_latency\",\"name\":\"Job dispatch latency\",\"description\":\"Share of dispatched jobs that left PENDING within 30 seconds of creation. Waiting jobs (held by the DAG) and cancelled jobs (saga rollback, or a stranded dependency parent) are excluded — a job nobody decided to dispatch has no dispatch latency.\",\"target\":0.95,\"window_hours\":24,\"total\":14,\"failed\":0,\"current_success_rate\":1.0,\"budget_remaining_pct\":100.0,\"burn_rate\":0.0,\"healthy\":true,\"fast_burn\":false}],\"total\":2,\"fast_burn_threshold\":14.4}",
+      "arguments": {}
+    },
+    {
+      "tool": "get_postgres_health",
+      "summary": "{\"ok\":true,\"ping_latency_ms\":1.636,\"active_connections\":1,\"dialect\":\"postgresql\",\"error\":null,\"pool_size\":5,\"pool_checked_out\":1,\"pool_overflow\":0,\"pool_max_overflow\":10,\"pool_wait_timeouts_1m\":0,\"pool_stats_unknown_reason\":null,\"longest_active_query_ms\":null,\"active_queries_over_slow_threshold\":0,\"slow_query_threshold_ms\":500.0,\"p95_query_ms_1m\":null,\"slow_query_count_1m\":null,\"query_stats_unknown_reason\":\"the PostgreSQL extension that records per-query timings is not installed on this database, so no per-query timing history exists\",\"pools\":[{\"process\":\"api_worker\",\"size\":5,\"checked_out\":0,\"overflow\":0,\"max_overflow\":10,\"wait_timeouts_1m\":0,\"written_at\":\"2026-10-11T11:13:03.717053Z\",\"reported_age_s\":7.069},{\"process\":\"mcp\",\"size\":5,\"checked_out\":0,\"overflow\":0,\"max_overflow\":10,\"wait_timeouts_1m\":0,\"written_at\":\"2026-10-11T11:13:01.033431Z\",\"reported_age_s\":9.753}],\"pool_gauges_unknown_reason\":null}",
+      "arguments": {}
+    },
+    {
+      "tool": "get_circuit_breakers",
+      "summary": "{\"measured_at\":\"2026-10-11T11:13:19.388135Z\",\"breakers\":[{\"name\":\"bulk-api-sync\",\"state\":\"closed\",\"failure_count\":0,\"failure_threshold\":3,\"recovery_timeout_s\":30.0,\"last_state_change_at\":null,\"seconds_since_state_change\":null,\"last_failure_at\":null,\"last_failure_reason_class\":null,\"recorded_at\":\"2026-10-11T11:12:20.687410Z\",\"reported_age_s\":58.701}],\"total\":1,\"unknown_reason\":null}",
+      "arguments": {}
+    },
+    {
+      "tool": "get_redis_health",
+      "summary": "{\"ok\":true,\"ping_latency_ms\":0.49,\"connected_clients\":15,\"used_memory_bytes\":3042776,\"used_memory_human\":\"2.90M\",\"keyspace_hits\":129451,\"keyspace_misses\":6647737,\"error\":null}",
+      "arguments": {}
+    }
+  ],
+  "findings": "At read time, all probed subsystems appeared healthy: the job_dispatch_latency SLO showed a 1.0 success rate with 100% budget remaining, worker-dispatcher consumer lag was zero with polling active, Postgres and Redis were reachable with no errors, and the single circuit breaker was closed — leading the run to conclude no_fault / slo-job-dispatch-latency-already-healthy-at-read-time (confidence 0.75), which remains the sole open hypothesis as no corrective action was taken. Because the SLO alert fired before this run's reads, the signal may reflect a burst that has since recovered, or the reads may have caught a momentary healthy window that does not represent sustained recovery.",
+  "recommendation": "Confirm whether the SLO is durably healthy by re-checking get_slo_status now and comparing burn rate and budget-remaining trends against the alert timestamp, then verify the monitoring alert has auto-resolved before closing the incident.",
+  "budget_used": {
+    "tool_calls": 5,
+    "tokens": 105793,
+    "wall_seconds": 53.043721,
+    "usd": "0.277348"
+  }
+}

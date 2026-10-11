@@ -65,7 +65,10 @@ help:
 	@echo "  oracle-gap-batch FREE by default: check evals/samples/oracle_gap.json and print the"
 	@echo "                   one recorded-mode command a batch runs (WO-R3-347). YES_SPEND=1"
 	@echo "                   runs it: real model calls, SPENDS MONEY, the owner's yes per batch;"
-	@echo "                   writes evals/reports/oracle-gap/. WORLDS=<name,...> runs a subset"
+	@echo "                   writes evals/reports/oracle-gap/. WORLDS=<name,...> runs a subset;"
+	@echo "                   PLAN=<file> picks the plan (the pilot: evals/samples/"
+	@echo "                   oracle_gap_pilot.json); REPEATS=N passes over every world N times"
+	@echo "                   in the ONE invocation (WO-R3-375)"
 	@echo "  oracle-gap-report FREE: the oracle gap over ARCHIVES=<id,...> (the batch archives),"
 	@echo "                   per world and pooled; WRITE=1 persists it"
 	@echo "  judge-calibration  put each judge's trap set to it and report trap agreement,"
@@ -163,13 +166,18 @@ judge-calibration:
 		$(if $(MODEL_ROLE_GIVEN),--model-role $(MODEL_ROLE_GIVEN),)
 
 # The oracle-gap sample (WO-R3-347, evals/oracle_gap.py). FREE by default: it checks the
-# committed sample plan and prints the exact recorded-mode command one batch runs, then
-# stops. YES_SPEND=1 (exactly 1) runs that batch — real model calls, SPENDS MONEY, needs the
-# owner's yes for this batch — and writes its report. WORLDS= re-runs a subset of the plan.
+# committed sample plan and prints the exact recorded-mode command one batch runs, with its
+# repeat count and total run count, then stops. YES_SPEND=1 (exactly 1) runs that batch — real
+# model calls, SPENDS MONEY, needs the owner's yes for this batch — and writes its report.
+# WORLDS= re-runs a subset of the plan. PLAN= picks the plan (default evals/samples/
+# oracle_gap.json; the O-55 pilot is evals/samples/oracle_gap_pilot.json). REPEATS=N (default
+# 1) makes N passes over every world in the ONE runner invocation, one archive per pass
+# (WO-R3-375).
 .PHONY: oracle-gap-batch oracle-gap-report
 oracle-gap-batch:
 	uv run python -m evals.oracle_gap batch \
 		$(if $(PLAN),--plan $(PLAN),) $(if $(WORLDS),--worlds $(WORLDS),) \
+		$(if $(REPEATS),--repeats $(REPEATS),) \
 		$(if $(filter 1,$(YES_SPEND)),--yes-spend,)
 
 # FREE: the same report over ARCHIVES=<id>[,<id>...] — the batch archives, pooled.

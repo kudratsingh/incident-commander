@@ -90,3 +90,56 @@ file grows an arm list rather than a second module.
 * ADR 0040, ADR 0043, ADR 0047, ADR 0049; plan 03 § 7.3, § 10, § 12.
 * The design the owner approves: the hub's `docs/plans/research-buildout-v2.1/samples/oracle-gap.md`.
 * Owner decisions O-37, O-40, O-43, O-45 (`audit-ws/.coordination/DECISIONS.md`).
+
+## Amendment 2026-10-10 — a pilot, repeats in one invocation, and the calibration id beside every selector number (WO-R3-375, owner O-55)
+
+*Status: accepted. Extends this ADR; changes one of its stated consequences (below).*
+
+The owner approved the oracle-gap design on four conditions this ADR already met and two it did not
+(O-55): a **pilot of 4 worlds × 3 seeds** before the full sample, and **the calibration report id
+beside every selector number**, not once at the top. A "seed" here is a repeat run of the same
+recorded world (the hub design § 2). Meeting both without breaking O-45 (one owner yes per paid
+invocation) took four decisions.
+
+**1. `--repeats N`: one runner invocation makes N passes, and each pass is its own archive.**
+The runner gains `--repeats N` (recorded mode only; a live pass would act on the shared world
+again with no reset between, ADR 0020, and a canned pass replays the same file to the same canned
+planner). Pass 0 keeps the invocation's id; each further pass mints its own id and writes its own
+archive, report, trajectories and briefings. So an archive still holds **one row per scenario**,
+which every reader that joins a run by `(archive, scenario)` relies on (the research report, the
+re-grader, the judge's track record, the label packet), and runs stay separated by identity as
+invariant 9 asks. Each row's provenance says which pass made it (`RunProvenance.repeat`, from 0)
+and which invocation it belongs to (`repeat_of`, pass 0's id, on every pass). Rejected: N rows of
+one scenario in one archive, which would have needed a new file-naming scheme and a change to
+every one of those readers, each a place a later repeat could be read as the first.
+
+**2. `--study NAME`: every row says which sample plan asked for it.** A plan gains
+`pooled_with_main` (default true). The pilot plan, `evals/samples/oracle_gap_pilot.json`, sets it
+false: its report scores only runs stamped with its own study and says it is reported on its own,
+and the main plan's report leaves every pilot run out with the reason. The stamp is needed because
+the pilot and the main sample may pin the *same* recordings, so nothing else in a run tells them
+apart. A run with no stamp counts for the main sample only.
+
+**3. A recorded run that pins its worlds selects by full scenario name.** The pilot pins
+`jobs_not_progressing_outbox_stall` without its `_deploy_noise` sibling. By substring that name
+selected both, and the all-or-nothing pinning rule above then refused the whole batch — at paid
+time, after the free check had passed. When `--world` is given in recorded mode, `--only` is now
+matched by full name, as on the live path. This replaces the negative consequence recorded above
+("`--only` still matches by substring in recorded mode, so a batch may select more than it pins"):
+a pinned selection can no longer be wider than its pins. Unpinned recorded runs, canned runs and
+`--smoke` keep substring matching.
+
+**4. One renderer puts the calibration id beside every selector number.**
+`research_report.selector_number(label, value, report_ids=…, why_withheld=…)` writes
+`selected@8 = 9/12 [cal 4fc2722d286e]`, or, with no report that opens the gate,
+`selected@8 withheld [<the reason>]`. The oracle-gap report uses it for every selected@k, gap,
+interval, decision-split, selector-vs-top-candidate, per-run and agreement cell, and the research
+report's oracle-gap section uses the same function. In JSON every such row carries
+`calibration_report_id` (and, when withheld, `withheld_because`) in the row itself.
+
+The report also lists each run with its repeat index and says, per world, whether its repeats
+agreed on pass@k and on selected@k. `make oracle-gap-batch PLAN=<plan> REPEATS=N` is the one
+command; the free check prints the runner command with `--repeats N` and the total run count.
+
+Nothing here was run against a model; the pilot itself (12 recorded runs, ≈ $3.60) is a separate
+paid ask.

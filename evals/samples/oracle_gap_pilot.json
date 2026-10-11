@@ -1,0 +1,19 @@
+{
+  "study": "oracle_gap_pilot",
+  "work_order": "WO-R3-347 pilot (WO-R3-375, owner O-55)",
+  "design": "audit-ws docs/plans/research-buildout-v2.1/samples/oracle-gap.md § The pilot",
+  "strategy": "candidate_selector",
+  "generator": "best_of_n_enumerated",
+  "n": 8,
+  "model_role": "benchmark",
+  "token_multiplier": "2",
+  "usd_multiplier": "1",
+  "batches": 1,
+  "pooled_with_main": false,
+  "worlds": [
+    {"scenario": "api_latency_db_query", "recording": "<id from WO-R3-368>"},
+    {"scenario": "dlq_mislabeled_replay_safe", "recording": "<id from WO-R3-368>"},
+    {"scenario": "jobs_not_progressing_outbox_stall", "recording": "<id from WO-R3-368>"},
+    {"scenario": "workflow_stuck_resolver_stall", "recording": "<id from WO-R3-368>"}
+  ]
+}

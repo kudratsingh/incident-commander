@@ -751,7 +751,10 @@ def test_the_committed_report_predates_the_adaptive_sections() -> None:
 def test_the_committed_report_predates_the_judge_gate() -> None:
     """The other half of the allowance above: it is used, and only for this.
 
-    Asserting both sides means the excuse cannot start covering another field.
+    The committed report was built before the gate existed, so its judge numbers carry
+    no id. A report built today carries the briefing judge's calibration id on every
+    row (99181bf074ec, 2026-10-11, agreement 8/16 — INC-010): the number is released,
+    and it says what it rests on.
     """
     committed = json.loads(artifacts.newest("research_report").read_text())
     rows = committed["sections"]["strategy_leaderboard"]["arms"]
@@ -760,8 +763,8 @@ def test_the_committed_report_predates_the_judge_gate() -> None:
     assert all("judge_gate" not in row for row in rows)
     today = research.assemble(research.REPO_ROOT)
     fresh = today["sections"]["strategy_leaderboard"]["arms"]
-    assert all(row["judge_mean_overall"] == research.WITHHELD_JUDGE for row in fresh)
-    assert all(row["judge_calibration_report_id"] is None for row in fresh)
+    assert all(row["judge_calibration_report_id"] == "99181bf074ec" for row in fresh)
+    assert all(row["judge_mean_overall"] != research.WITHHELD_JUDGE for row in fresh)
 
 
 def test_every_archive_in_scope_is_committed_and_carries_provenance() -> None:

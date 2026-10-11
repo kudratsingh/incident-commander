@@ -578,11 +578,12 @@ class TestNoJudgeNumberWithoutACalibrationReport:
             )
         ]
 
-    def test_the_register_is_empty_today(self) -> None:
-        """The correct state: the sweep that fills it is a paid run, deferred."""
-        assert dict(JUDGE_CALIBRATION_REPORTS) == {}
+    def test_the_register_holds_exactly_the_label_leg_report(self) -> None:
+        """The label leg ran once on the owner's 16 labels (2026-10-11, INC-010)."""
+        assert dict(JUDGE_CALIBRATION_REPORTS) == {LEADERBOARD_JUDGE: "99181bf074ec"}
 
-    def test_the_number_is_withheld_without_an_id(self) -> None:
+    def test_the_number_is_withheld_without_an_id(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr("evals.research_report.JUDGE_CALIBRATION_REPORTS", {})
         summary = arm_summary(self._ARM, self._rows())
         assert summary["judge_mean_overall"] == WITHHELD_JUDGE
         assert summary["judge_calibration_report_id"] is None

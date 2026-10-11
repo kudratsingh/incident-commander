@@ -377,7 +377,12 @@ class TestTheReport:
         assert document["spend"]["runs"] == 5
         assert document["spend"]["usd_total"] == "1.50"
 
-    def test_selector_numbers_are_withheld_without_a_calibration_report(self, batch: Path) -> None:
+    def test_selector_numbers_are_withheld_without_a_calibration_report(
+        self, batch: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # The register holds the arm's real calibration (36e12b915900) since 2026-10-11;
+        # this test is about the EMPTY register, so empty it here.
+        monkeypatch.setattr(research_report, "CALIBRATION_REPORTS", {})
         document = oracle_gap.assemble(["bbbbbbbbbbbb"], _batch_plan(), root=batch)
         assert document["calibration"]["report_id"] is None
         assert document["calibration"]["opens"] is False

@@ -1145,7 +1145,30 @@ make oracle-gap-batch                 # FREE: checks the plan, prints the exact 
 make oracle-gap-batch YES_SPEND=1     # PAID: one batch, one invocation, the owner's yes for it
 make oracle-gap-batch YES_SPEND=1 WORLDS=<scenario,...>   # a re-run of named worlds (its own yes)
 make oracle-gap-report ARCHIVES=<id>,<id>,<id>,<id> WRITE=1   # FREE: pooled over the batches
+
+# The O-55 pilot: 4 worlds x 3 repeats = 12 recorded runs, ONE runner invocation, ONE owner yes
+make oracle-gap-batch PLAN=evals/samples/oracle_gap_pilot.json REPEATS=3              # FREE check
+make oracle-gap-batch PLAN=evals/samples/oracle_gap_pilot.json REPEATS=3 YES_SPEND=1  # PAID
+make oracle-gap-report PLAN=evals/samples/oracle_gap_pilot.json ARCHIVES=<p0>,<p1>,<p2> WRITE=1
 ```
+
+`PLAN=` picks the sample plan (default `evals/samples/oracle_gap.json`). `REPEATS=N` (default 1)
+passes the runner `--repeats N`: it makes N passes over the same pinned worlds inside the one
+invocation, and **each pass is its own archive** under its own invocation id, so an archive still
+holds one row per scenario; every row's provenance says which pass made it (`repeat`, from 0) and
+names pass 0's id (`repeat_of`). The free check prints the runner command with `--repeats N` and
+the total run count (worlds x repeats) — that total is what the owner says yes to. A paid batch
+finds every pass the runner wrote and writes one report over all of them; if a pass is missing it
+says which it found and writes nothing (each pass written is still in `evals/runs/`). The driver
+also passes `--study <plan's study>`, which stamps every row: a plan with `pooled_with_main:
+false` — the pilot — reports only its own runs, and the main plan's report leaves every pilot run
+out with its reason, so the pilot never reaches the 52 even where both pin the same recording.
+With `--world` given, the runner matches `--only` by full scenario name (the pilot pins
+`jobs_not_progressing_outbox_stall` without its `_deploy_noise` sibling). Every selector number in
+the report — selected@k, the gap, its interval, the split by decision, each run's pick — carries
+the calibration report id in the same cell (`selected@8 = 9/12 [cal 4fc2722d286e]`), or the reason
+it is withheld (`selected@8 withheld [<why>]`); the per-world table also says whether a world's
+repeats agreed (ADR 0079, amended by WO-R3-375).
 
 The free check refuses a placeholder recording id, a recording that does not exist, and a recording
 whose answer key says it does not describe its world (`applies: false`, ADR 0040) — before anything

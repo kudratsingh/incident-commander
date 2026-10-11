@@ -173,7 +173,11 @@ _PER_SCENARIO: Final[frozenset[str]] = frozenset({"scenario", "budget", "recorde
 #: case for every row of the offline suite — the platform's alert stream is a live read, and
 #: an offline suite has no platform. Still compared across rows above: one run cannot have
 #: seeded half its worlds externally, and it cannot have been paged two different ways.
-_ABSENCE_IS_AN_ANSWER: Final[frozenset[str]] = frozenset({"chaos_seeded_by", "alert_id"})
+#: ``repeat_of`` and ``study`` (WO-R3-375): ``None`` says the invocation made one pass and no
+#: sample plan asked for it, which is true of the offline suite and of every graded run.
+_ABSENCE_IS_AN_ANSWER: Final[frozenset[str]] = frozenset(
+    {"chaos_seeded_by", "alert_id", "repeat_of", "study"}
+)
 
 
 def stamp_of(offline_path: Path) -> dict[str, Any]:

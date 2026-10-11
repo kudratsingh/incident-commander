@@ -971,7 +971,15 @@ CALIBRATION_REPORTS: Final[Mapping[str, str]] = MappingProxyType({})
 #: fake-client calibration must never be entered here; ``is_a_measurement`` is what
 #: distinguishes one. Pinned both ways by
 #: ``test_judge_calibration.py::TestNoJudgeNumberWithoutACalibrationReport``.
-JUDGE_CALIBRATION_REPORTS: Final[Mapping[str, str]] = MappingProxyType({})
+JUDGE_CALIBRATION_REPORTS: Final[Mapping[str, str]] = MappingProxyType(
+    {
+        # 2026-10-11 06:32Z, live, claude-haiku-4-5 (JUDGE_MODEL), scored against the
+        # owner's 16 hand labels: agreement 8/16 (judge useful / owner not 3; judge not
+        # useful / owner useful 5), traps 3/6 (INC-010). Registered as measured; every
+        # judge number carries this id and this agreement.
+        "briefing_judge": "99181bf074ec",
+    }
+)
 
 #: The judge whose scores ``judge_overall`` carries — ``evals/graders/llm_judge.py`` is
 #: the only writer of that column. Named rather than spelled at the call site, so a

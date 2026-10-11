@@ -71,6 +71,7 @@ _NON_SETTINGS_TOKENS: Final[frozenset[str]] = frozenset(
         "FROM_LOGS",  # `make world-drift-all` reads saved logs instead of the stack
         "UNTIL_LAG",  # `make traffic` stop-at-this-backlog flag (scripts/traffic_loop.py)
         "YES_SPEND",  # `make judge-calibration` second flag a paid LIVE=1 run requires
+        "KEY_OUT",  # `make label-packet` path for a blind packet's repeat key (WO-R3-379)
         # Read by make, passed as `--model-role` to the runner and (when given) to
         # `make judge-calibration`'s selector leg (WO-R3-364); `.env.example` documents it.
         "MODEL_ROLE",

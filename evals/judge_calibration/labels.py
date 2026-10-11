@@ -3,11 +3,18 @@
 WO-R3-278. The packet shows 16 committed briefings as ``briefing_judge`` sees them; the label
 file is append-only (a correction is a new line naming the id it ``supersedes``). A model
 never writes a label here.
+
+WO-R3-379. Packets are numbered. Packet 2 onward is drawn blind: new briefings by the same rule
+from those no packet has shown, plus repeats of briefings an earlier packet labelled, shuffled
+by a recorded seed and unmarked. Which ones repeat goes only to a key file outside the repo. A
+label line names its packet, so one briefing holds one label per packet; a line without one is
+packet 1.
 """
 
 from __future__ import annotations
 
 import json
+import random
 import re
 import subprocess
 from collections.abc import Iterable, Mapping, Sequence
@@ -34,6 +41,9 @@ NOT_USEFUL: Final[str] = "not_useful"
 LABEL_VALUES: Final[tuple[str, ...]] = (USEFUL, NOT_USEFUL)
 LABELLED_BY: Final[str] = "owner"
 
+#: A label line or packet file from before packets were numbered belongs to packet 1.
+FIRST_PACKET: Final[int] = 1
+
 #: INC-002's briefing, which is trap bj-05: always in the packet.
 INC_002_ID: Final[str] = "54ab08425f82:remediate_dlq_backlog_success"
 
@@ -50,6 +60,7 @@ FAILED: Final[str] = "failed"
 
 _FENCE: Final[str] = "~~~~"
 _HEADER_RE: Final[re.Pattern[str]] = re.compile(r"^## \d+\. `([^`]+)`\s*$")
+_PACKET_LINE_RE: Final[re.Pattern[str]] = re.compile(r"^packet: (\d+)\s*$")
 
 
 class LabelError(ValueError):
@@ -168,18 +179,26 @@ def candidates(archives: Iterable[str], *, root: Path | None = None) -> list[Can
     return found
 
 
-def select(pool: Sequence[Candidate], *, size: int = PACKET_SIZE) -> list[Pick]:
+def select(
+    pool: Sequence[Candidate], *, size: int = PACKET_SIZE, with_inc_002: bool = True
+) -> list[Pick]:
     """The packet's briefings: INC-002 first, then a deterministic spread, newest first.
 
     Live runs before canned ones; one per scenario before a second; each next pick is the one
     whose outcome class, then family, has the fewest picks so far, newest breaking a tie.
+    ``with_inc_002=False`` skips the first step, for a later packet: packet 1 labelled it.
     """
     by_id = {c.id: c for c in pool}
-    if INC_002_ID not in by_id:
-        raise LabelError(f"INC-002's briefing {INC_002_ID} is not among the candidates")
-    picks = [
-        Pick(candidate=by_id[INC_002_ID], why="INC-002's briefing (trap bj-05); always included")
-    ]
+    picks: list[Pick] = []
+    if with_inc_002:
+        if INC_002_ID not in by_id:
+            raise LabelError(f"INC-002's briefing {INC_002_ID} is not among the candidates")
+        picks.append(
+            Pick(
+                candidate=by_id[INC_002_ID],
+                why="INC-002's briefing (trap bj-05); always included",
+            )
+        )
     order = {c.id: i for i, c in enumerate(pool)}
     for live in (True, False):
         for cap in range(1, PER_SCENARIO_CAP + 1):
@@ -267,15 +286,36 @@ def _first_sentence(text: str) -> str:
     return f"{head}{dot.strip()}" if dot else flat
 
 
-def render_packet(picks: Sequence[Pick], *, on: date, root: Path | None = None) -> str:
-    """The Markdown packet. Each briefing is shown as ``briefing_judge`` sees it."""
+def render_packet(
+    picks: Sequence[Pick],
+    *,
+    on: date,
+    root: Path | None = None,
+    packet: int = FIRST_PACKET,
+    seed: int | None = None,
+) -> str:
+    """The Markdown packet. Each briefing is shown as ``briefing_judge`` sees it.
+
+    Packet 2 onward is blind: its header names the packet and the seed, says some briefings may
+    repeat, and no block says why it was picked, because a repeat's reason would mark it.
+    """
     from evals.scenarios.loader import load_scenarios
 
     base = root or REPO_ROOT
     corpus = {s.name: s for s in load_scenarios(base / "evals" / "scenarios")}
-    lines = [
-        f"# Briefing usefulness labels — packet {on.strftime('%Y%m%d')}",
-        "",
+    blind = packet != FIRST_PACKET
+    if blind and seed is None:
+        raise LabelError(f"packet {packet} is drawn blind and records its seed; none was given")
+    lines = [f"# Briefing usefulness labels — packet {on.strftime('%Y%m%d')}", ""]
+    if blind:
+        lines += [
+            f"packet: {packet}",
+            f"seed: {seed}",
+            "",
+            f"{len(picks)} briefings; some may repeat an earlier packet.",
+            "",
+        ]
+    lines += [
         USEFUL_MEANS,
         "",
         "For each briefing below, write `useful` or `not_useful` after `LABEL:` and one line after",
@@ -300,7 +340,7 @@ def render_packet(picks: Sequence[Pick], *, on: date, root: Path | None = None) 
             f"- Run: archive {c.archive}, {'live' if c.live else 'canned'} model, {c.generated_at}",
             f"- Scenario: {c.scenario} (family {c.family}, outcome {c.outcome})",
             *_scenario_lines(corpus.get(c.scenario)),
-            f"- Why it is in the packet: {pick.why}",
+            *([] if blind else [f"- Why it is in the packet: {pick.why}"]),
             *_old_format_note(c.id, base),
             "",
             "The briefing, as the judge sees it:",
@@ -320,10 +360,139 @@ def write_packet(text: str, *, on: date, directory: Path | None = None) -> Path:
     """Write the packet create-only; an existing packet for that day raises ``FileExistsError``."""
     folder = directory or LABELS_DIR
     folder.mkdir(parents=True, exist_ok=True)
-    path = folder / f"packet.{on.strftime('%Y%m%d')}.md"
+    path = packet_path(on, directory=folder)
     with path.open("x", encoding="utf-8") as handle:
         handle.write(text)
     return path
+
+
+def packet_path(on: date, *, directory: Path | None = None) -> Path:
+    return (directory or LABELS_DIR) / f"packet.{on.strftime('%Y%m%d')}.md"
+
+
+def packet_number(text: str) -> int:
+    """The packet a packet file is: its ``packet: N`` header line, or 1 when it has none."""
+    for line in text.splitlines():
+        if _HEADER_RE.match(line):
+            break
+        found = _PACKET_LINE_RE.match(line)
+        if found:
+            return int(found.group(1))
+    return FIRST_PACKET
+
+
+def packet_ids(text: str) -> list[str]:
+    """Every briefing id a packet file shows, in its order; headers inside a box are text."""
+    ids: list[str] = []
+    inside = False
+    for line in text.splitlines():
+        if line.startswith(_FENCE):
+            inside = not inside
+        elif not inside and (header := _HEADER_RE.match(line)):
+            ids.append(header.group(1))
+    return ids
+
+
+def packets_on_disk(directory: Path | None = None) -> dict[int, tuple[str, ...]]:
+    """Each packet file's number and the ids it shows; two files claiming one number raise."""
+    found: dict[int, tuple[str, ...]] = {}
+    names: dict[int, str] = {}
+    for path in sorted((directory or LABELS_DIR).glob("packet.*.md")):
+        text = path.read_text(encoding="utf-8")
+        number = packet_number(text)
+        if number in found:
+            raise LabelError(f"{names[number]} and {path.name} both claim packet {number}")
+        found[number], names[number] = tuple(packet_ids(text)), path.name
+    return found
+
+
+@dataclass(frozen=True, kw_only=True)
+class Draw:
+    """A later packet: new picks by the selection rule plus repeats, shuffled by ``seed``."""
+
+    packet: int
+    seed: int
+    picks: tuple[Pick, ...]
+    new: tuple[Pick, ...]
+    repeats: tuple[str, ...]
+
+    def key(self) -> dict[str, Any]:
+        """Which briefings repeat: written outside the repo, never into the packet."""
+        return {"packet": self.packet, "seed": self.seed, "repeats": list(self.repeats)}
+
+
+def draw_packet(
+    pool: Sequence[Candidate],
+    *,
+    packet: int,
+    repeats: int,
+    seed: int,
+    rows: Sequence[Mapping[str, Any]],
+    packets: Mapping[int, Sequence[str]],
+    size: int = PACKET_SIZE,
+) -> Draw:
+    """Packet ``packet`` (2 or more): ``size - repeats`` new picks, ``repeats`` repeats, shuffled.
+
+    New picks follow ``select`` over the briefings no packet file shows and no label line names.
+    Repeats are drawn by ``seed`` from ids an earlier packet labelled, and the same generator
+    then shuffles all of them, so the seed reproduces the packet and its key exactly.
+    """
+    if packet <= FIRST_PACKET:
+        raise LabelError(f"a drawn packet is numbered 2 or more; got {packet}")
+    if packet in packets or any(row_packet(row) == packet for row in rows):
+        raise LabelError(f"packet {packet} already exists; a packet is drawn once")
+    if not 0 <= repeats < size:
+        raise LabelError(f"repeats must be from 0 to {size - 1}; got {repeats}")
+    by_id = {c.id: c for c in pool}
+    seen = {str(row["id"]) for row in rows} | {i for ids in packets.values() for i in ids}
+    new = select([c for c in pool if c.id not in seen], size=size - repeats, with_inc_002=False)
+    earlier = sorted({str(row["id"]) for row in rows if row_packet(row) < packet} & by_id.keys())
+    if len(earlier) < repeats:
+        raise LabelError(
+            f"only {len(earlier)} briefing(s) carry a label from an earlier packet; "
+            f"{repeats} repeats were asked for"
+        )
+    rng = random.Random(seed)
+    chosen = rng.sample(earlier, repeats)
+    picks = [
+        *new,
+        *(Pick(candidate=by_id[i], why="labelled in an earlier packet") for i in chosen),
+    ]
+    rng.shuffle(picks)
+    return Draw(
+        packet=packet,
+        seed=seed,
+        picks=tuple(picks),
+        new=tuple(new),
+        repeats=tuple(sorted(chosen)),
+    )
+
+
+def _outside_repo(path: Path, repo: Path | None) -> Path:
+    target = path.expanduser().resolve()
+    home = (repo or REPO_ROOT).resolve()
+    if target.is_relative_to(home):
+        raise LabelError(
+            f"the repeat key must be written outside the repository; {target} is inside {home}"
+        )
+    return target
+
+
+def check_key_path(path: Path, *, repo: Path | None = None) -> Path:
+    """The key's resolved path, or a ``LabelError`` when it is inside the repo or exists."""
+    target = _outside_repo(path, repo)
+    if target.exists():
+        raise LabelError(f"the repeat key {target} already exists; it is never replaced")
+    return target
+
+
+def write_key(key: Mapping[str, Any], path: Path, *, repo: Path | None = None) -> Path:
+    """Write the repeat key create-only, outside the repo; the packet never holds it."""
+    target = _outside_repo(path, repo)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    with target.open("x", encoding="utf-8") as handle:
+        handle.write(json.dumps(dict(key), indent=2) + "\n")
+    return target
 
 
 # ---------------------------------------------------------------------------
@@ -404,21 +573,30 @@ def read_lines(path: Path | None = None) -> list[dict[str, Any]]:
     if not target.is_file():
         return []
     rows: list[dict[str, Any]] = []
-    seen: set[str] = set()
+    seen: set[tuple[str, int]] = set()
     for number, raw in enumerate(target.read_text(encoding="utf-8").splitlines(), start=1):
         if not raw.strip():
             continue
         row = json.loads(raw)
         _check_row(row, where=f"{target.name}:{number}")
-        if row["id"] in seen and row.get("supersedes") != row["id"]:
-            raise LabelError(f"{target.name}:{number}: {row['id']} repeats without supersedes")
-        if "supersedes" in row and row["supersedes"] not in seen:
+        key = (row["id"], row_packet(row))
+        if key in seen and row.get("supersedes") != row["id"]:
             raise LabelError(
-                f"{target.name}:{number}: supersedes {row['supersedes']}, never labelled"
+                f"{target.name}:{number}: {row['id']} repeats without supersedes in packet {key[1]}"
             )
-        seen.add(row["id"])
+        if "supersedes" in row and key not in seen:
+            raise LabelError(
+                f"{target.name}:{number}: supersedes {row['supersedes']}, never labelled "
+                f"in packet {key[1]}"
+            )
+        seen.add(key)
         rows.append(row)
     return rows
+
+
+def row_packet(row: Mapping[str, Any]) -> int:
+    """The packet a label line belongs to; a line written before packets existed is packet 1."""
+    return int(row.get("packet", FIRST_PACKET))
 
 
 def _check_row(row: Mapping[str, Any], *, where: str) -> None:
@@ -426,9 +604,11 @@ def _check_row(row: Mapping[str, Any], *, where: str) -> None:
     missing = required - set(row)
     if missing:
         raise LabelError(f"{where}: missing {sorted(missing)}")
-    extra = set(row) - required - {"supersedes"}
+    extra = set(row) - required - {"supersedes", "packet"}
     if extra:
         raise LabelError(f"{where}: unknown fields {sorted(extra)}")
+    if "packet" in row and not _is_packet(row["packet"]):
+        raise LabelError(f"{where}: packet {row['packet']!r} is not a whole number from 1")
     split_id(str(row["id"]))
     if row["label"] not in LABEL_VALUES:
         raise LabelError(f"{where}: label {row['label']!r} is not one of {LABEL_VALUES}")
@@ -437,9 +617,62 @@ def _check_row(row: Mapping[str, Any], *, where: str) -> None:
     date.fromisoformat(str(row["labelled_at"]))
 
 
-def current_labels(path: Path | None = None) -> dict[str, dict[str, Any]]:
-    """The label in force for each id: its latest line, a correction replacing its original."""
-    return {row["id"]: row for row in read_lines(path)}
+def _is_packet(value: object) -> bool:
+    return type(value) is int and value >= FIRST_PACKET
+
+
+def current_labels(
+    path: Path | None = None, *, packet: int | None = None
+) -> dict[str, dict[str, Any]]:
+    """The label in force for each id: its latest line, a correction replacing its original.
+
+    ``packet`` keeps that packet's labels only. Without it, an id labelled in several packets
+    keeps its earliest packet's label: a later packet's label of the same briefing is a re-test
+    (``test_retest``), not a correction, so it never moves a label already in force.
+    """
+    in_force: dict[str, dict[str, Any]] = {}
+    for row in read_lines(path):
+        number = row_packet(row)
+        if packet is not None and number != packet:
+            continue
+        prior = in_force.get(row["id"])
+        if prior is None or number <= row_packet(prior):
+            in_force[row["id"]] = row
+    return in_force
+
+
+def packets(path: Path | None = None) -> tuple[int, ...]:
+    """The packets the label file holds labels for, in order."""
+    return tuple(sorted({row_packet(row) for row in read_lines(path)}))
+
+
+@dataclass(frozen=True, kw_only=True)
+class Retest:
+    """One briefing the owner labelled in two packets, and both labels."""
+
+    id: str
+    first: str
+    second: str
+
+    @property
+    def agrees(self) -> bool:
+        return self.first == self.second
+
+
+def test_retest(packet_a: int, packet_b: int, *, path: Path | None = None) -> tuple[Retest, ...]:
+    """The ids labelled in both packets, by id, each with both labels in force and agreement."""
+    if packet_a == packet_b:
+        raise LabelError(f"test-retest compares two different packets; got {packet_a} twice")
+    first = current_labels(path, packet=packet_a)
+    second = current_labels(path, packet=packet_b)
+    return tuple(
+        Retest(id=i, first=first[i]["label"], second=second[i]["label"])
+        for i in sorted(first.keys() & second.keys())
+    )
+
+
+# A library function whose name begins with ``test_``; this keeps pytest from collecting it.
+test_retest.__test__ = False  # type: ignore[attr-defined]
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -455,14 +688,19 @@ def import_labels(
     path: Path | None = None,
     today: date | None = None,
     root: Path | None = None,
+    packet: int = FIRST_PACKET,
 ) -> ImportResult:
-    """Append new labels; never replace one.
+    """Append new labels under ``packet``; never replace one.
 
-    An id already in the file is skipped when the label and reason match and REFUSED when
-    they differ, unless the block says ``SUPERSEDES``. Every id must name a committed briefing.
+    An id already labelled in this packet is skipped when the label and reason match and
+    REFUSED when they differ, unless the block says ``SUPERSEDES``. A label from another packet
+    does not count: a repeated briefing gets its own line. Every id must name a committed
+    briefing.
     """
+    if not _is_packet(packet):
+        raise LabelError(f"packet {packet!r} is not a whole number from 1")
     target = path or LABELS_FILE
-    existing = current_labels(target)
+    existing = current_labels(target, packet=packet)
     stamp = (today or datetime.now(UTC).date()).isoformat()
     appended: list[str] = []
     same: list[str] = []
@@ -481,13 +719,16 @@ def import_labels(
                 refused.append(item.id)
             continue
         if item.supersedes is not None and prior is None:
-            raise LabelError(f"{item.id}: SUPERSEDES names an id that was never labelled")
+            raise LabelError(
+                f"{item.id}: SUPERSEDES names an id that was never labelled in packet {packet}"
+            )
         row: dict[str, Any] = {
             "id": item.id,
             "label": item.label,
             "reason": item.reason,
             "labelled_by": LABELLED_BY,
             "labelled_at": stamp,
+            "packet": packet,
         }
         if item.supersedes is not None:
             row["supersedes"] = item.supersedes

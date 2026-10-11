@@ -233,6 +233,7 @@ class TestTheLabelFileIsAppendOnly:
             "reason": "honest",
             "labelled_by": "owner",
             "labelled_at": "2026-10-08",
+            "packet": 1,
         }
 
     def test_an_existing_id_is_refused_never_replaced(self, tmp_path: Path) -> None:

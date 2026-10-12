@@ -10,7 +10,7 @@
   "usd_multiplier": "1",
   "batches": 4,
   "worlds": [
-    {"scenario": "api_latency_db_query", "recording": "8c4a32a50d4b"},
+    {"scenario": "api_latency_db_query", "recording": "301c99c4ae11"},
     {"scenario": "api_latency_downstream", "recording": "58ec70df7157"},
     {"scenario": "api_latency_redis", "recording": "a6e62370ef38"},
     {"scenario": "dlq_mislabeled_replay_safe", "recording": "e5d407945572"},

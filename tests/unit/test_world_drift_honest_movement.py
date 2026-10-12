@@ -608,6 +608,43 @@ class TestTheHeldQuery:
         assert ("longest_active_query_ms", world_drift.KIND_HISTORY_CLAIM) in kinds
 
 
+class TestTheHeldQueryCount:
+    """WO-R3-386: the fault's two sleepers make the count 1 or 2 by the instant of the read."""
+
+    def _count(self, n: int, ms: float = 1553.365) -> Change:
+        def change(payload: dict[str, Any]) -> None:
+            payload["active_queries_over_slow_threshold"] = n
+            payload["longest_active_query_ms"] = ms
+
+        return change
+
+    def test_the_wo_r3_368_drift_line_now_reads_clean(self, corpus: dict[str, Scenario]) -> None:
+        """world_drift_table.20261012T075555Z: `canned=1 live=2` on 8c4a32a50d4b."""
+        name = "api_latency_db_query"
+        world = _world(name, "8c4a32a50d4b")
+        live = _live(world, get_postgres_health=self._count(2, ms=1148.047))
+        assert _before_this_change(world, live, corpus[name]) == {
+            ("get_postgres_health", "active_queries_over_slow_threshold", "value")
+        }
+        assert _now(world, live, corpus[name]) == []
+
+    def test_and_the_other_way_round(self, corpus: dict[str, Scenario]) -> None:
+        """301c99c4ae11 recorded 2; a read landing in the other half of the chunk says 1."""
+        name = "api_latency_db_query"
+        world = _world(name, "301c99c4ae11")
+        live = _live(world, get_postgres_health=self._count(1, ms=1148.047))
+        assert _now(world, live, corpus[name]) == []
+
+    def test_no_query_held_still_drifts(self, corpus: dict[str, Scenario]) -> None:
+        name = "api_latency_db_query"
+        world = _world(name, "301c99c4ae11")
+        live = _live(world, get_postgres_health=self._count(0, ms=12.0))
+        kinds = {(d.path, d.kind) for d in _now(world, live, corpus[name])}
+        assert ("active_queries_over_slow_threshold", "sign_class") in kinds
+        # The scenario's own claim (at_least 1) is asked of the live reading as well.
+        assert ("active_queries_over_slow_threshold", world_drift.KIND_HISTORY_CLAIM) in kinds
+
+
 # --------------------------------------------------------------------------
 # Rule 6 — the breaker's 24-hour state record
 # --------------------------------------------------------------------------
@@ -779,7 +816,10 @@ class TestTheTableIsNarrow:
                 "objectives.healthy": "window_reading",
                 "objectives.fast_burn": "window_reading",
             },
-            "get_postgres_health": {"longest_active_query_ms": "threshold_side"},
+            "get_postgres_health": {
+                "longest_active_query_ms": "threshold_side",
+                "active_queries_over_slow_threshold": "held_count",
+            },
         }
 
     def test_every_path_is_a_field_of_that_tools_output_or_inside_an_open_map(self) -> None:

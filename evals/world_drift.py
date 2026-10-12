@@ -168,11 +168,12 @@ _HISTORY: Final[Mapping[str, Mapping[str, str]]] = {
     },
     "search_traces": {
         "matches.trace_id": (
-            "the trace's own id. `make eval-reset PURGE_IDEMPOTENCY=1` drops the "
-            "seeded rows and re-seeds them, so the fault comes back with a new "
-            "id; the traffic generator's rows carry random ids that were never "
-            "reproducible at all. What the scenario grades on is the job's type "
-            "and status, and both of those stay compared by value."
+            "the trace's own id. The traffic generator's rows carry random ids that "
+            "are never reproducible, so as a VALUE in the merged walk it is history. "
+            "The seeder's rows keep a version-5 id across every reset (only their "
+            "clocks move), and `fixture_drift.observed_pair` matches those rows by "
+            "it, row by row (WO-R3-386). What the scenario grades on is the job's "
+            "type and status, and both of those stay compared by value."
         ),
         "matches.job_id": (
             "the job behind that trace, re-minted by the same reset and for the "
@@ -487,6 +488,17 @@ def drift_between(
                 shape_only=shape_only_paths(recorded.tool, scenario),
                 honest=honest_paths(recorded.tool, scenario),
             )
+        )
+        drifts.extend(
+            Drift(
+                scenario=recording.scenario,
+                tool=recorded.tool,
+                path=found_by_id.path,
+                kind=found_by_id.kind,
+                canned=found_by_id.canned,
+                live=found_by_id.live,
+            )
+            for found_by_id in pair.disagreements
         )
         # What the scenario grades on a forgiven path, asked of the LIVE reading.
         # Runs whether or not the walk found anything: it is the only thing still

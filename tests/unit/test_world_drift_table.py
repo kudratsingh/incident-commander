@@ -38,6 +38,9 @@ _TABLE_WO_R3_374 = (
 _TABLE_WO_R3_368 = (
     _REPO / "evals/reports/world-drift/world_drift_table.20261012T075555Z.a43ca33fe04d.json"
 )
+_TABLE_WO_R3_386 = (
+    _REPO / "evals/reports/world-drift/world_drift_table.20261012T095055Z.3f2cddc323c3.json"
+)
 
 _CMD = 'PLATFORM_COMPOSE="demo/compose.yml" uv run python -m evals.world_drift --world '
 _FILE = "dlq_backlog/dlq_backlog.20260917T182256Z"
@@ -401,7 +404,7 @@ def test_the_newest_recording_of_each_scenario_is_what_the_loop_checks() -> None
     worlds = world_drift_table.newest_recordings()
     assert len(worlds) == len({scenario for scenario, _ in worlds}) == 17
     assert all(re.fullmatch(r"[0-9a-f]{12}", recording) for _, recording in worlds)
-    assert ("api_latency_db_query", "8c4a32a50d4b") in worlds
+    assert ("api_latency_db_query", "301c99c4ae11") in worlds
 
 
 def test_the_make_target_runs_every_recording_or_reads_logs() -> None:
@@ -429,11 +432,19 @@ def test_the_wo_r3_368_table_checks_every_newest_recording_on_v0625() -> None:
     assert len(table["rows"]) == 17
     assert table["counts"] == {CLEAN: 14, DRIFT: 2, REFUSED: 0, NOT_RUN: 1}
     assert table["platform_pin"] == "v0.6.25"
-    assert artifacts.newest("world_drift_table") == _TABLE_WO_R3_368
+    versions = artifacts.versions("world_drift_table")
+    assert versions.index(_TABLE_WO_R3_368) < versions.index(_TABLE_WO_R3_386)
     rows = {row["scenario"]: row for row in table["rows"]}
-    assert {(name, row["recording"]) for name, row in rows.items()} == set(
-        world_drift_table.newest_recordings()
-    )
+    # Every row named its scenario's newest recording on the day; WO-R3-386 re-recorded the
+    # two DRIFT worlds since, so those two are the only ones that are no longer newest.
+    older = {
+        "api_latency_db_query": "8c4a32a50d4b",
+        "jobs_not_progressing_healthy_backlog_spike": "038a59f3c381",
+    }
+    assert {(name, row["recording"]) for name, row in rows.items()} == {
+        (name, older.get(name, recording))
+        for name, recording in world_drift_table.newest_recordings()
+    }
     for name, recording in {
         "jobs_not_progressing_outbox_stall": "c7f4746c4a61",
         "jobs_not_progressing_outbox_stall_deploy_noise": "07ce53de46ca",
@@ -452,3 +463,31 @@ def test_the_wo_r3_368_table_checks_every_newest_recording_on_v0625() -> None:
     not_run = rows["api_latency_downstream"]
     assert not_run["verdict"] == NOT_RUN
     assert "not checked by WO-R3-368" in not_run["detail"]
+
+
+def test_the_wo_r3_386_table_checks_every_newest_recording_by_trace_identity() -> None:
+    """WO-R3-386: the two DRIFT worlds of WO-R3-368 re-recorded on v0.6.25, the trace page
+    compared by identity and the slow-query count by `held_count`, then all 17 newest
+    recordings checked — 16 CLEAN; api_latency_downstream NOT RUN, and it says why."""
+    table = json.loads(_TABLE_WO_R3_386.read_text())
+    assert len(table["rows"]) == 17
+    assert table["counts"] == {CLEAN: 16, DRIFT: 0, REFUSED: 0, NOT_RUN: 1}
+    assert table["platform_pin"] == "v0.6.25"
+    assert artifacts.newest("world_drift_table") == _TABLE_WO_R3_386
+    rows = {row["scenario"]: row for row in table["rows"]}
+    assert {(name, row["recording"]) for name, row in rows.items()} == set(
+        world_drift_table.newest_recordings()
+    )
+    assert (rows["api_latency_db_query"]["recording"], rows["api_latency_db_query"]["verdict"]) == (
+        "301c99c4ae11",
+        CLEAN,
+    )
+    spike = rows["jobs_not_progressing_healthy_backlog_spike"]
+    assert (spike["recording"], spike["verdict"]) == ("5fd6a858d336", CLEAN)
+    assert "held_count" in rows["api_latency_db_query"]["output"]
+    not_run = rows["api_latency_downstream"]
+    assert not_run["verdict"] == NOT_RUN
+    assert "not checked by WO-R3-386" in not_run["detail"]
+    assert {name for name, row in rows.items() if row["verdict"] == CLEAN} == set(rows) - {
+        "api_latency_downstream"
+    }

@@ -53,6 +53,24 @@ def _plan(*worlds: tuple[str, str]) -> SamplePlan:
     )
 
 
+def _placeholders(plan: SamplePlan, order: str) -> SamplePlan:
+    """``plan`` with every recording id back to the placeholder a plan carried before its fill."""
+    return plan.model_copy(
+        update={
+            "worlds": tuple(
+                SampleWorld(scenario=world.scenario, recording=f"<id from {order}>")
+                for world in plan.worlds
+            )
+        }
+    )
+
+
+def _newest_recording(scenario: str) -> str:
+    """The invocation id of ``scenario``'s newest recording, through the one resolver."""
+    path = artifacts.newest("recorded_world", scenario)
+    return path.name.removesuffix(".json").rsplit(".", 1)[-1]
+
+
 def _record(
     categories: Sequence[str], *, selected: str | None, decision: str = "select"
 ) -> dict[str, Any]:
@@ -113,10 +131,17 @@ class TestThePlan:
             assert scenario.difficulty is not ScenarioDifficulty.CONTROL, world.scenario
 
     def test_placeholder_ids_are_refused_before_anything_runs(self) -> None:
-        plan = oracle_gap.load_plan()
+        plan = _placeholders(oracle_gap.load_plan(), "WO-R3-294")
         refusals = oracle_gap.plan_refusals(plan, plan.worlds)
         assert len(refusals) == len(plan.worlds)
         assert all("is not a recording id" in line for line in refusals)
+
+    def test_the_committed_plan_pins_every_world_to_its_newest_recording(self) -> None:
+        """WO-R3-368 filled the ids: each is its scenario's newest recording, none refused."""
+        plan = oracle_gap.load_plan()
+        assert oracle_gap.plan_refusals(plan, plan.worlds) == []
+        for world in plan.worlds:
+            assert world.recording == _newest_recording(world.scenario), world.scenario
 
     def test_filled_ids_of_committed_recordings_pass(self) -> None:
         plan = _plan(_PAUSED, _LAG)
@@ -169,7 +194,8 @@ class TestTheBatch:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         monkeypatch.setattr(subprocess, "run", _must_not_run)
-        assert oracle_gap.run_batch(oracle_gap.load_plan(), yes_spend=True) == 2
+        plan = _placeholders(oracle_gap.load_plan(), "WO-R3-294")
+        assert oracle_gap.run_batch(plan, yes_spend=True) == 2
 
     def test_a_subset_outside_the_plan_is_refused(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(subprocess, "run", _must_not_run)
@@ -533,17 +559,27 @@ class TestThePilotPlan:
         assert pilot.study != main.study
 
     def test_the_pilot_placeholder_ids_are_refused(self) -> None:
-        pilot = _pilot()
+        pilot = _placeholders(_pilot(), "WO-R3-368")
         refusals = oracle_gap.plan_refusals(pilot, pilot.worlds)
         assert len(refusals) == len(_PILOT_WORLDS)
         assert all("is not a recording id" in line for line in refusals)
         assert all("WO-R3-368" in line for line in refusals)
 
+    def test_the_committed_pilot_pins_the_main_plans_recordings(self) -> None:
+        """WO-R3-368: the pilot's four worlds are the main plan's, pinned to the same newest ids."""
+        pilot, main = _pilot(), oracle_gap.load_plan()
+        assert oracle_gap.plan_refusals(pilot, pilot.worlds) == []
+        pinned = {world.scenario: world.recording for world in main.worlds}
+        for world in pilot.worlds:
+            assert world.recording == pinned[world.scenario], world.scenario
+            assert world.recording == _newest_recording(world.scenario), world.scenario
+
     def test_the_pilot_never_reaches_the_runner_with_placeholders(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         monkeypatch.setattr(subprocess, "run", _must_not_run)
-        assert oracle_gap.run_batch(_pilot(), yes_spend=True, repeats=3) == 2
+        pilot = _placeholders(_pilot(), "WO-R3-368")
+        assert oracle_gap.run_batch(pilot, yes_spend=True, repeats=3) == 2
 
 
 class TestRepeatsAreOneInvocation:

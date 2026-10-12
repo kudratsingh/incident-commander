@@ -10,18 +10,18 @@
   "usd_multiplier": "1",
   "batches": 4,
   "worlds": [
-    {"scenario": "api_latency_db_query", "recording": "<id from WO-R3-294>"},
-    {"scenario": "api_latency_downstream", "recording": "<id from WO-R3-294>"},
-    {"scenario": "api_latency_redis", "recording": "<id from WO-R3-294>"},
-    {"scenario": "dlq_mislabeled_replay_safe", "recording": "<id from WO-R3-294>"},
-    {"scenario": "jobs_not_progressing_dispatcher_stall", "recording": "<id from WO-R3-294>"},
-    {"scenario": "jobs_not_progressing_outbox_stall", "recording": "<id from WO-R3-294>"},
-    {"scenario": "jobs_not_progressing_outbox_stall_deploy_noise", "recording": "<id from WO-R3-294>"},
-    {"scenario": "remediate_consumer_lag_success", "recording": "<id from WO-R3-294>"},
-    {"scenario": "remediate_dlq_backlog_success", "recording": "<id from WO-R3-294>"},
-    {"scenario": "workflow_stuck_dead_lettered_root", "recording": "<id from WO-R3-294>"},
-    {"scenario": "workflow_stuck_downstream_child_failed", "recording": "<id from WO-R3-294>"},
-    {"scenario": "workflow_stuck_paused_dag", "recording": "<id from WO-R3-294>"},
-    {"scenario": "workflow_stuck_resolver_stall", "recording": "<id from WO-R3-294>"}
+    {"scenario": "api_latency_db_query", "recording": "8c4a32a50d4b"},
+    {"scenario": "api_latency_downstream", "recording": "58ec70df7157"},
+    {"scenario": "api_latency_redis", "recording": "a6e62370ef38"},
+    {"scenario": "dlq_mislabeled_replay_safe", "recording": "e5d407945572"},
+    {"scenario": "jobs_not_progressing_dispatcher_stall", "recording": "a877c9ede98c"},
+    {"scenario": "jobs_not_progressing_outbox_stall", "recording": "c7f4746c4a61"},
+    {"scenario": "jobs_not_progressing_outbox_stall_deploy_noise", "recording": "07ce53de46ca"},
+    {"scenario": "remediate_consumer_lag_success", "recording": "fe0a6b1cf71e"},
+    {"scenario": "remediate_dlq_backlog_success", "recording": "6339347eec1f"},
+    {"scenario": "workflow_stuck_dead_lettered_root", "recording": "b9fe65835de7"},
+    {"scenario": "workflow_stuck_downstream_child_failed", "recording": "415e668be1d6"},
+    {"scenario": "workflow_stuck_paused_dag", "recording": "e5f484c3f34f"},
+    {"scenario": "workflow_stuck_resolver_stall", "recording": "6f030e848a9d"}
   ]
 }

@@ -11,9 +11,9 @@
   "batches": 1,
   "pooled_with_main": false,
   "worlds": [
-    {"scenario": "api_latency_db_query", "recording": "<id from WO-R3-368>"},
-    {"scenario": "dlq_mislabeled_replay_safe", "recording": "<id from WO-R3-368>"},
-    {"scenario": "jobs_not_progressing_outbox_stall", "recording": "<id from WO-R3-368>"},
-    {"scenario": "workflow_stuck_resolver_stall", "recording": "<id from WO-R3-368>"}
+    {"scenario": "api_latency_db_query", "recording": "8c4a32a50d4b"},
+    {"scenario": "dlq_mislabeled_replay_safe", "recording": "e5d407945572"},
+    {"scenario": "jobs_not_progressing_outbox_stall", "recording": "c7f4746c4a61"},
+    {"scenario": "workflow_stuck_resolver_stall", "recording": "6f030e848a9d"}
   ]
 }

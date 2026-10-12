@@ -28,7 +28,7 @@ from evals.judge_calibration.roles import (
     SelectionSubject,
 )
 from evals.judge_calibration.traps import TrapCase, traps_for
-from incident_commander.llm.client import LLMError, LLMResult
+from incident_commander.llm.client import LLMError, LLMResult, LLMUsage
 
 
 class FakeJudgeClient:
@@ -37,10 +37,18 @@ class FakeJudgeClient:
     ``answers`` maps a user message to its payloads, in order. ``calls``, ``temperatures``
     and ``models`` record what was asked, so a test can ASSERT that the calibration went
     through the real prompt, sent no sampling parameter (ADR 0048, O-24) and asked each
-    leg on the model it should have (WO-R3-364).
+    leg on the model it should have (WO-R3-364). ``usage`` is the usage block every answer
+    reports (zeros by default: a script bills nothing), so a test can drive the billed-usage sum
+    through the real harness (WO-R3-384).
     """
 
-    def __init__(self, answers: Mapping[str, Sequence[Mapping[str, Any]]]) -> None:
+    def __init__(
+        self,
+        answers: Mapping[str, Sequence[Mapping[str, Any]]],
+        *,
+        usage: LLMUsage | None = None,
+    ) -> None:
+        self._usage = usage or LLMUsage()
         self._answers: dict[str, list[Mapping[str, Any]]] = {}
         for question, payloads in answers.items():
             queue = list(payloads)
@@ -81,13 +89,8 @@ class FakeJudgeClient:
             )
         index = min(self._served[question], len(queue) - 1)
         self._served[question] += 1
-        return LLMResult(
-            output=output_model.model_validate(dict(queue[index])),
-            input_tokens=0,
-            output_tokens=0,
-            cache_creation_tokens=0,
-            cache_read_tokens=0,
-            stop_reason="canned",
+        return self._usage.with_output(
+            output_model.model_validate(dict(queue[index])), stop_reason="canned"
         )
 
     def _question(self, user_message: str) -> str | None:

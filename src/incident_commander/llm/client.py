@@ -1,7 +1,8 @@
 """Anthropic-backed LLM client with typed structured outputs.
 
 Structured output is one forced tool whose schema is the caller's Pydantic model;
-the system prompt is cache-controlled.
+the system prompt is cache-controlled. A client built with ``cache_question=True`` also marks
+the user message, for a caller that asks one question several times in a row (ADR 0084).
 """
 
 from __future__ import annotations
@@ -18,6 +19,11 @@ from anthropic.types import Message
 from pydantic import BaseModel, ValidationError
 
 _STRUCTURED_TOOL_NAME: Final[str] = "record_output"
+
+#: The prompt-caching marker. The system block always carries it: tools and system render first,
+#: so one marker there caches both, and the agent, the judges and the selector all repeat that
+#: prefix call after call (ADR 0015 meters the cache tokens it produces; ADR 0084).
+CACHE_CONTROL: Final[dict[str, str]] = {"type": "ephemeral"}
 
 # Retrying is ``LLMClient.call``'s own job below, so the SDK never retries by itself (finding
 # C-07). The 120-second read bound ends a stalled call, so the run's budget can escalate on it.
@@ -169,6 +175,7 @@ class LLMClient:
         client: anthropic.Anthropic | None = None,
         tracer: Callable[[dict[str, Any]], None] | None = None,
         clock: Callable[[], float] = time.monotonic,
+        cache_question: bool = False,
     ) -> None:
         self._client = client or anthropic.Anthropic(
             api_key=api_key,
@@ -182,6 +189,15 @@ class LLMClient:
         # Injected like ``sleep`` so a test can assert an exact reported duration; against a real
         # clock the only safe assertion would be ">= 0", which proves nothing about the timing.
         self._clock = clock
+        # Off by default: an agent's user message is new every call, and a marker on it would
+        # pay the cache-write premium on bytes nobody reads back. The calibration harness asks
+        # each question ``reps`` times in a row, so there the second ask on reads it (ADR 0084).
+        self._cache_question = cache_question
+
+    @property
+    def cache_question(self) -> bool:
+        """Whether this client marks the user message for caching as well as the system prompt."""
+        return self._cache_question
 
     def call[T: BaseModel](
         self,
@@ -211,10 +227,12 @@ class LLMClient:
                 {
                     "type": "text",
                     "text": system_prompt,
-                    "cache_control": {"type": "ephemeral"},
+                    "cache_control": dict(CACHE_CONTROL),
                 }
             ],
-            "messages": [{"role": "user", "content": user_message}],
+            "messages": [
+                {"role": "user", "content": _user_content(user_message, self._cache_question)}
+            ],
             "tools": [
                 {
                     "name": _STRUCTURED_TOOL_NAME,
@@ -369,6 +387,13 @@ class LLMClient:
             usage=usage,
             record_id=record_id,
         )
+
+
+def _user_content(user_message: str, cached: bool) -> str | list[dict[str, Any]]:
+    """The user turn: a plain string, or one text block carrying the cache marker."""
+    if not cached:
+        return user_message
+    return [{"type": "text", "text": user_message, "cache_control": dict(CACHE_CONTROL)}]
 
 
 def _repair_keys(record_id: str, repair_of: str | None) -> dict[str, Any]:

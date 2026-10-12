@@ -50,6 +50,15 @@ MODEL_PRICING: Final[dict[str, ModelPricing]] = {
     ),
 }
 
+#: The shortest prefix each priced model will cache, in tokens (docs.claude.com prompt caching,
+#: checked 2026-10-12). A marked prefix shorter than this is not an error: the call is billed as
+#: uncached input and the usage block shows no cache tokens. Haiku 4.5's 4,096 is above the
+#: briefing judge's ~3,300-token rubric, which is why ADR 0084 also marks the question.
+CACHE_MINIMUM_TOKENS: Final[dict[str, int]] = {
+    "claude-sonnet-4-6": 1024,
+    "claude-haiku-4-5": 4096,
+}
+
 _warned_models: set[str] = set()
 
 
@@ -94,7 +103,17 @@ def cost_of(model: str, usage: LLMUsage) -> Decimal:
 
     Takes ``LLMUsage``, not ``LLMResult``, so billed paths with no parsed output price the
     same way; ``discarded_output_tokens`` bills at the output rate, never under (ADR 0015).
+    A call that billed no token of any class costs nothing at any price, so it is not looked up:
+    a scripted fake under a made-up model id is not an unpriced model (WO-R3-384).
     """
+    if not (
+        usage.input_tokens
+        or usage.output_tokens
+        or usage.discarded_output_tokens
+        or usage.cache_creation_tokens
+        or usage.cache_read_tokens
+    ):
+        return Decimal("0").quantize(_USD_QUANTUM)
     row = pricing_for(model)
     raw = (
         usage.input_tokens * row.input_usd_per_mtok

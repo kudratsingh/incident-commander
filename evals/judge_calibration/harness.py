@@ -20,6 +20,12 @@ except the selector's, which may ask a run role's model (``leg_model``, WO-R3-36
 leg given ``JUDGE_MODEL_OVERRIDE``, which asks that model instead and says so in the report. The
 briefing judge may be asked under a named rubric variant (``BRIEFING_JUDGE_RUBRICS``), whose file
 name and hash the report records (WO-R3-383, owner O-61).
+
+Every call is metered (WO-R3-384, owner O-62): the report carries ``usage`` — the API's own token
+counts summed per leg and per model — and ``usd_used`` priced by the pinned map, so a paid leg
+records what it was billed rather than what it was estimated to cost. ``live_client`` is the one
+way the paid path builds its client: the rubric is cache-marked as on every call, and the question
+is marked too when it is asked more than once, so reps 2..N read it from the cache (ADR 0084).
 """
 
 from __future__ import annotations
@@ -36,6 +42,7 @@ from uuid import uuid4
 
 from evals import artifacts
 from evals.graders.llm_judge import BRIEFING_JUDGE_CHECKS, JUDGE_PROMPT, checks_of
+from evals.judge_calibration.billing import LABEL_LEG, TRAP_LEG, usage_block
 from evals.judge_calibration.label_leg import label_agreement
 from evals.judge_calibration.roles import (
     ABSENT_ROLES,
@@ -54,6 +61,7 @@ from evals.judge_calibration.traps import (
     TrapCase,
     traps_for,
 )
+from incident_commander.agent.accounting import RunAccounting
 from incident_commander.config import ModelRole, Settings
 from incident_commander.llm.client import LLMClientProtocol, LLMError
 
@@ -178,6 +186,9 @@ class CalibrationReport:
     # The model a judge leg was told to ask instead of ``JUDGE_MODEL`` (WO-R3-383), or ``None``.
     # On the live path it IS ``model``; on the free path ``model`` is the script's id.
     judge_model_override: str | None = None
+    # Every call's billed usage, summed (``billing.usage_block``, WO-R3-384). ``None`` only for a
+    # report built by hand; ``calibrate`` always fills it, with zeros on the scripted fake.
+    usage: Mapping[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         payload: dict[str, Any] = {
@@ -196,6 +207,9 @@ class CalibrationReport:
             ),
             "judge_client": self.judge_client,
             "reps": self.reps,
+            # What this calibration was billed (owner O-62: the billed figure, not the estimate).
+            "usd_used": None if self.usage is None else self.usage["usd_used"],
+            "usage": None if self.usage is None else dict(self.usage),
             "protocol": PROTOCOL,
             "rubric": dict(self.rubric),
             "determinism": dict(self.determinism),
@@ -489,9 +503,12 @@ def calibrate(
         )
     if labels is not None and judge != BRIEFING_JUDGE:
         raise ValueError(f"owner labels exist for {BRIEFING_JUDGE} only, not {judge}")
+    # One meter for the whole calibration, one role per leg, so the report can say what each leg
+    # was billed. Not charged to any run's ledger: no run is in progress.
+    accounting = RunAccounting()
     labelled = (
         label_agreement(
-            client=client,
+            client=accounting.meter(client, LABEL_LEG, charged_to_ledger=False),
             model=model,
             reps=reps,
             labels_path=labels,
@@ -510,7 +527,8 @@ def calibrate(
             f"least {MINIMUM_TRAPS_PER_JUDGE}. A calibration over fewer is a "
             "number whose error bars are wider than its own scale."
         )
-    outcomes = tuple(ask(case, client=client, model=model, reps=reps) for case in cases)
+    traps_client = accounting.meter(client, TRAP_LEG, charged_to_ledger=False)
+    outcomes = tuple(ask(case, client=traps_client, model=model, reps=reps) for case in cases)
     return CalibrationReport(
         report_id=report_id or uuid4().hex[:12],
         judge=judge,
@@ -527,7 +545,26 @@ def calibrate(
         label_agreement=labelled,
         model_role=model_role,
         judge_model_override=judge_model_override,
+        usage=usage_block(
+            accounting.calls, question_cached=bool(getattr(client, "cache_question", False))
+        ),
     )
+
+
+def live_client(api_key: str, *, reps: int, sdk: Any = None) -> LLMClientProtocol:
+    """The client the paid path asks through: the run's own ``LLMClient``, cache-marked.
+
+    The rubric (system prompt) is marked on every call, as for the agent. The question is marked
+    as well when ``reps > 1``: each one is asked ``reps`` times in a row, so asks 2..N read the
+    whole prompt from the cache — which is also what lets a Haiku leg cache at all, since Haiku
+    4.5 will not cache a prefix under 4,096 tokens and the rubric alone is ~3,300 (ADR 0084). At
+    ``reps == 1`` nothing would read the question back, so it is not marked. ``sdk`` is a test seam.
+    """
+    # Looked up at call time, not imported at module scope: the free path never builds a real
+    # client, and tests replace ``llm.client.LLMClient`` to prove the paid path never does either.
+    from incident_commander.llm import client as llm_client
+
+    return llm_client.LLMClient(api_key=api_key, client=sdk, cache_question=reps > 1)
 
 
 def _under_rubric(cases: Sequence[TrapCase], rubric: str | None) -> tuple[TrapCase, ...]:

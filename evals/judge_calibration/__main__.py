@@ -14,6 +14,9 @@ packet's held-out briefings and ``--dev-packet`` shows another beside it, not co
 ``--rubric`` asks the briefing judge under a named rubric variant and ``--judge-model-override``
 asks the judge legs on another model than ``JUDGE_MODEL``; the report records both, and the
 free path prints the exact paid command a run with the same flags would take (WO-R3-383, O-61).
+Every summary's first line ends ``billed $X.XX (N calls, cache-read P%)``: the API's usage blocks
+summed and priced (WO-R3-384, owner O-62); on the free path it reads $0.00, because a script bills
+nothing.
 """
 
 from __future__ import annotations
@@ -26,6 +29,7 @@ from typing import Any, Final
 
 from evals.graders.llm_judge import BRIEFING_JUDGE_RUBRICS
 from evals.judge_calibration import label_leg, labels, track_record
+from evals.judge_calibration.billing import LABEL_LEG, billed_line
 from evals.judge_calibration.fakes import FakeJudgeClient, answers_for, answers_for_labels
 from evals.judge_calibration.harness import (
     FAKE_CLIENT,
@@ -36,6 +40,7 @@ from evals.judge_calibration.harness import (
     calibrate,
     leg_model,
     leg_role,
+    live_client,
     model_setting,
     write_report,
 )
@@ -80,7 +85,8 @@ def _summarize(report: CalibrationReport) -> list[str]:
     stability = report.self_agreement
     ground = report.ground_truth_agreement
     lines = [
-        f"{report.judge}  (report {report.report_id}, client {report.judge_client})",
+        f"{report.judge}  (report {report.report_id}, client {report.judge_client})  "
+        f"{billed_line(report.usage)}",
         *_model_lines(report),
         f"  rubric      {report.rubric['prompt']}.md  sha256 {report.rubric['sha256'][:12]}  "
         f"{report.rubric['lines']} lines",
@@ -119,6 +125,9 @@ def _summarize(report: CalibrationReport) -> list[str]:
         lines.append(f"    ERRORED    {entry['case_id']}: {entry['error']}")
     if report.label_agreement is not None:
         lines.extend(_summarize_labels(report.label_agreement))
+        leg = (report.usage or {}).get("by_leg", {}).get(LABEL_LEG)
+        if leg is not None:
+            lines.append(f"  label leg   {billed_line(leg)}")
     return lines
 
 
@@ -434,12 +443,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         # Imported here, not at module scope: Settings refuses to start without a
         # priced JUDGE_MODEL, which a fake-path run has no business requiring.
         from incident_commander.config import get_settings
-        from incident_commander.llm.client import LLMClient
 
         settings = get_settings()
         # The key is read from Settings and handed straight to the SDK; it is
         # never printed, logged or put in the report.
-        client: object = LLMClient(api_key=settings.anthropic_api_key.get_secret_value())
+        client: object = live_client(settings.anthropic_api_key.get_secret_value(), reps=args.reps)
         client_kind = LIVE_CLIENT
     else:
         client_kind = FAKE_CLIENT

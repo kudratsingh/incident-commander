@@ -35,6 +35,9 @@ _TABLE_WO_R3_372 = (
 _TABLE_WO_R3_374 = (
     _REPO / "evals/reports/world-drift/world_drift_table.20261010T190122Z.0f08672ecce9.json"
 )
+_TABLE_WO_R3_368 = (
+    _REPO / "evals/reports/world-drift/world_drift_table.20261012T075555Z.a43ca33fe04d.json"
+)
 
 _CMD = 'PLATFORM_COMPOSE="demo/compose.yml" uv run python -m evals.world_drift --world '
 _FILE = "dlq_backlog/dlq_backlog.20260917T182256Z"
@@ -377,7 +380,8 @@ def test_the_wo_r3_374_table_checks_the_five_worlds_re_recorded_on_v0625() -> No
     assert len(table["rows"]) == 17
     assert table["counts"] == {CLEAN: 5, DRIFT: 0, REFUSED: 0, NOT_RUN: 12}
     assert table["platform_pin"] == "v0.6.25"
-    assert artifacts.newest("world_drift_table") == _TABLE_WO_R3_374
+    versions = artifacts.versions("world_drift_table")
+    assert versions.index(_TABLE_WO_R3_374) < versions.index(_TABLE_WO_R3_368)
     rows = {row["scenario"]: row for row in table["rows"]}
     assert {name: row["recording"] for name, row in rows.items() if row["verdict"] == CLEAN} == {
         "workflow_stuck_dead_lettered_root": "b9fe65835de7",
@@ -413,3 +417,38 @@ def test_the_make_target_runs_every_recording_or_reads_logs() -> None:
     assert "evals.world_drift_table" in recipe() and "--all" in recipe()
     logs = recipe("FROM_LOGS=/tmp/x", "WRITE=1")
     assert "--from-logs /tmp/x" in logs and "--write" in logs and "--all" not in logs
+
+
+def test_the_wo_r3_368_table_checks_every_newest_recording_on_v0625() -> None:
+    """WO-R3-368: the four INC-007 worlds re-recorded, then all 17 newest recordings checked.
+
+    Every row names its scenario's newest recording. The two DRIFT rows are reported, not
+    forgiven; the one NOT RUN row is api_latency_downstream, and it says why.
+    """
+    table = json.loads(_TABLE_WO_R3_368.read_text())
+    assert len(table["rows"]) == 17
+    assert table["counts"] == {CLEAN: 14, DRIFT: 2, REFUSED: 0, NOT_RUN: 1}
+    assert table["platform_pin"] == "v0.6.25"
+    assert artifacts.newest("world_drift_table") == _TABLE_WO_R3_368
+    rows = {row["scenario"]: row for row in table["rows"]}
+    assert {(name, row["recording"]) for name, row in rows.items()} == set(
+        world_drift_table.newest_recordings()
+    )
+    for name, recording in {
+        "jobs_not_progressing_outbox_stall": "c7f4746c4a61",
+        "jobs_not_progressing_outbox_stall_deploy_noise": "07ce53de46ca",
+        "jobs_not_progressing_dispatcher_stall": "a877c9ede98c",
+        "remediate_consumer_lag_success": "fe0a6b1cf71e",
+    }.items():
+        assert (rows[name]["recording"], rows[name]["verdict"]) == (recording, CLEAN), name
+    assert {name for name, row in rows.items() if row["verdict"] == DRIFT} == {
+        "api_latency_db_query",
+        "jobs_not_progressing_healthy_backlog_spike",
+    }
+    assert "active_queries_over_slow_threshold" in rows["api_latency_db_query"]["output"]
+    assert (
+        "polling [live_only_field]" in rows["jobs_not_progressing_healthy_backlog_spike"]["output"]
+    )
+    not_run = rows["api_latency_downstream"]
+    assert not_run["verdict"] == NOT_RUN
+    assert "not checked by WO-R3-368" in not_run["detail"]

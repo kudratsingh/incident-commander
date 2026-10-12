@@ -229,6 +229,9 @@ RULE_WINDOW_READING: Final[str] = "window_reading"
 #: A reading with a threshold beside it in the same payload: both readings must sit on the
 #: same side of their own threshold (both at or over it, or both under it / null).
 RULE_THRESHOLD_SIDE: Final[str] = "threshold_side"
+#: A live count of things running at the instant of the read, where the world claims "some"
+#: and how many depends on that instant: some on both sides, or none on both (WO-R3-386).
+RULE_HELD_COUNT: Final[str] = "held_count"
 
 #: What each rule still compares, printed beside every path it covers.
 RULE_MEANING: Final[Mapping[str, str]] = {
@@ -238,6 +241,7 @@ RULE_MEANING: Final[Mapping[str, str]] = {
     RULE_WINDOW_COUNT: "a number on the same side of zero",
     RULE_WINDOW_READING: "type only — it follows from the 24-hour window",
     RULE_THRESHOLD_SIDE: "on the same side of the threshold the same reading carries",
+    RULE_HELD_COUNT: "some on both readings, or none on both — not how many",
 }
 
 
@@ -330,6 +334,18 @@ HONEST_MOVEMENT: Final[Mapping[str, Mapping[str, Movement]]] = {
             "is the scenario's own rule (at_least 500 = slow_query_threshold_ms).",
             threshold="slow_query_threshold_ms",
         ),
+        "active_queries_over_slow_threshold": Movement(
+            RULE_HELD_COUNT,
+            "the platform's slow-query fault (`slow_db_queries`, platform ADR 0034) runs two "
+            "2000 ms queries offset by half a chunk, so the older is always past the 500 ms "
+            "threshold and the younger is past it for about half of every chunk: the count is "
+            "1 or 2 by the instant of the read, in the same world. Measured: 1 in the three "
+            "recordings before 2026-10-12, 2 in WO-R3-368's two checks and in 301c99c4ae11 "
+            "(longest 1553 ms), then 1 in all seven reads a second apart during WO-R3-386's "
+            "check of that recording (longest 1310-1418 ms, the younger under 500), and 0 in "
+            "the reset world before and after. What the world claims is that a query is held "
+            "(the scenario's `at_least 1`): none still drifts.",
+        ),
     },
 }
 
@@ -343,9 +359,23 @@ RAISED_ROWS: Final[Mapping[str, str]] = {
 
 #: Newest-first pages capped by the call's ``limit``. Every job any check submits pushes the
 #: oldest row off a full page, so a recorded row the live page no longer holds is not drift
-#: when the rows missing are, as shapes, among the recording's oldest that many
-#: (``observed_pair``). A row that vanished from the middle still reads as drift.
+#: when it can have slid off. Rows are matched by the trace's own id, never by position
+#: (WO-R3-386, ``observed_pair``): the seeder's traces carry version-5 ids that every reset
+#: keeps and re-timestamps to just before the reset, while real jobs keep both their random
+#: id and their time — so after a burst the seeded rows sit in a different place on the page
+#: than they did in the recording, and a position rule read that as a row gone from the
+#: middle. A seeded trace held by both pages must read the same; one gone while an OLDER
+#: seeded trace is still on the page, or gone from a page that is not full, is drift.
 NEWEST_PAGES: Final[Mapping[str, str]] = {"search_traces": "matches"}
+
+#: Each newest page's row id: the field whose version-5 value names one seeded trace.
+NEWEST_PAGE_ROW_ID: Final[Mapping[str, str]] = {"search_traces": "trace_id"}
+
+#: The kinds only ``observed_pair`` can find, because the walk reads a list's rows as one
+#: merged value domain and cannot say "this trace, and not another, changed".
+KIND_SEEDED_ROW_CHANGED: Final[str] = "seeded_row_changed"
+KIND_SEEDED_ROW_MISSING: Final[str] = "seeded_row_missing"
+KIND_PAGE_BELOW_FLOOR: Final[str] = "page_below_floor"
 
 #: The platform's own words for a breaker store with no record (`breaker_state.py`,
 #: BREAKERS_UNKNOWN_NONE_PUBLISHED). A breaker record lives 24 h after the breaker last
@@ -675,7 +705,7 @@ def compare(
             return
         if not same_types(path, values, domain):
             return
-        if move.rule == RULE_WINDOW_COUNT:
+        if move.rule in (RULE_WINDOW_COUNT, RULE_HELD_COUNT):
             live_signs = {_sign(v) for v in domain if _is_number(v)}
             for value in values:
                 if _is_number(value) and live_signs and _sign(value) not in live_signs:
@@ -698,7 +728,7 @@ def compare(
         if move.rule in (RULE_FIRING_READING, RULE_WINDOW_READING):
             return
         both_numbers = _is_number(canned_node) and _is_number(live_node)
-        if move.rule == RULE_WINDOW_COUNT and both_numbers:
+        if move.rule in (RULE_WINDOW_COUNT, RULE_HELD_COUNT) and both_numbers:
             if _sign(canned_node) != _sign(live_node):
                 record(path, "sign_class", canned_node, live_node)
         elif move.rule == RULE_COUNT_FLOOR and both_numbers:
@@ -801,12 +831,24 @@ def _merge_rows(elements: Sequence[Any]) -> dict[str, list[Any]]:
 
 
 @dataclass(frozen=True)
+class PairDisagreement:
+    """A disagreement ``observed_pair`` found row by row, for the caller to report as drift."""
+
+    path: str
+    kind: str
+    canned: Any = None
+    live: Any = None
+
+
+@dataclass(frozen=True)
 class ObservedPair:
     """Two readings of one call with the rows only one of them can hold set aside, and why."""
 
     recorded: dict[str, Any]
     live: dict[str, Any]
     notes: tuple[str, ...] = ()
+    #: Found by matching rows on their own id (``NEWEST_PAGES``); the walk cannot see these.
+    disagreements: tuple[PairDisagreement, ...] = ()
 
 
 def observed_pair(
@@ -851,6 +893,7 @@ def observed_pair(
                 f"read, set aside — {names}"
             )
 
+    disagreements: list[PairDisagreement] = []
     key = NEWEST_PAGES.get(tool)
     limit = arguments.get("limit")
     recorded_rows, live_rows = _rows(recorded, key or ""), _rows(live, key or "")
@@ -859,18 +902,50 @@ def observed_pair(
         and isinstance(limit, int)
         and recorded_rows is not None
         and live_rows is not None
-        and len(recorded_rows) == len(live_rows) == limit
     ):
-        slid = _slid_off(recorded_rows, live_rows, key, rows_relaxed)
-        if slid:
-            recorded_out[key] = [row for i, row in enumerate(recorded_rows) if i not in slid]
-            shapes = Counter(_identity(recorded_rows[i], key, rows_relaxed) for i in slid)
+        page = _newest_page(
+            recorded_rows,
+            live_rows,
+            key=key,
+            row_id=NEWEST_PAGE_ROW_ID.get(tool, "id"),
+            limit=limit,
+            relaxed=rows_relaxed,
+        )
+        disagreements.extend(page.disagreements)
+        if page.slid_seeded or page.slid_traffic:
+            gone = page.slid_seeded | page.slid_traffic
+            recorded_out[key] = [row for i, row in enumerate(recorded_rows) if i not in gone]
+            if not recorded_out[key]:
+                # Every recorded row is below the live page: nothing on it is comparable, and
+                # an empty recorded list against a full live one would read as every row field
+                # being live-only. The floor above is what still holds the page to account.
+                live_out[key] = []
+                notes.append(
+                    f"{tool}: no recorded row is still on the newest-{limit} page, so its rows "
+                    f"are not compared — the page held {len(live_rows)} rows, at least the "
+                    f"recorded {len(recorded_rows)}"
+                )
+        if page.slid_seeded:
+            shapes = Counter(
+                _identity(recorded_rows[i], key, rows_relaxed) for i in page.slid_seeded
+            )
             listed = ", ".join(f"{shape} x{n}" for shape, n in sorted(shapes.items()))
             notes.append(
-                f"{tool}: {len(slid)} recorded row(s) slid off the newest-{limit} page as "
-                f"newer rows arrived, set aside — {listed}"
+                f"{tool}: {len(page.slid_seeded)} seeded row(s) slid off the newest-{limit} "
+                f"page as newer rows arrived (each one older than every seeded row still on "
+                f"it), set aside — {listed}"
             )
-    return ObservedPair(recorded_out, live_out, tuple(notes))
+        if page.slid_traffic:
+            shapes = Counter(
+                _identity(recorded_rows[i], key, rows_relaxed) for i in page.slid_traffic
+            )
+            listed = ", ".join(f"{shape} x{n}" for shape, n in sorted(shapes.items()))
+            notes.append(
+                f"{tool}: {len(page.slid_traffic)} recorded traffic row(s) slid off the "
+                f"newest-{limit} page (older than the live page's oldest row), set aside — "
+                f"{listed}"
+            )
+    return ObservedPair(recorded_out, live_out, tuple(notes), tuple(disagreements))
 
 
 def _rows(payload: Mapping[str, Any], key: str) -> list[Any] | None:
@@ -893,32 +968,87 @@ def _identity(row: Any, prefix: str, relaxed: frozenset[str]) -> str:
     return json.dumps(keep(row, prefix), sort_keys=True, default=str)
 
 
-def _slid_off(
-    recorded: Sequence[Any], live: Sequence[Any], key: str, relaxed: frozenset[str]
-) -> set[int]:
-    """Indexes of the recorded rows a full page lost to newer rows, or nothing.
+@dataclass(frozen=True)
+class _Page:
+    """``_newest_page``'s answer: recorded row indexes to set aside, and what is drift."""
 
-    Two full pages of one size: as a multiset of shapes, what the recording holds and live
-    does not is exactly as many rows as live holds and the recording does not. If those
-    missing shapes are all among the recording's oldest that many rows, the page slid; the
-    set returned is those rows. Anything missing from further up means a row went away.
+    slid_seeded: frozenset[int] = frozenset()
+    slid_traffic: frozenset[int] = frozenset()
+    disagreements: tuple[PairDisagreement, ...] = ()
+
+
+def _newest_page(
+    recorded: Sequence[Any],
+    live: Sequence[Any],
+    *,
+    key: str,
+    row_id: str,
+    limit: int,
+    relaxed: frozenset[str],
+) -> _Page:
+    """Two newest-first pages compared by the trace's own id, with a count floor (WO-R3-386).
+
+    *Count floor:* the live page holds at least as many rows as the recording did (a full
+    page stays full). Below it nothing is set aside — rows left the world.
+
+    *Seeded rows* (an id that is not random, so every reset keeps it): one held by both pages
+    must read the same, everything the walk compares by value; one the live page lacks slid
+    off only if the live page is full and every seeded row older than it is gone too — the
+    reset moves the seeded rows together, keeping their order. A gap above a seeded row that
+    is still there is a row gone from the middle.
+
+    *Traffic rows* (a random id): real jobs keep their time, so a recorded one older than the
+    live page's oldest row is simply below the page, and is set aside when the page is full.
+    The rest stay in the walk, which reads them as a value domain exactly as before.
     """
-    recorded_shapes = [_identity(row, key, relaxed) for row in recorded]
-    missing = Counter(recorded_shapes) - Counter(_identity(row, key, relaxed) for row in live)
-    count = sum(missing.values())
-    if not count:
-        return set()
-    order = sorted(range(len(recorded)), key=lambda i: _created_at(recorded[i]), reverse=True)
-    tail = order[-count:]
-    if Counter(recorded_shapes[i] for i in tail) & missing != missing:
-        return set()
-    slid: set[int] = set()
-    left = Counter(missing)
-    for i in reversed(tail):  # oldest first
-        if left[recorded_shapes[i]] > 0:
-            left[recorded_shapes[i]] -= 1
-            slid.add(i)
-    return slid
+
+    def stable(row: Any) -> str | None:
+        value = row.get(row_id) if isinstance(row, Mapping) else None
+        return value if isinstance(value, str) and not _is_random_uuid(value) else None
+
+    found: list[PairDisagreement] = []
+    if len(live) < min(len(recorded), limit):
+        found.append(PairDisagreement(f"{key}[]", KIND_PAGE_BELOW_FLOOR, len(recorded), len(live)))
+    live_full = len(live) >= limit and not found
+    live_seeded = {ident: row for row in live if (ident := stable(row)) is not None}
+
+    seeded = sorted(
+        (i for i, row in enumerate(recorded) if stable(row) is not None),
+        key=lambda i: _created_at(recorded[i]),
+    )  # oldest first
+    slid_seeded: set[int] = set()
+    still_sliding = live_full
+    for i in seeded:
+        ident = stable(recorded[i])
+        assert ident is not None
+        twin = live_seeded.get(ident)
+        if twin is None:
+            if still_sliding:
+                slid_seeded.add(i)
+                continue
+            found.append(
+                PairDisagreement(
+                    f"{key}[]",
+                    KIND_SEEDED_ROW_MISSING,
+                    f"{ident} {_identity(recorded[i], key, relaxed)}",
+                    None,
+                )
+            )
+            continue
+        still_sliding = False  # an older seeded row is on the page: nothing above it slid
+        mine, theirs = _identity(recorded[i], key, relaxed), _identity(twin, key, relaxed)
+        if mine != theirs:
+            found.append(
+                PairDisagreement(f"{key}[]", KIND_SEEDED_ROW_CHANGED, f"{ident} {mine}", theirs)
+            )
+
+    slid_traffic: set[int] = set()
+    if live_full and live:
+        floor = min(_created_at(row) for row in live)
+        slid_traffic = {
+            i for i, row in enumerate(recorded) if stable(row) is None and _created_at(row) < floor
+        }
+    return _Page(frozenset(slid_seeded), frozenset(slid_traffic), tuple(found))
 
 
 def _created_at(row: Any) -> str:

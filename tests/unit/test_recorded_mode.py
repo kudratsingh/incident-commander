@@ -733,7 +733,23 @@ _TRACES: Final[dict[str, Any]] = {
 _LATER_TRACES: Final[dict[str, Any]] = {
     "matches": [
         {
-            # Re-minted by the reset between the two readings. Same fault.
+            # Re-timestamped by the reset between the two readings, its version-5 id kept: the
+            # seeder's ids are uuid5 and a reset shifts their clocks, never re-mints them
+            # (platform `seed_eval_fixtures._rebaseline_timestamps`; WO-R3-386). Same fault.
+            "trace_id": "c5ca46c1-f4dd-5021-8be4-130143553096",
+            "job_id": "f7e2990f-ef64-470e-ac1b-c26f7970551b",
+            "job_type": "report_gen",
+            "status": "dead_letter",
+            "created_at": "2026-09-17T20:38:11.554210Z",
+        }
+    ]
+}
+
+#: What WO-R3-271 took a reset to do: the seeded trace gone and a random-id row of the same
+#: shape in its place. On today's platform that is a different world (WO-R3-386).
+_REMINTED_TRACES: Final[dict[str, Any]] = {
+    "matches": [
+        {
             "trace_id": "0b1d9f77-6c34-4e52-8ab0-2f17c4d9e601",
             "job_id": "51ab7d20-9e18-4c77-b6f3-0d2a8e5c1b44",
             "job_type": "report_gen",
@@ -815,9 +831,15 @@ class TestHistoryIsNotState:
         """The newest 50 rows are whatever ran last. Nothing puts them back."""
         assert _drift("list_audit_events", _AUDIT, _LATER_AUDIT) == []
 
-    def test_a_re_minted_trace_id_is_not_drift(self) -> None:
-        """A reset deletes the fixture rows and seeds new ones with new ids."""
+    def test_a_re_timestamped_seeded_trace_is_not_drift(self) -> None:
+        """A reset moves the seeded trace's clock and keeps its id (WO-R3-386)."""
         assert _drift("search_traces", _TRACES, _LATER_TRACES) == []
+
+    def test_a_seeded_trace_replaced_by_a_random_id_row_is_drift(self) -> None:
+        """WO-R3-271's premise, measured false: a seeded id is never re-minted, so a page that
+        is not full and lacks it has lost the row, whatever stands in its place (WO-R3-386)."""
+        drifts = _drift("search_traces", _TRACES, _REMINTED_TRACES)
+        assert [(d.path, d.kind) for d in drifts] == [("matches[]", "seeded_row_missing")]
 
     def test_the_committed_recordings_history_churn_is_forgiven(self) -> None:
         """The real measurement, offline: two honest reads of one live stack.
@@ -832,10 +854,16 @@ class TestHistoryIsNotState:
             recorded, [call for call in later.calls if call.key in shared]
         )
         assert [d for d in drifts if d.tool == "list_audit_events"] == []
-        assert {d.path for d in drifts if d.tool == "search_traces"} == {
-            "matches[].job_type[]",
-            "matches[].status[]",
-        }
+        # The later page holds 47 rows newer than the re-timestamped seeded block, so the six
+        # oldest seeded traces and 41 older traffic rows are below it. The position rule read
+        # that as rows gone from the middle (`job_type[]`, `status[]`); matched by id it is a
+        # page that slid (WO-R3-386).
+        assert [d for d in drifts if d.tool == "search_traces"] == []
+        notes = world_drift.set_aside_notes(
+            recorded, [call for call in later.calls if call.key in shared]
+        )
+        assert any(note.startswith("search_traces: 6 seeded row(s) slid off") for note in notes)
+        assert any(note.startswith("search_traces: 41 recorded traffic row(s)") for note in notes)
 
     # -- the safety net: a real drift still fails --------------------------
 
@@ -858,7 +886,11 @@ class TestHistoryIsNotState:
         healed = json.loads(json.dumps(_LATER_TRACES))
         healed["matches"][0]["status"] = "completed"
         drifts = _drift("search_traces", _TRACES, healed)
-        assert [d.path for d in drifts] == ["matches[].status[]"]
+        # The walk's value domain, and the same trace matched by its id (WO-R3-386).
+        assert [(d.path, d.kind) for d in drifts] == [
+            ("matches[].status[]", "not_live_reachable"),
+            ("matches[]", "seeded_row_changed"),
+        ]
 
     def test_an_empty_live_audit_log_is_still_drift(self) -> None:
         """`events` itself is NOT forgiven, so a listing that lost its rows shows."""

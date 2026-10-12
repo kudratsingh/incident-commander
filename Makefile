@@ -84,6 +84,10 @@ help:
 	@echo "                   packet's held-out briefings only; DEV_PACKET=<m> shows the dev"
 	@echo "                   set beside it, NOT COUNTED (WO-R3-378, ADR 0082)"
 	@echo "                   LABELS=1 (with JUDGE=briefing_judge) adds the owner-label leg"
+	@echo "                   RUBRIC=<name> (with JUDGE=briefing_judge) asks a rubric variant,"
+	@echo "                   e.g. briefing_judge.v2-minus-copied; JUDGE_MODEL_OVERRIDE=<model>"
+	@echo "                   asks the judge legs on that model instead of JUDGE_MODEL; the"
+	@echo "                   free run prints the exact paid command (WO-R3-383)"
 	@echo "  label-packet     FREE: write the briefing labelling packet from committed archives;"
 	@echo "                   IMPORT=<filled packet> appends its labels (append-only)."
 	@echo "                   PACKET=2 REPEATS=3 SEED=<n> KEY_OUT=<path outside the repo>"
@@ -171,6 +175,8 @@ judge-calibration:
 		$(if $(LIVE),--live,) $(if $(YES_SPEND),--yes-spend,) \
 		$(if $(LABELS),--labels $(filter-out 1,$(LABELS)),) \
 		$(if $(PACKET),--packet $(PACKET),) $(if $(DEV_PACKET),--dev-packet $(DEV_PACKET),) \
+		$(if $(RUBRIC),--rubric $(RUBRIC),) \
+		$(if $(JUDGE_MODEL_OVERRIDE),--judge-model-override $(JUDGE_MODEL_OVERRIDE),) \
 		$(if $(MODEL_ROLE_GIVEN),--model-role $(MODEL_ROLE_GIVEN),)
 
 # The oracle-gap sample (WO-R3-347, evals/oracle_gap.py). FREE by default: it checks the

@@ -197,6 +197,46 @@ Revisit trigger: the held-out score does not clear (O-58: "the judge cannot be r
 the owner's test-retest is below the threshold itself, which would say the label is noisier than
 the bar.
 
+## Amendment 2026-10-12 — a rubric variant and a judge-model override, for one trial (WO-R3-383)
+
+Rubric v2 did not clear on packet 2 (report `1b137efa119f`, 5/13, O-60), and the owner kept the
+judge measured at 8/16 (O-61 item 1). The "derived, not copied" pattern became a deterministic lookup
+in the `BRIEFING` grade dimension ([ADR 0083](0083-two-briefing-faults-are-lookups-not-judgments.md),
+WO-R3-382). O-61 item 3 orders one trial: v2 without that check, on `claude-sonnet-4-6`, scored on
+packet 2 as held out and packet 1 as dev, in its own report, not registered unless the owner rules.
+Two additions make that trial one command and keep it from being mistaken for the production judge:
+
+* **A variant is a new file, not an edit of v2.**
+  `src/incident_commander/llm/prompts/briefing_judge.v2-minus-copied.md` is v2 with check 2's two
+  lines (the rule and its `0db6fe722f7c:deploy_correlation` example) removed and every other byte
+  kept — including the check numbers, so the diff is exactly the two removed lines and the list reads
+  1, 3, 4, 5. Its served-text hash is pinned in the prompt snapshot like any prompt (`71ab6a82…`);
+  v2's stays `9f684d74…`. `llm_judge.BRIEFING_JUDGE_RUBRICS` lists every rubric the judge may be
+  asked under with its checks; `make judge-calibration RUBRIC=<name>` (briefing judge only) puts
+  every trap and label under it, and the report's `rubric` records the `file`, `sha256`,
+  `variant_of`, `removed_checks` and `traps_for_removed_checks` (`bj-07`, whose verdict still counts:
+  all ten traps stay, so the number is comparable with v2's reports). The "written from" refusal of
+  § 3 reads the bytes of the rubric actually asked. Nothing but the calibration names a variant; a
+  run's judge still loads `briefing_judge.md`.
+* **`JUDGE_MODEL_OVERRIDE=<model>`** (make variable → `--judge-model-override`) makes the judge legs
+  ask that model instead of `JUDGE_MODEL`; the report says `model_setting: JUDGE_MODEL_OVERRIDE` and
+  carries a `judge_model_override` block. It is refused for the selector leg (`MODEL_ROLE` governs
+  it, WO-R3-364), and for a model with no `MODEL_PRICING` row, before any call. It is not a Settings
+  field.
+* **The register's judge gate now checks the report.** `research_report.judge_calibration_gate`
+  opens the leaderboard's judge number only when the registered report exists, measured the
+  production rubric, and measured the model the judged runs' judge was called on
+  (`provenance.judge_model`, carried on each row as `Row.judge_model`) — the selector gate's rule
+  (WO-R3-364) one role out. A refused row says why (`judge_calibration_refused`). Today it opens: the
+  registered `99181bf074ec` is `claude-haiku-4-5` on `briefing_judge`, and every run in scope was
+  judged on `claude-haiku-4-5`. A Sonnet or variant report is refused for these runs by test.
+* **The free path prints the exact paid command** for the flags it was given, so the rehearsal and
+  the paid run are the same line.
+
+The paid trial (pre-authorised once by O-61; the coordinator runs it after this merges):
+`make judge-calibration JUDGE=briefing_judge LABELS=1 PACKET=2 DEV_PACKET=1 RUBRIC=briefing_judge.v2-minus-copied JUDGE_MODEL_OVERRIDE=claude-sonnet-4-6 LIVE=1 YES_SPEND=1 WRITE=1`
+— 195 calls. § 4's threshold and § 5's one-change rule apply to it unchanged.
+
 ## More information
 
 * `evals/graders/llm_judge.py` — `BRIEFING_JUDGE_CHECKS`, `cited_checks`

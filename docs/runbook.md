@@ -1367,6 +1367,34 @@ call. In order:
    clear, the finding is "the judge cannot be rubric-fixed" (O-58 item 5), an INCIDENTS row before
    any further rubric edit.
 
+## Judge calibration: a rubric variant on another judge model (WO-R3-383)
+
+One trial the owner pre-authorised once (O-61 item 3): rubric v2 with its `derived, not copied` check
+removed — that pattern is a deterministic lookup now, the `BRIEFING` grade dimension (WO-R3-382,
+[ADR 0083](ADR/0083-two-briefing-faults-are-lookups-not-judgments.md)) — asked on
+`claude-sonnet-4-6` instead of `JUDGE_MODEL`, scored on packet 2 (held out) with packet 1 as the dev
+set. Two switches, both recorded in the report and neither changing the judge a run calls:
+`RUBRIC=briefing_judge.v2-minus-copied` asks every trap and label under
+`src/incident_commander/llm/prompts/briefing_judge.v2-minus-copied.md` (v2 minus that check's two
+lines; the report's `rubric` names the file, its sha256, `removed_checks` and the trap that tests the
+dropped check, `bj-07`, whose verdict still counts), and `JUDGE_MODEL_OVERRIDE=<model>` asks the judge
+legs on that model (`model_setting: JUDGE_MODEL_OVERRIDE`; refused for the selector leg, which
+`MODEL_ROLE` governs, and for a model with no price row). In order:
+
+1. **Rehearse (free).**
+   `make judge-calibration JUDGE=briefing_judge LABELS=1 PACKET=2 DEV_PACKET=1 RUBRIC=briefing_judge.v2-minus-copied JUDGE_MODEL_OVERRIDE=claude-sonnet-4-6`
+   prints the scripted report (`VARIANT` line, `held-out packet 2` 13 counted, `dev set packet 1`
+   16, `test-retest` 3 pairs) and, last, the exact paid command.
+2. **Run it (PAID, pre-authorised once by O-61).** The printed line:
+   `make judge-calibration JUDGE=briefing_judge LABELS=1 PACKET=2 DEV_PACKET=1 RUBRIC=briefing_judge.v2-minus-copied JUDGE_MODEL_OVERRIDE=claude-sonnet-4-6 LIVE=1 YES_SPEND=1 WRITE=1`
+   — 10 traps, 13 held-out and 16 dev briefings, five asks each (195 calls on Sonnet). Commit the
+   report in its own PR.
+3. **Report, do not register.** Its own calibration report, read beside `1b137efa119f` (v2 on Haiku,
+   5/13). `research_report.judge_calibration_gate` refuses it for the leaderboard's judge anyway: the
+   leaderboard's runs were judged on `claude-haiku-4-5` under `briefing_judge.md`, and a report made
+   on another model or on a variant rubric does not vouch for them. The register stays
+   `99181bf074ec` until the owner rules.
+
 ## Debugging one scenario
 
 The per-scenario trace file is the fastest path:

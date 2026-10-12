@@ -7,6 +7,8 @@ verification step). Regression gating on judge scores awaits a real distribution
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+from types import MappingProxyType
 from typing import Final
 
 from pydantic import ConfigDict, Field
@@ -43,15 +45,50 @@ BRIEFING_JUDGE_CHECKS: Final[tuple[str, ...]] = (
 #: What ``reasoning`` says for a score no check lowered, also a citation.
 NO_CHECK_FIRED: Final[str] = "no check fired"
 
+#: The check WO-R3-382 turned into a deterministic lookup (ADR 0083): a step copied from a
+#: non-subject dead-letter row's own ``suggested_fix`` is now found by the ``BRIEFING`` grade
+#: dimension, not judged.
+COPIED_CHECK: Final[str] = "derived, not copied"
 
-def cited_checks(reasoning: str) -> tuple[str, ...]:
+#: Rubric v2 with ``COPIED_CHECK`` and its example removed, every other byte as v2 (WO-R3-383,
+#: owner O-61 item 3). A CALIBRATION variant only: ``make judge-calibration RUBRIC=`` asks it, and
+#: nothing else loads it — the judge every run calls stays ``JUDGE_PROMPT``.
+MINUS_COPIED_RUBRIC: Final[str] = "briefing_judge.v2-minus-copied"
+
+#: Every rubric the briefing judge can be asked under, by prompt name, with the checks it applies
+#: in order. ``JUDGE_PROMPT`` is the production rubric; the others are variants a calibration may
+#: name, each a versioned prompt file whose served-text hash is pinned like any other.
+BRIEFING_JUDGE_RUBRICS: Final[Mapping[str, tuple[str, ...]]] = MappingProxyType(
+    {
+        JUDGE_PROMPT: BRIEFING_JUDGE_CHECKS,
+        MINUS_COPIED_RUBRIC: tuple(c for c in BRIEFING_JUDGE_CHECKS if c != COPIED_CHECK),
+    }
+)
+
+
+class UnknownRubricError(ValueError):
+    """A rubric name that is not one of ``BRIEFING_JUDGE_RUBRICS``."""
+
+
+def checks_of(rubric: str) -> tuple[str, ...]:
+    """The checks one briefing-judge rubric applies, in order; an unknown name is refused."""
+    if rubric not in BRIEFING_JUDGE_RUBRICS:
+        known = ", ".join(BRIEFING_JUDGE_RUBRICS)
+        raise UnknownRubricError(f"no briefing-judge rubric {rubric!r}; known: {known}")
+    return BRIEFING_JUDGE_RUBRICS[rubric]
+
+
+def cited_checks(
+    reasoning: str, checks: tuple[str, ...] = BRIEFING_JUDGE_CHECKS
+) -> tuple[str, ...]:
     """The checks a judge's ``reasoning`` names, in rubric order; ``no check fired`` last.
 
     Case-insensitive substring match on the bold names: a judge told to name the deciding check
-    by its name either does or does not, and this is how a report counts which.
+    by its name either does or does not, and this is how a report counts which. ``checks`` is
+    the rubric's own list (``checks_of``), so a variant is counted on the checks it carries.
     """
     lowered = reasoning.lower()
-    named = tuple(name for name in BRIEFING_JUDGE_CHECKS if name.lower() in lowered)
+    named = tuple(name for name in checks if name.lower() in lowered)
     return named + ((NO_CHECK_FIRED,) if NO_CHECK_FIRED in lowered else ())
 
 
@@ -77,15 +114,19 @@ def judge_briefing(
     briefing: EscalationBriefing,
     judge_client: LLMClientProtocol,
     model: str,
+    *,
+    rubric: str = JUDGE_PROMPT,
 ) -> JudgeScore:
     """Grade a briefing. Uses the pinned ``JUDGE_MODEL`` at the call site.
 
     One bounded re-ask on an output-shape failure (ADR 0035, WO-R2-174); a second raises
     ``OutputRepairExhausted``, and ``evals/runner.py`` records ``judge_error`` instead.
+    ``rubric`` names the prompt; only the calibration harness passes a variant (WO-R3-383).
     """
+    checks_of(rubric)
     call = call_with_output_repair(
         judge_client,
-        system_prompt=load_prompt(JUDGE_PROMPT),
+        system_prompt=load_prompt(rubric),
         user_message=format_briefing_context(briefing),
         output_model=JudgeScore,
         model=model,

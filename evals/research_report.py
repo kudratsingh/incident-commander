@@ -505,6 +505,21 @@ def _dimension_rates(rows: Sequence[Row]) -> dict[str, float | None]:
     return {name: _rate(passed[name], graded[name]) for name in sorted(graded)}
 
 
+def _briefing_lookups(rows: Sequence[Row]) -> dict[str, int] | None:
+    """BRIEFING over the rows that wrote a briefing (ADR 0083); ``None`` where none carries it.
+
+    Counted over written briefings, not every row: a run with no prose passes vacuously, and
+    folding those in would make the rate read as a claim about briefings nobody wrote.
+    """
+    graded = [
+        (ok, detail) for row in rows for name, ok, detail in row.dimensions if name == "briefing"
+    ]
+    if not graded:
+        return None
+    written = [ok for ok, detail in graded if not is_vacuous_detail(detail)]
+    return {"written": len(written), "passed": sum(written), "no_prose": len(graded) - len(written)}
+
+
 #: Phrases ``_grade_safety`` writes for the half of the dimension about what the agent
 #: DID. The other half (``expected_action_arguments``) fails whenever the sanctioned
 #: action did not fire, which on an escalated run is missing, not unsafe.
@@ -557,6 +572,9 @@ def arm_summary(arm: tuple[str, str, str], rows: Sequence[Row]) -> dict[str, Any
         "passed": sum(row.passed for row in rows),
         "pass_rate": _rate(sum(row.passed for row in rows), len(rows)),
         "dimension_pass_rate": _dimension_rates(rows),
+        # Only where a row carries the dimension, so a document assembled before ADR 0083
+        # regenerates byte for byte.
+        **({"briefing_lookups": lookups} if (lookups := _briefing_lookups(rows)) else {}),
         "root_cause": {
             "graded": coverage.graded,
             "correct": coverage.correct,
@@ -2284,6 +2302,13 @@ def _number(value: float | None, places: int = 3) -> str:
     return "—" if value is None else f"{value:.{places}f}"
 
 
+def _briefing_cell(lookups: dict[str, int] | None) -> str:
+    """``passed/written`` for BRIEFING, or a dash for an arm graded before it existed."""
+    if lookups is None:
+        return "—"
+    return f"{lookups['passed']}/{lookups['written']}"
+
+
 def _table(header: Sequence[str], rows: Iterable[Sequence[str]]) -> list[str]:
     lines = ["| " + " | ".join(header) + " |", "|" + "---|" * len(header)]
     lines.extend("| " + " | ".join(cells) + " |" for cells in rows)
@@ -2527,6 +2552,8 @@ def render_markdown(document: dict[str, Any]) -> str:
         f"{board['one_model_per_table']}.",
         "",
     ]
+    # The briefing column appears only once an archive in scope was graded on it (ADR 0083).
+    briefing = any("briefing_lookups" in arm for arm in board["arms"])
     lines.extend(
         _table(
             (
@@ -2535,6 +2562,7 @@ def render_markdown(document: dict[str, Any]) -> str:
                 "scenarios",
                 "pass rate",
                 "root cause",
+                *(("briefing lookups",) if briefing else ()),
                 "mean tools",
                 "mean tokens",
                 "USD",
@@ -2546,6 +2574,7 @@ def render_markdown(document: dict[str, Any]) -> str:
                     str(arm["scenarios"]),
                     _number(arm["pass_rate"]),
                     f"{arm['root_cause']['correct']}/{arm['root_cause']['graded']}",
+                    *((_briefing_cell(arm.get("briefing_lookups")),) if briefing else ()),
                     _number(arm["mean_tool_calls"], 2),
                     _number(arm["mean_tokens"], 0),
                     arm["usd_total"],

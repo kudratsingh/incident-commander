@@ -170,6 +170,16 @@ def _dimension_rows(archived: GradeReport, regraded: GradeReport) -> dict[str, A
     return rows
 
 
+def _passed_on_archived_dimensions(dimensions: dict[str, Any]) -> bool:
+    """The re-graded verdict over the dimensions the archive was graded on.
+
+    ``_dimension_rows``'s rule applied to the roll-up as well: a dimension the grader gained
+    afterwards (BRIEFING, ADR 0083) has no archived verdict to change, so it cannot change
+    whether the row passed — otherwise every new dimension would re-bless a committed re-grade.
+    """
+    return all(row["regraded"]["passed"] for row in dimensions.values() if row["regraded"])
+
+
 def _coverage(dimensions: Sequence[dict[str, Any]], total: int) -> dict[str, Any]:
     """Root-cause coverage over one side of the comparison."""
     coverage = coverage_over(
@@ -267,13 +277,14 @@ def regrade(
                 archived["passed"],
                 archived["detail"],
             ) != (root_cause["regraded"]["passed"], frozen_detail)
+        regraded_passed = _passed_on_archived_dimensions(dimensions)
         rows.append(
             {
                 "scenario": outcome.scenario,
                 "world": world_of(outcome),
                 "archived": {"passed": outcome.report.passed},
-                "regraded": {"passed": regraded.passed},
-                "changed": outcome.report.passed != regraded.passed,
+                "regraded": {"passed": regraded_passed},
+                "changed": outcome.report.passed != regraded_passed,
                 "dimensions": dimensions,
             }
         )

@@ -213,7 +213,7 @@ docs/
 ├── ADR/                        # numbered decision records, never edited after acceptance
 │   ├── README.md               # the index: all of them, with status and what amended what
 │   ├── 0000-template.md
-│   └── 0001-…0083-….md         # 0001 external client architecture … 0083 two briefing faults are lookups, not judgments
+│   └── 0001-…0084-….md         # 0001 external client architecture … 0084 a calibration records what it was billed
 ├── lessons/                    # case studies of things that went wrong, or almost did
 │   ├── phase-6-hardening.md          # free-form Hypothesis.name → schema tightening
 │   ├── live-eval-noise-sources.md    # the five buckets a weird live failure falls into
@@ -231,7 +231,7 @@ docs/
 └── interview-map.md            # (planned — Phase 8) component → JD skill → talking points
 ```
 
-ADR process: any decision that constrains future work gets an ADR before or with the implementing PR. Status flow is proposed, accepted, superseded. An accepted ADR is never rewritten — a later ADR amends or supersedes it and both stay on the shelf. The set runs 0001 through 0083; [`docs/ADR/README.md`](docs/ADR/README.md) lists every one with its status and records which later ADR moved which.
+ADR process: any decision that constrains future work gets an ADR before or with the implementing PR. Status flow is proposed, accepted, superseded. An accepted ADR is never rewritten — a later ADR amends or supersedes it and both stay on the shelf. The set runs 0001 through 0084; [`docs/ADR/README.md`](docs/ADR/README.md) lists every one with its status and records which later ADR moved which.
 
 Before opening a PR touching schemas, prompts, or the state machine, read [`docs/architecture-principles.md`](docs/architecture-principles.md). It codifies the rules that came out of past PRs — most importantly "default to the structural fix, not the band-aid." When you hit a symptom that a prompt tweak would patch, the first design conversation is whether the schema should reject the class of bug instead. See [`docs/lessons/phase-6-hardening.md`](docs/lessons/phase-6-hardening.md) for the case study that produced this rule.
 
@@ -336,7 +336,7 @@ that produced the `evals.yml` gate gap.
 | Harness engineering, guardrails | tier policy, platform approvals, budgets, ADR 0003 |
 | Agent memory | `src/incident_commander/memory/` (planned — Phase 4), measured lift, ADR 0005 |
 | Skills, sub-agents, context engineering | `src/incident_commander/skills/` (planned — Phase 5), log-diver sub-agent, compaction |
-| Prompt and context caching economics | ADR 0006, cost metrics in eval reports |
+| Prompt and context caching economics | ADR 0015 (cache tokens metered and priced), ADR 0084 (calibration billed usage, the repeated question cached), cost metrics in eval reports |
 | Adversarial robustness, injection defense | `evals/scenarios/adversarial/`, `docs/threat-model.md` (both planned — Phase 7) |
 | Human-in-the-loop design | approvals flow, briefings, escalation rail |
 | LLM observability and cost | `src/incident_commander/observability/` (planned — Phase 8), OTel spans, per-incident dashboards |

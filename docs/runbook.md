@@ -1395,6 +1395,45 @@ legs on that model (`model_setting: JUDGE_MODEL_OVERRIDE`; refused for the selec
    on another model or on a variant rubric does not vouch for them. The register stays
    `99181bf074ec` until the owner rules.
 
+## Judge calibration: the billed figure and prompt caching (WO-R3-384, WO-R3-385)
+
+Owner O-62: "record the billed figure, not the estimate." Every `make judge-calibration` report now
+says what it was billed ([ADR 0084](ADR/0084-a-calibration-records-what-it-was-billed-and-caches-its-repeated-question.md)).
+The first line of each judge's summary ends:
+
+```text
+briefing_judge  (report 0123456789ab, client live)  billed $1.07 (195 calls, cache-read 58%)
+```
+
+and, when the owner-label leg ran, a second line gives that leg on its own
+(`  label leg   billed $0.81 (145 calls, cache-read 66%)`). The numbers are illustrative.
+
+* **What "billed" means.** The API's own usage block for every call the calibration made — input,
+  output, cache-write and cache-read tokens, a call that was billed and then failed included —
+  summed and priced by the pinned price map in `llm/pricing.py` (cache reads at the cache-read rate, writes at
+  the write rate). It is not an estimate made before the run. It is also not the invoice: the
+  Anthropic console stays the authority, and the two differ only if a price changed and the map
+  did not.
+* **N calls** counts every call, repair re-asks and failed-but-billed calls included.
+* **cache-read P%** is the share of all prompt tokens served from the cache. `n/a` means no prompt
+  token was billed (the free path, where a script answers and everything reads `$0.00`).
+* **In the JSON**: `usd_used` (dollars, to the microdollar) and `usage` — the totals, `by_leg`
+  (`traps`, `labels`), `by_model` (each with its `cache_minimum_tokens`), and `cache_markers`
+  (what the request marked). A report written before 2026-10-12 has no `usage` and reads
+  `usd_used: null`; `evals.judge_calibration.billing.billed_of` reads either kind.
+
+**Caching.** The paid path marks the rubric (system prompt) on every call, as the agent's client
+always has, and — when `REPS` is above 1, which it is by default — the question too, so asks 2..5 of
+each question read it from the cache. Haiku 4.5 caches nothing under 4,096 tokens and the briefing
+rubric is ~3,300, so on Haiku only questions long enough to carry the prompt past 4,096 (most
+labelled briefings; not the short traps) cache at all. The rubric is not padded to get there: its
+bytes are what the calibration measures. The eval-time judge and the selector inside a run ask each
+question once, so only their rubric is marked (it caches on Sonnet, not on Haiku).
+
+**The deferred-paid-runs ledger.** An entry carries the estimate before the run and the billed
+figure after it, copied from this line. Until the next paid leg prints one, every cost quoted for
+the oracle-gap pilot or the next calibration sweep is an estimate and says so.
+
 ## Debugging one scenario
 
 The per-scenario trace file is the fastest path:

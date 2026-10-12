@@ -575,8 +575,12 @@ class TestNoJudgeNumberWithoutACalibrationReport:
                 usd=Decimal("0.13"),
                 wall_seconds=41.2,
                 judge_overall=judge_overall,
+                judge_model=self._JUDGE_MODEL,
             )
         ]
+
+    #: The model the rows' judge ran on, and the one the registered report below measured.
+    _JUDGE_MODEL: Final[str] = "claude-haiku-4-5"
 
     def test_the_register_holds_exactly_the_label_leg_report(self) -> None:
         """The label leg ran once on the owner's 16 labels (2026-10-11, INC-010)."""
@@ -591,15 +595,29 @@ class TestNoJudgeNumberWithoutACalibrationReport:
         assert "no judge number is reported before" in summary["judge_gate"]
 
     def test_the_number_is_printed_once_the_judge_is_calibrated(
-        self, monkeypatch: pytest.MonkeyPatch
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
+        """The registered id must name a report on disk that measured the rows' judge model.
+
+        Since WO-R3-383 the gate reads the report (``judge_calibration_gate``): an id with no
+        file behind it, a rubric variant or another model is refused, so this writes one.
+        """
         monkeypatch.setattr(
             "evals.research_report.JUDGE_CALIBRATION_REPORTS",
             {LEADERBOARD_JUDGE: "0123456789ab"},
         )
-        summary = arm_summary(self._ARM, self._rows())
+        report = calibrate(
+            BRIEFING_JUDGE,
+            client=_agreeing(BRIEFING_JUDGE),
+            model=self._JUDGE_MODEL,
+            now=_AT,
+            report_id="0123456789ab",
+        )
+        write_report(report, root=tmp_path)
+        summary = arm_summary(self._ARM, self._rows(), root=tmp_path)
         assert summary["judge_mean_overall"] == pytest.approx(0.85)
         assert summary["judge_calibration_report_id"] == "0123456789ab"
+        assert "judge_calibration_refused" not in summary
 
     def test_the_coverage_count_is_never_withheld(self) -> None:
         """How many runs were judged is a fact about the arm, not about the judge.
@@ -645,6 +663,7 @@ class TestTheRoleWordIsAlwaysPrefixed:
         "src/incident_commander/agent/selection.py",
         "src/incident_commander/llm/prompts/verification_judge.md",
         "src/incident_commander/llm/prompts/briefing_judge.md",
+        "src/incident_commander/llm/prompts/briefing_judge.v2-minus-copied.md",
         "src/incident_commander/llm/prompts/candidate_selector.md",
     )
     #: The three other things the word correctly names here, declared. Adding to

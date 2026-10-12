@@ -39,6 +39,7 @@ from evals.candidate_metrics import (
     world_key,
 )
 from evals.graders.deterministic import GradeDimension, is_vacuous_detail
+from evals.graders.llm_judge import JUDGE_PROMPT
 from evals.graders.root_cause import coverage_over
 from evals.runner import RunReport, ScenarioOutcome
 from evals.scenarios.loader import load_scenarios
@@ -273,6 +274,9 @@ class Row:
     #: ``execution_mode``, because the flag is the claim the provenance makes about itself
     #: and this document's job is to refuse it, not to re-derive it.
     rehearsal: bool = False
+    #: The model the run's briefing judge was called on (``provenance.judge_model``), which a
+    #: registered judge calibration must have measured before its mean is shown (WO-R3-383).
+    judge_model: str | None = None
 
     @property
     def arm(self) -> tuple[str, str, str]:
@@ -386,6 +390,7 @@ def build_row(
         judge_overall=outcome.judge_score.overall if outcome.judge_score else None,
         recorded_world=recorded_fingerprint(outcome),
         rehearsal=provenance.rehearsal,
+        judge_model=provenance.judge_model,
     )
 
 
@@ -548,20 +553,31 @@ def safety_kind(detail: str) -> str:
     )
 
 
-def arm_summary(arm: tuple[str, str, str], rows: Sequence[Row]) -> dict[str, Any]:
+def arm_summary(
+    arm: tuple[str, str, str], rows: Sequence[Row], *, root: Path = REPO_ROOT
+) -> dict[str, Any]:
     """One leaderboard row: correctness, and the budget beside it (02 § 8).
 
     ``judge_mean_overall`` is a statement about a MODEL'S OPINION, so it is withheld
-    until ``LEADERBOARD_JUDGE`` has an id in ``JUDGE_CALIBRATION_REPORTS`` (WP-6.3).
-    ``judged_runs`` is NOT gated, on ``_selector_number``'s split: it is a coverage
-    fact, and hiding it would leave "not calibrated" indistinguishable from
-    "never judged".
+    until ``LEADERBOARD_JUDGE`` has an id in ``JUDGE_CALIBRATION_REPORTS`` (WP-6.3) whose
+    report measured the production rubric on the model these runs' judge was called on
+    (``judge_calibration_gate``, WO-R3-383). ``judged_runs`` is NOT gated, on
+    ``_selector_number``'s split: it is a coverage fact, and hiding it would leave "not
+    calibrated" indistinguishable from "never judged".
     """
     coverage = coverage_over(
         ((row.root_cause_graded, row.root_cause_correct) for row in rows), total=len(rows)
     )
     judged = [row.judge_overall for row in rows if row.judge_overall is not None]
-    calibration_id = judge_calibration_report_for(LEADERBOARD_JUDGE)
+    gate = judge_calibration_gate(
+        LEADERBOARD_JUDGE,
+        sorted(
+            {row.judge_model for row in rows if row.judge_overall is not None and row.judge_model}
+        ),
+        root=root,
+    )
+    calibration_id = gate["report_id"] if gate["opens"] else None
+    refused = gate["why_not"] if gate["report_id"] is not None and not gate["opens"] else ""
     return {
         **dict(zip(ARM_KEYS, arm, strict=True)),
         "arm": arm_label(arm),
@@ -588,11 +604,14 @@ def arm_summary(arm: tuple[str, str, str], rows: Sequence[Row]) -> dict[str, Any
         "judge_mean_overall": (
             _mean([float(value) for value in judged])
             if calibration_id is not None or not judged
-            else WITHHELD_JUDGE
+            else (f"withheld: {refused} (plan 02:243)" if refused else WITHHELD_JUDGE)
         ),
         "judged_runs": len(judged),
         "judge": LEADERBOARD_JUDGE,
         "judge_calibration_report_id": calibration_id,
+        # Only when a registered report was refused, so a document whose gate opens
+        # regenerates byte for byte.
+        **({"judge_calibration_refused": refused} if refused else {}),
         "judge_gate": JUDGE_GATE_RULE,
     }
 
@@ -748,14 +767,14 @@ def _grouping(rows: Sequence[Row]) -> dict[str, Any]:
     }
 
 
-def _leaderboard(rows: Sequence[Row], model: str) -> dict[str, Any]:
+def _leaderboard(rows: Sequence[Row], model: str, *, root: Path = REPO_ROOT) -> dict[str, Any]:
     grouped = _by_arm(rows)
     return {
         "model": model,
         "one_model_per_table": (
             "enforced by refusal in evals/regression.py::model_refusal, not by a footnote"
         ),
-        "arms": [arm_summary(arm, grouped[arm]) for arm in arms_of(rows)],
+        "arms": [arm_summary(arm, grouped[arm], root=root) for arm in arms_of(rows)],
     }
 
 
@@ -1020,6 +1039,52 @@ def judge_calibration_report_for(judge: str) -> str | None:
     different way.
     """
     return JUDGE_CALIBRATION_REPORTS.get(judge)
+
+
+def judge_calibration_gate(
+    judge: str, judge_models: Sequence[str], *, root: Path = REPO_ROOT
+) -> dict[str, Any]:
+    """Whether the judge's registered calibration report may release its numbers.
+
+    ``calibration_gate``'s rule, one role further out (WO-R3-383, owner O-61): the report must
+    exist, must have measured the production rubric (``JUDGE_PROMPT``, not a calibration
+    variant), and must have measured the model the judged runs' judge was called on
+    (``provenance.judge_model``). A report asked on ``JUDGE_MODEL_OVERRIDE`` is refused for the
+    leaderboard's judge unless the leaderboard's judge ran on that model too. ``judge_models``
+    empty (no judged run) checks the rubric only: there is no number to release.
+    """
+    report_id = judge_calibration_report_for(judge)
+    gate: dict[str, Any] = {
+        "report_id": report_id,
+        "model": None,
+        "rubric": None,
+        "opens": False,
+        "why_not": "",
+    }
+    if report_id is None:
+        gate["why_not"] = f"no calibration report is registered for {judge} (plan 02:243)"
+        return gate
+    for path in artifacts.versions("judge_calibration", judge, root=root):
+        if path.name.endswith(f".{report_id}.json"):
+            report = json.loads(path.read_text(encoding="utf-8"))
+            gate["model"] = report.get("model")
+            gate["rubric"] = (report.get("rubric") or {}).get("prompt")
+    if gate["rubric"] != JUDGE_PROMPT:
+        gate["why_not"] = (
+            f"calibration report {report_id} measured rubric "
+            f"{gate['rubric'] or 'that it does not name'}, and the judge every run calls is "
+            f"{JUDGE_PROMPT}"
+        )
+        return gate
+    others = [model for model in judge_models if model != gate["model"]]
+    if others:
+        gate["why_not"] = (
+            f"calibration report {report_id} measured {gate['model'] or 'no model it names'}, "
+            f"and this arm's {judge} ran on {', '.join(others)}"
+        )
+        return gate
+    gate["opens"] = True
+    return gate
 
 
 def calibration_report_for(arm: str) -> str | None:
@@ -2213,7 +2278,7 @@ def assemble(root: Path, archives: Sequence[str] = SCOPE) -> dict[str, Any]:
 
     sections: dict[str, Any] = {
         "grouping": _grouping(rows),
-        "strategy_leaderboard": _leaderboard(rows, model),
+        "strategy_leaderboard": _leaderboard(rows, model, root=root),
         "accuracy_by_difficulty": _accuracy_by(rows, "difficulty"),
         "accuracy_by_family": _accuracy_by(rows, "family"),
         "safety_by_strategy": _safety_by_strategy(rows),

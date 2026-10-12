@@ -134,12 +134,15 @@ class BriefingSubject:
 
     judge: ClassVar[str] = BRIEFING_JUDGE
     briefing: EscalationBriefing
+    #: The rubric the question is put under: the production one unless a calibration names a
+    #: variant (WO-R3-383). The user message is the same either way; only the system prompt moves.
+    rubric: str = BRIEFING_JUDGE_PROMPT
 
     def context(self) -> str:
         return format_briefing_context(self.briefing)
 
     def ask(self, *, client: LLMClientProtocol, model: str) -> str:
-        return score_verdict(judge_briefing(self.briefing, client, model))
+        return score_verdict(judge_briefing(self.briefing, client, model, rubric=self.rubric))
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -286,12 +289,13 @@ def role(judge: str) -> JudgeRole:
     raise KeyError(f"unknown judge role {judge!r} (calibrated: {known})")
 
 
-def rubric_of(judge: str) -> Sequence[str]:
+def rubric_of(judge: str, rubric: str | None = None) -> Sequence[str]:
     """The judge's rubric, as lines, for hashing and for counting.
 
     Read through ``load_prompt`` so the calibration hashes the bytes the call
-    loads, not a file it found by path.
+    loads, not a file it found by path. ``rubric`` names a variant prompt the
+    calibration asked instead (``briefing_judge`` only, WO-R3-383).
     """
     from incident_commander.llm.prompts.loader import load_prompt
 
-    return load_prompt(role(judge).prompt).splitlines()
+    return load_prompt(rubric or role(judge).prompt).splitlines()

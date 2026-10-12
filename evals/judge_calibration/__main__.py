@@ -11,6 +11,9 @@ leg is DEFERRED (O-22): proved against the fake, costed in
 is called on; the judge legs keep ``JUDGE_MODEL`` (WO-R3-364). ``--packet`` counts one label
 packet's held-out briefings and ``--dev-packet`` shows another beside it, not counted
 (WO-R3-378, owner O-58, ADR 0082); a label file of several packets needs ``--packet``.
+``--rubric`` asks the briefing judge under a named rubric variant and ``--judge-model-override``
+asks the judge legs on another model than ``JUDGE_MODEL``; the report records both, and the
+free path prints the exact paid command a run with the same flags would take (WO-R3-383, O-61).
 """
 
 from __future__ import annotations
@@ -21,10 +24,12 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any, Final
 
+from evals.graders.llm_judge import BRIEFING_JUDGE_RUBRICS
 from evals.judge_calibration import label_leg, labels, track_record
 from evals.judge_calibration.fakes import FakeJudgeClient, answers_for, answers_for_labels
 from evals.judge_calibration.harness import (
     FAKE_CLIENT,
+    JUDGE_MODEL_OVERRIDE_SETTING,
     LIVE_CLIENT,
     SELF_AGREEMENT_REPS,
     CalibrationReport,
@@ -43,6 +48,7 @@ from evals.judge_calibration.roles import (
 )
 from evals.judge_calibration.traps import traps_for
 from incident_commander.config import ModelRole
+from incident_commander.llm.pricing import MODEL_PRICING
 
 #: The imperfection the fake judge is scripted with, deliberately: a fake that agreed
 #: with every trap would exercise the accuracy numerator and nothing else, so the
@@ -78,6 +84,7 @@ def _summarize(report: CalibrationReport) -> list[str]:
         *_model_lines(report),
         f"  rubric      {report.rubric['prompt']}.md  sha256 {report.rubric['sha256'][:12]}  "
         f"{report.rubric['lines']} lines",
+        *_variant_lines(report),
         f"  traps       {traps['agreed']}/{traps['answered']} agreed"
         f"   accuracy {traps['accuracy']}"
         f"   false approve {traps['false_approves']}/{traps['asserted_refusals']}"
@@ -115,10 +122,24 @@ def _summarize(report: CalibrationReport) -> list[str]:
     return lines
 
 
+def _variant_lines(report: CalibrationReport) -> list[str]:
+    """A rubric variant says what it drops, and which traps test a check it does not carry."""
+    rubric = report.rubric
+    if "variant_of" not in rubric:
+        return []
+    return [
+        f"    VARIANT    of {rubric['variant_of']}.md, not the production rubric; drops "
+        f"{', '.join(repr(c) for c in rubric['removed_checks'])}; traps testing a dropped check "
+        f"still count: {', '.join(rubric['traps_for_removed_checks'])}"
+    ]
+
+
 def _model_lines(report: CalibrationReport) -> list[str]:
     """Which model answered and where it came from; a selector on the judge's pin is flagged."""
     role = report.model_role
     source = model_setting(role) + ("" if role is None else f", role {role.value}")
+    if report.judge_model_override is not None:
+        source = f"{JUDGE_MODEL_OVERRIDE_SETTING}={report.judge_model_override}, not JUDGE_MODEL"
     if report.is_a_measurement:
         lines = [f"  model       {report.model}  from {source}"]
     else:
@@ -220,6 +241,34 @@ def _scripted_wrong_label(path: Path) -> tuple[str, ...]:
     return tuple(str(row["id"]) for row in rows[:1])
 
 
+def paid_command(args: argparse.Namespace) -> str:
+    """The exact ``make`` line that asks the real judge with the flags this free run was given.
+
+    Printed on the free path so the rehearsal and the paid run cannot drift apart: the paid run
+    is this line, copied, after the owner's yes (PROTOCOL: readiness is not authorization).
+    """
+    parts = ["make judge-calibration"]
+    if args.judge:
+        parts.extend(f"JUDGE={judge}" for judge in args.judge)
+    if args.reps != SELF_AGREEMENT_REPS:
+        parts.append(f"REPS={args.reps}")
+    if args.labels is not None:
+        default = Path(args.labels).resolve() == labels.LABELS_FILE.resolve()
+        parts.append("LABELS=1" if default else f"LABELS={args.labels}")
+    if args.packet is not None:
+        parts.append(f"PACKET={args.packet}")
+    if args.dev_packet is not None:
+        parts.append(f"DEV_PACKET={args.dev_packet}")
+    if args.rubric is not None:
+        parts.append(f"RUBRIC={args.rubric}")
+    if args.judge_model_override is not None:
+        parts.append(f"{JUDGE_MODEL_OVERRIDE_SETTING}={args.judge_model_override}")
+    if args.model_role is not None:
+        parts.append(f"MODEL_ROLE={args.model_role}")
+    parts.extend(["LIVE=1", "YES_SPEND=1", "WRITE=1"])
+    return " ".join(parts)
+
+
 def _scan() -> int:
     print("Trap sets (plan 03 § 107):")
     for judge in CALIBRATED_ROLES:
@@ -296,6 +345,23 @@ def main(argv: Sequence[str] | None = None) -> int:
         type=int,
         help="briefing_judge only: score this packet beside --packet, marked NOT COUNTED.",
     )
+    parser.add_argument(
+        "--rubric",
+        choices=list(BRIEFING_JUDGE_RUBRICS),
+        help=(
+            f"{BRIEFING_JUDGE} only: ask every trap and label under this rubric instead of the "
+            "production one; the report records its file name and sha256 (WO-R3-383)."
+        ),
+    )
+    parser.add_argument(
+        "--judge-model-override",
+        metavar="MODEL",
+        help=(
+            "the judge legs ask this model instead of JUDGE_MODEL, and the report says "
+            f"model_setting: {JUDGE_MODEL_OVERRIDE_SETTING}. Not for {CANDIDATE_SELECTOR}, "
+            "which MODEL_ROLE governs (WO-R3-383)."
+        ),
+    )
     args = parser.parse_args(argv)
 
     if args.scan:
@@ -327,6 +393,32 @@ def main(argv: Sequence[str] | None = None) -> int:
             file=sys.stderr,
         )
         return 2
+    if args.rubric is not None and judges != (BRIEFING_JUDGE,):
+        print(
+            f"refusing: --rubric (RUBRIC=) names a {BRIEFING_JUDGE} rubric; pass "
+            f"--judge {BRIEFING_JUDGE} and no other judge.",
+            file=sys.stderr,
+        )
+        return 2
+    override = args.judge_model_override
+    if override is not None and CANDIDATE_SELECTOR in judges:
+        print(
+            f"refusing: --judge-model-override ({JUDGE_MODEL_OVERRIDE_SETTING}=) replaces "
+            f"JUDGE_MODEL for the judge legs only, and {CANDIDATE_SELECTOR} would be asked "
+            "too; name the judge leg(s) with --judge (JUDGE=). The selector's model is "
+            "MODEL_ROLE's (WO-R3-364).",
+            file=sys.stderr,
+        )
+        return 2
+    if override is not None and override not in MODEL_PRICING:
+        known = ", ".join(sorted(MODEL_PRICING))
+        print(
+            f"refusing: {JUDGE_MODEL_OVERRIDE_SETTING}={override!r} has no row in MODEL_PRICING, "
+            f"so its calls would be billed at the most expensive rate on record. Priced ids: "
+            f"{known}.",
+            file=sys.stderr,
+        )
+        return 2
     if args.live and not args.yes_spend:
         print(
             "refusing: --live asks the real judge and spends money. Pass "
@@ -354,7 +446,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     exit_code = 0
     for judge in judges:
-        model = leg_model(judge, settings, model_role) if args.live else _FAKE_MODEL
+        model = leg_model(judge, settings, model_role, override) if args.live else _FAKE_MODEL
         if not args.live:
             script = answers_for(
                 judge,
@@ -376,6 +468,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                 model_role=leg_role(judge, model_role),
                 packet=args.packet,
                 dev_packet=args.dev_packet,
+                rubric=args.rubric,
+                judge_model_override=override,
             )
         except (NoLabelsError, labels.LabelError) as err:
             print(str(err), file=sys.stderr)
@@ -386,6 +480,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         if args.write:
             print(f"  written: {write_report(report)}")
         print()
+    if not args.live:
+        print(
+            f"paid command (SPENDS MONEY; the owner's yes for THIS run first): {paid_command(args)}"
+        )
     return exit_code
 
 

@@ -46,6 +46,8 @@ from incident_commander.llm.prompts.shared_rules import (
     render,
 )
 
+# `briefing_judge.v2-minus-copied` (WO-R3-383) is rubric v2 minus one check, so it carries every
+# shared rule v2 carries and is a reader wherever `briefing_judge` is, in every list below.
 # The prompts O-19 names as readers of the stuck-chain rule: the planner that hands
 # off, the fix table that picks the tool, and the judge that grades the outcome.
 # Written down rather than derived, so the test below compares it against the
@@ -53,6 +55,7 @@ from incident_commander.llm.prompts.shared_rules import (
 # that starts are each a change to the decision.
 _STUCK_CHAIN_RULE_READERS: Final[tuple[str, ...]] = (
     "briefing_judge",
+    "briefing_judge.v2-minus-copied",
     "investigation_planner",
     "remediation_planner",
 )
@@ -62,6 +65,7 @@ _STUCK_CHAIN_RULE_READERS: Final[tuple[str, ...]] = (
 # speculation. Written down and compared against the directory in both directions, as above.
 _REMAINDER_RULE_READERS: Final[tuple[str, ...]] = (
     "briefing_judge",
+    "briefing_judge.v2-minus-copied",
     "briefing_writer",
 )
 
@@ -72,6 +76,7 @@ _REMAINDER_RULE_READERS: Final[tuple[str, ...]] = (
 # the directory in both directions, as above.
 _CHAIN_NODE_RULE_READERS: Final[tuple[str, ...]] = (
     "briefing_judge",
+    "briefing_judge.v2-minus-copied",
     "investigation_planner",
     "remediation_planner",
 )
@@ -82,6 +87,7 @@ _CHAIN_NODE_RULE_READERS: Final[tuple[str, ...]] = (
 # the directory in both directions, as above.
 _STALLED_CHAIN_RULE_READERS: Final[tuple[str, ...]] = (
     "briefing_judge",
+    "briefing_judge.v2-minus-copied",
     "briefing_writer",
     "investigation_planner",
     "remediation_planner",
@@ -94,6 +100,7 @@ _STALLED_CHAIN_RULE_READERS: Final[tuple[str, ...]] = (
 # words would be asking a writer to paraphrase a block it is already handed.
 _ATTRIBUTION_RULE_READERS: Final[tuple[str, ...]] = (
     "briefing_judge",
+    "briefing_judge.v2-minus-copied",
     "investigation_planner",
     "remediation_planner",
 )
@@ -195,6 +202,14 @@ _EXPECTED_HASHES: Final[dict[str, str]] = {
     # that decided each score. The shared rules are kept word for word, so no other hash moves.
     # The calibration report's own rubric sha (over the served lines) moves 6140102d… → 20230ebc….
     "briefing_judge": ("9f684d7446ce8fbc4904eeaf0366be65a9a4f61d8d314ce781d0a3dc7af4e963"),
+    # NEW by WO-R3-383 / owner O-61 item 3 (ADR 0082's 2026-10-12 note): rubric v2 with the
+    # `derived, not copied` check and its example removed — that pattern is a deterministic lookup
+    # now (WO-R3-382, ADR 0083) — every other byte as `briefing_judge.md`. A CALIBRATION variant:
+    # only `make judge-calibration RUBRIC=` loads it. A new file, so nothing beside it moved:
+    # `briefing_judge` keeps 9f684d74… above (pinned again by test_rubric_variant_judge_model.py).
+    "briefing_judge.v2-minus-copied": (
+        "71ab6a8293ddca1205bdc467c607745585ace751cda64b23ea4dc40d9879abff"
+    ),
     # Moved by WO-R3-226 / ADR 0056: two sentences cited ADR 0008 for "you get one Tier-1
     # call", which is now true of a PLAN and not of a run. The rules themselves are
     # unchanged — a plan still proposes exactly one action. Moved again by WO-R3-284 /

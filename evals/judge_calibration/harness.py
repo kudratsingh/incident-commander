@@ -16,7 +16,10 @@ judgement. Every report carries the sha256 and line count of the prompt bytes it
 calibrated, which is what makes § 110's one-line-at-a-time rubric rule checkable.
 Writing is a separate act: ``write_report`` is versioned and exclusive-create, because
 two calibrations of one rubric are two facts (invariant 9). Every leg asks ``JUDGE_MODEL``
-except the selector's, which may ask a run role's model (``leg_model``, WO-R3-364).
+except the selector's, which may ask a run role's model (``leg_model``, WO-R3-364), and a judge
+leg given ``JUDGE_MODEL_OVERRIDE``, which asks that model instead and says so in the report. The
+briefing judge may be asked under a named rubric variant (``BRIEFING_JUDGE_RUBRICS``), whose file
+name and hash the report records (WO-R3-383, owner O-61).
 """
 
 from __future__ import annotations
@@ -24,7 +27,7 @@ from __future__ import annotations
 import hashlib
 import json
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from types import MappingProxyType
@@ -32,19 +35,25 @@ from typing import Any, Final
 from uuid import uuid4
 
 from evals import artifacts
-from evals.graders.llm_judge import BRIEFING_JUDGE_CHECKS
+from evals.graders.llm_judge import BRIEFING_JUDGE_CHECKS, JUDGE_PROMPT, checks_of
 from evals.judge_calibration.label_leg import label_agreement
 from evals.judge_calibration.roles import (
     ABSENT_ROLES,
     BRIEFING_JUDGE,
     CALIBRATED_ROLES,
     CANDIDATE_SELECTOR,
+    BriefingSubject,
     is_approval,
     role,
     rubric_of,
 )
 from evals.judge_calibration.track_record import ground_truth_agreement
-from evals.judge_calibration.traps import MINIMUM_TRAPS_PER_JUDGE, TrapCase, traps_for
+from evals.judge_calibration.traps import (
+    BRIEFING_CHECK_TRAPS,
+    MINIMUM_TRAPS_PER_JUDGE,
+    TrapCase,
+    traps_for,
+)
 from incident_commander.config import ModelRole, Settings
 from incident_commander.llm.client import LLMClientProtocol, LLMError
 
@@ -72,8 +81,16 @@ ROLE_MODEL_SETTINGS: Final[Mapping[ModelRole, str]] = MappingProxyType(
 )
 
 
-def model_setting(model_role: ModelRole | None) -> str:
-    """The setting a leg's model comes from: ``JUDGE_MODEL``, or the role's own pin."""
+#: The make variable (``--judge-model-override``) a judge leg reads its model from INSTEAD of
+#: ``JUDGE_MODEL`` (WO-R3-383, owner O-61): a trial of another judge model, recorded as such. Not
+#: a Settings field — the judge every run calls keeps ``JUDGE_MODEL``.
+JUDGE_MODEL_OVERRIDE_SETTING: Final[str] = "JUDGE_MODEL_OVERRIDE"
+
+
+def model_setting(model_role: ModelRole | None, *, overridden: bool = False) -> str:
+    """The setting a leg's model comes from: ``JUDGE_MODEL``, the override, or the role's pin."""
+    if overridden:
+        return JUDGE_MODEL_OVERRIDE_SETTING
     return JUDGE_MODEL_SETTING if model_role is None else ROLE_MODEL_SETTINGS[model_role]
 
 
@@ -82,15 +99,31 @@ def leg_role(judge: str, model_role: ModelRole | None) -> ModelRole | None:
     return model_role if judge == CANDIDATE_SELECTOR else None
 
 
-def leg_model(judge: str, settings: Settings, model_role: ModelRole | None) -> str:
+def leg_model(
+    judge: str,
+    settings: Settings,
+    model_role: ModelRole | None,
+    judge_model_override: str | None = None,
+) -> str:
     """The model id one leg is asked on, on the live path.
 
     ``Settings.model_for_role`` is the lookup the runner makes for ``--model-role``, so the
     selector is calibrated on the id an arm of that role calls it on. The judge legs keep
-    ``JUDGE_MODEL`` whatever role is asked for.
+    ``JUDGE_MODEL`` whatever role is asked for, unless ``judge_model_override`` names another
+    model for them (WO-R3-383); the selector is not a judge and is refused the override.
     """
+    if judge_model_override is not None:
+        if judge == CANDIDATE_SELECTOR:
+            raise ValueError(_SELECTOR_REFUSES_OVERRIDE)
+        return judge_model_override
     asked = leg_role(judge, model_role)
     return settings.judge_model if asked is None else settings.model_for_role(asked)
+
+
+_SELECTOR_REFUSES_OVERRIDE: Final[str] = (
+    f"{JUDGE_MODEL_OVERRIDE_SETTING} replaces JUDGE_MODEL for the judge legs only; "
+    f"{CANDIDATE_SELECTOR} is called on a run's own model (MODEL_ROLE picks it, WO-R3-364)"
+)
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -142,6 +175,9 @@ class CalibrationReport:
     label_agreement: Mapping[str, Any] | None = None
     # The run role ``model`` was resolved from; ``None`` means ``JUDGE_MODEL`` (WO-R3-364).
     model_role: ModelRole | None = None
+    # The model a judge leg was told to ask instead of ``JUDGE_MODEL`` (WO-R3-383), or ``None``.
+    # On the live path it IS ``model``; on the free path ``model`` is the script's id.
+    judge_model_override: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         payload: dict[str, Any] = {
@@ -151,9 +187,13 @@ class CalibrationReport:
             "generated_at": self.generated_at.isoformat(),
             "model": self.model,
             # Where ``model`` came from: the role asked for (selector leg only) and the
-            # setting a live run of this leg reads. The register compares ``model`` alone.
+            # setting a live run of this leg reads (``JUDGE_MODEL_OVERRIDE`` for a trial of
+            # another judge model). The judge register refuses a report whose ``model`` is not
+            # the one the leaderboard's judge ran on (research_report.judge_calibration_gate).
             "model_role": None if self.model_role is None else self.model_role.value,
-            "model_setting": model_setting(self.model_role),
+            "model_setting": model_setting(
+                self.model_role, overridden=self.judge_model_override is not None
+            ),
             "judge_client": self.judge_client,
             "reps": self.reps,
             "protocol": PROTOCOL,
@@ -178,6 +218,13 @@ class CalibrationReport:
         }
         if self.label_agreement is not None:
             payload["label_agreement"] = dict(self.label_agreement)
+        if self.judge_model_override is not None:
+            payload["judge_model_override"] = {
+                "model": self.judge_model_override,
+                "setting": JUDGE_MODEL_OVERRIDE_SETTING,
+                "replaces": JUDGE_MODEL_SETTING,
+                "why": JUDGE_MODEL_OVERRIDE_WHY,
+            }
         return payload
 
     def to_json(self) -> str:
@@ -318,11 +365,13 @@ def _self_agreement(outcomes: Sequence[TrapOutcome], *, reps: int) -> dict[str, 
     }
 
 
-def _rubric(judge: str) -> dict[str, Any]:
-    lines = rubric_of(judge)
+def _rubric(judge: str, variant: str | None = None) -> dict[str, Any]:
+    lines = rubric_of(judge, variant)
     body = "\n".join(lines)
+    prompt = variant or role(judge).prompt
     rubric: dict[str, Any] = {
-        "prompt": role(judge).prompt,
+        "prompt": prompt,
+        "file": f"{prompt}.md",
         "sha256": hashlib.sha256(body.encode("utf-8")).hexdigest(),
         "lines": len(lines),
         "one_line_at_a_time": (
@@ -335,8 +384,37 @@ def _rubric(judge: str) -> dict[str, Any]:
     }
     if judge == BRIEFING_JUDGE:
         # Rubric v2 (WO-R3-378): the checks this rubric applies, in order, by name.
-        rubric["checks"] = list(BRIEFING_JUDGE_CHECKS)
+        checks = checks_of(prompt)
+        rubric["checks"] = list(checks)
+        if prompt != JUDGE_PROMPT:
+            # A variant (WO-R3-383): what it is a variant of, which checks it drops, and which
+            # traps test a check it does not carry — their verdicts still count, and a
+            # disagreement there is the variant doing what it was built to do.
+            removed = [c for c in BRIEFING_JUDGE_CHECKS if c not in checks]
+            rubric["variant_of"] = JUDGE_PROMPT
+            rubric["production"] = False
+            rubric["removed_checks"] = removed
+            rubric["traps_for_removed_checks"] = [
+                case_id for check in removed for case_id in BRIEFING_CHECK_TRAPS[check]
+            ]
+            rubric["why_removed"] = VARIANT_WHY
     return rubric
+
+
+#: Why the ``briefing_judge.v2-minus-copied`` variant exists, in the report (owner O-61).
+VARIANT_WHY: Final[str] = (
+    "owner O-61 item 3 (WO-R3-383): a step copied from a non-subject dead-letter row's own "
+    "suggested_fix is now a deterministic lookup in the BRIEFING grade dimension (WO-R3-382, "
+    "ADR 0083), so this trial asks rubric v2 without that check. A calibration variant only: "
+    "the judge every run calls keeps briefing_judge.md"
+)
+
+#: Why a report may name a model other than ``JUDGE_MODEL`` (owner O-61).
+JUDGE_MODEL_OVERRIDE_WHY: Final[str] = (
+    "a trial of another judge model (owner O-61 item 3, WO-R3-383). The leaderboard's judge "
+    "keeps JUDGE_MODEL, so research_report.judge_calibration_gate refuses this report for it "
+    "unless the leaderboard's judge ran on this model"
+)
 
 
 def _determinism(client_kind: str) -> dict[str, Any]:
@@ -374,6 +452,8 @@ def calibrate(
     model_role: ModelRole | None = None,
     packet: int | None = None,
     dev_packet: int | None = None,
+    rubric: str | None = None,
+    judge_model_override: str | None = None,
 ) -> CalibrationReport:
     """Calibrate one judge and return its report. Writes nothing.
 
@@ -382,9 +462,24 @@ def calibrate(
     ``packet`` / ``dev_packet`` name the held-out packet whose agreement counts and the dev
     packet shown beside it, not counted (WO-R3-378, ADR 0082); both need ``labels``.
     ``model_role`` (``candidate_selector`` only) records the run role ``model`` came from.
+    ``rubric`` (``briefing_judge`` only) asks every trap and label under that named rubric
+    variant; ``judge_model_override`` (judge legs only) records that ``model`` was asked in place
+    of ``JUDGE_MODEL`` — on the live path the two must be the same id (WO-R3-383).
     """
     if reps < 1:
         raise ValueError(f"reps must be at least 1; got {reps}")
+    if rubric is not None:
+        if judge != BRIEFING_JUDGE:
+            raise ValueError(f"a rubric variant exists for {BRIEFING_JUDGE} only, not {judge}")
+        checks_of(rubric)
+    if judge_model_override is not None:
+        if judge == CANDIDATE_SELECTOR:
+            raise ValueError(_SELECTOR_REFUSES_OVERRIDE)
+        if client_kind == LIVE_CLIENT and model != judge_model_override:
+            raise ValueError(
+                f"{JUDGE_MODEL_OVERRIDE_SETTING}={judge_model_override} but the live leg was "
+                f"handed {model}: the report would name a model nobody asked"
+            )
     if (packet is not None or dev_packet is not None) and labels is None:
         raise ValueError("a label packet needs the owner labels: pass labels= as well")
     if model_role is not None and judge != CANDIDATE_SELECTOR:
@@ -403,11 +498,12 @@ def calibrate(
             root=root,
             packet=packet,
             dev_packet=dev_packet,
+            rubric=rubric or JUDGE_PROMPT,
         )
         if labels is not None
         else None
     )
-    cases = traps_for(judge)
+    cases = _under_rubric(traps_for(judge), rubric)
     if len(cases) < MINIMUM_TRAPS_PER_JUDGE:
         raise ValueError(
             f"{judge} has {len(cases)} trap case(s); plan 03 § 107 asks for at "
@@ -422,7 +518,7 @@ def calibrate(
         model=model,
         judge_client=client_kind,
         reps=reps,
-        rubric=_rubric(judge),
+        rubric=_rubric(judge, rubric),
         determinism=_determinism(client_kind),
         trap_agreement=_trap_agreement(judge, outcomes),
         self_agreement=_self_agreement(outcomes, reps=reps),
@@ -430,6 +526,19 @@ def calibrate(
         outcomes=outcomes,
         label_agreement=labelled,
         model_role=model_role,
+        judge_model_override=judge_model_override,
+    )
+
+
+def _under_rubric(cases: Sequence[TrapCase], rubric: str | None) -> tuple[TrapCase, ...]:
+    """The trap set with every briefing question put under ``rubric``; unchanged without one."""
+    if rubric is None:
+        return tuple(cases)
+    return tuple(
+        replace(case, subject=replace(case.subject, rubric=rubric))
+        if isinstance(case.subject, BriefingSubject)
+        else case
+        for case in cases
     )
 
 

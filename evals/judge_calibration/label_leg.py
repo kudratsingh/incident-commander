@@ -14,6 +14,11 @@ refused as the held-out one. ``dev_packet`` is scored beside it and marked ``cou
 A label file holding more than one packet is refused unless one is named, because "all labels
 in force" would put the dev set into the number O-58 says it must not enter.
 ``HELD_OUT_AGREEMENT_THRESHOLD`` is reported, never acted on: the owner decides.
+
+``rubric`` names the rubric every briefing is asked under (WO-R3-383): the production
+``briefing_judge`` by default, or a variant from ``BRIEFING_JUDGE_RUBRICS``. The "written from"
+refusal reads the bytes of the rubric actually asked, and ``reasoning`` is counted against that
+rubric's own checks.
 """
 
 from __future__ import annotations
@@ -29,6 +34,7 @@ from evals.graders.llm_judge import (
     JUDGE_PROMPT,
     USEFUL_THRESHOLD,
     JudgeScore,
+    checks_of,
     cited_checks,
     judge_briefing,
 )
@@ -221,13 +227,14 @@ def ask_labelled(
     model: str,
     reps: int,
     root: Path | None = None,
+    rubric: str = JUDGE_PROMPT,
 ) -> LabelOutcome:
     """Put one labelled briefing ``reps`` times; an ``LLMError`` is recorded, not raised."""
     briefing = labels.load_briefing(label_id, root=root)
     scores: list[JudgeScore] = []
     for _ in range(reps):
         try:
-            scores.append(judge_briefing(briefing, client, model))
+            scores.append(judge_briefing(briefing, client, model, rubric=rubric))
         except LLMError as err:
             return LabelOutcome(
                 id=label_id,
@@ -247,6 +254,7 @@ def _score_set(
     reps: int,
     root: Path | None,
     path: Path,
+    rubric: str = JUDGE_PROMPT,
 ) -> dict[str, Any]:
     """Ask every labelled briefing present in this checkout; the agreement over the set."""
     missing = sorted(i for i in in_force if not labels.briefing_path(i, root=root).is_file())
@@ -257,14 +265,15 @@ def _score_set(
             f"this checkout's evals/runs ({', '.join(missing)})"
         )
     outcomes = [
-        ask_labelled(i, row, client=client, model=model, reps=reps, root=root)
+        ask_labelled(i, row, client=client, model=model, reps=reps, root=root, rubric=rubric)
         for i, row in present.items()
     ]
+    checks = checks_of(rubric)
     answered = [o for o in outcomes if o.answered]
     agreed = [o for o in answered if o.agrees]
     disagreed = [o for o in answered if not o.agrees]
     stable = [o for o in answered if o.stable]
-    citing = [o for o in answered if cited_checks(o.scores[0].reasoning)]
+    citing = [o for o in answered if cited_checks(o.scores[0].reasoning, checks)]
     stamps = sorted(str(row["labelled_at"]) for row in in_force.values())
     return {
         "labels_file": _display(path),
@@ -286,10 +295,10 @@ def _score_set(
         },
         "reasoning_names_a_check": len(citing),
         "errors": [{"id": o.id, "error": o.error} for o in outcomes if not o.answered],
-        "rows": [_row(o) for o in outcomes],
+        "rows": [_row(o, checks) for o in outcomes],
         "disagreements": [
             {
-                **_row(o),
+                **_row(o, checks),
                 "owner_reason": o.reason,
                 "judge_reasoning": o.scores[0].reasoning,
             }
@@ -307,6 +316,7 @@ def label_agreement(
     root: Path | None = None,
     packet: int | None = None,
     dev_packet: int | None = None,
+    rubric: str = JUDGE_PROMPT,
 ) -> dict[str, Any]:
     """Agreement with the labels in force, or ``NoLabelsError`` when there are none.
 
@@ -320,6 +330,7 @@ def label_agreement(
         )
     if dev_packet is not None and dev_packet == packet:
         raise ValueError(f"the dev packet and the held-out packet must differ (both {packet})")
+    checks_of(rubric)
     path = labels_path or labels.LABELS_FILE
     by_packet = labels_by_packet(load_rows(path))
     if not by_packet:
@@ -336,7 +347,13 @@ def label_agreement(
             )
         (only,) = by_packet
         value = _score_set(
-            by_packet[only], client=client, model=model, reps=reps, root=root, path=path
+            by_packet[only],
+            client=client,
+            model=model,
+            reps=reps,
+            root=root,
+            path=path,
+            rubric=rubric,
         )
         return _leg({"packet": only, "counted": True, **value})
 
@@ -350,8 +367,8 @@ def label_agreement(
         label_id: [p for p, in_force in by_packet.items() if p != packet and label_id in in_force]
         for label_id in scored
     }
-    rubric = load_prompt(JUDGE_PROMPT)
-    quoted = {label_id: label_id in rubric for label_id in scored}
+    asked = load_prompt(rubric)
+    quoted = {label_id: label_id in asked for label_id in scored}
     written_from = [i for i in scored if quoted[i] and not elsewhere[i]]
     if written_from:
         raise NoLabelsError(
@@ -378,7 +395,9 @@ def label_agreement(
             for label_id, others in elsewhere.items()
             if others
         ],
-        **_score_set(held_out, client=client, model=model, reps=reps, root=root, path=path),
+        **_score_set(
+            held_out, client=client, model=model, reps=reps, root=root, path=path, rubric=rubric
+        ),
     }
     value["threshold"] = held_out_verdict(value)
     dev = None
@@ -388,7 +407,13 @@ def label_agreement(
             "counted": False,
             "why_not_counted": DEV_NOT_COUNTED,
             **_score_set(
-                by_packet[dev_packet], client=client, model=model, reps=reps, root=root, path=path
+                by_packet[dev_packet],
+                client=client,
+                model=model,
+                reps=reps,
+                root=root,
+                path=path,
+                rubric=rubric,
             ),
         }
     return _leg(value, dev_set=dev, test_retest=owner_test_retest(by_packet, packet=packet))
@@ -411,7 +436,7 @@ def _leg(
     }
 
 
-def _row(outcome: LabelOutcome) -> dict[str, Any]:
+def _row(outcome: LabelOutcome, checks: tuple[str, ...]) -> dict[str, Any]:
     first = outcome.scores[0] if outcome.answered else None
     return {
         "id": outcome.id,
@@ -420,7 +445,7 @@ def _row(outcome: LabelOutcome) -> dict[str, Any]:
         "verdict": outcome.verdicts[0] if outcome.answered else None,
         "groundedness": first.groundedness if first else None,
         "actionability": first.actionability if first else None,
-        "checks_cited": list(cited_checks(first.reasoning)) if first else [],
+        "checks_cited": list(cited_checks(first.reasoning, checks)) if first else [],
         "agrees": outcome.agrees,
         "stable": outcome.stable,
         "observed": list(outcome.verdicts),

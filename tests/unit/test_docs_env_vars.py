@@ -65,6 +65,10 @@ _NON_SETTINGS_TOKENS: Final[frozenset[str]] = frozenset(
         "JUDGE_CALIBRATION_REPORTS",
         "HELD_OUT_AGREEMENT_THRESHOLD",
         "DEV_PACKET",
+        # WO-R3-383: `make judge-calibration`'s judge-model override for one trial (a make flag
+        # passed as `--judge-model-override`, recorded in the report as `model_setting`). Not a
+        # Settings field: the judge every run calls keeps JUDGE_MODEL.
+        "JUDGE_MODEL_OVERRIDE",
         # Environment variables / make flags consumed outside Settings.
         "CHAOS_ENABLED",  # platform-side chaos gate (demo/compose.yml)
         # Platform-side SLO evaluator interval. v0.6.4 made the evaluator skip the seeded

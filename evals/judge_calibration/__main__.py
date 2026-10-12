@@ -8,18 +8,20 @@ paid leg and BOTH flags are required, because readiness is not authorization. Th
 leg is DEFERRED (O-22): proved against the fake, costed in
 ``.coordination/DEFERRED-PAID-RUNS.md``. ``--scan`` shows what the free legs can see.
 ``--model-role`` asks the selector leg on that run role's model, the one an arm's selector
-is called on; the judge legs keep ``JUDGE_MODEL`` (WO-R3-364).
+is called on; the judge legs keep ``JUDGE_MODEL`` (WO-R3-364). ``--packet`` counts one label
+packet's held-out briefings and ``--dev-packet`` shows another beside it, not counted
+(WO-R3-378, owner O-58, ADR 0082); a label file of several packets needs ``--packet``.
 """
 
 from __future__ import annotations
 
 import argparse
 import sys
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any, Final
 
-from evals.judge_calibration import labels, track_record
+from evals.judge_calibration import label_leg, labels, track_record
 from evals.judge_calibration.fakes import FakeJudgeClient, answers_for, answers_for_labels
 from evals.judge_calibration.harness import (
     FAKE_CLIENT,
@@ -109,7 +111,7 @@ def _summarize(report: CalibrationReport) -> list[str]:
     for entry in traps["errors"]:
         lines.append(f"    ERRORED    {entry['case_id']}: {entry['error']}")
     if report.label_agreement is not None:
-        lines.extend(_summarize_labels(report.label_agreement["value"]))
+        lines.extend(_summarize_labels(report.label_agreement))
     return lines
 
 
@@ -130,21 +132,81 @@ def _model_lines(report: CalibrationReport) -> list[str]:
     return lines
 
 
-def _summarize_labels(value: dict[str, Any]) -> list[str]:
+def _summarize_labels(leg: Mapping[str, Any]) -> list[str]:
+    """The owner-label leg: the counted block, then the dev set and the owner's test-retest."""
+    value = leg["value"]
+    held_out = "threshold" in value
+    head = f"held-out    packet {value['packet']}:" if held_out else "owner labels"
+    lines = [f"  {head} {_agreement_line(value)}  ({value['labels_file']})"]
+    if held_out:
+        lines.append(_threshold_line(value["threshold"]))
+        if value["not_counted"]:
+            ids = ", ".join(row["id"] for row in value["not_counted"])
+            lines.append(
+                f"    NOT COUNTED  {len(value['not_counted'])} briefing(s) of packet "
+                f"{value['packet']} also carry a label in another packet (the rubric was written "
+                f"with those in view): {ids}"
+            )
+    lines.extend(_set_detail(value, prefix="LABEL"))
+    dev = leg.get("dev_set")
+    if dev is not None:
+        lines.append(
+            f"  dev set     packet {dev['packet']}: {_agreement_line(dev)}  NOT COUNTED "
+            "(the rubric was written from these labels)"
+        )
+        lines.extend(_set_detail(dev, prefix="DEV"))
+    retest = leg.get("test_retest")
+    if retest is not None:
+        if retest["pairs"]:
+            lines.append(
+                f"  test-retest the owner labelled {retest['pairs']} briefing(s) of packet "
+                f"{retest['packet']} in another packet too: {retest['same']}/{retest['pairs']} "
+                "the same"
+            )
+        else:
+            lines.append(
+                f"  test-retest no briefing of packet {retest['packet']} carries a label in "
+                "another packet"
+            )
+        for row in retest["rows"]:
+            if not row["same"]:
+                said = ", ".join(
+                    f"packet {entry['packet']} {entry['label']} ({entry['labelled_at']})"
+                    for entry in row["labels"]
+                )
+                lines.append(f"    RETEST CHANGED  {row['id']}: {said}")
+    return lines
+
+
+def _agreement_line(value: Mapping[str, Any]) -> str:
     stability = value["stability"]
-    lines = [
-        f"  owner labels {value['agree']}/{value['n']} agreed   agreement {value['agreement']}"
+    return (
+        f"{value['agree']}/{value['n']} agreed   agreement {value['agreement']}"
         f"   judge useful / owner not {value['judge_useful_owner_not']}"
         f"   judge not useful / owner useful {value['judge_not_useful_owner_useful']}"
         f"   stable {stability['identical']}/{value['n']} over N={stability['reps']}"
-        f"  ({value['labels_file']})",
+        f"   reasoning names a check {value['reasoning_names_a_check']}/{value['n']}"
+    )
+
+
+def _threshold_line(threshold: Mapping[str, Any]) -> str:
+    baseline = threshold["majority_label_baseline"]
+    verdict = "CLEARS" if threshold["clears"] else "does not clear"
+    incomplete = "" if threshold["complete"] else " (incomplete: an unanswered or missing briefing)"
+    return (
+        f"    threshold  {threshold['value']} ({threshold['constant']}, ADR 0082): {verdict}"
+        f"{incomplete}; always '{baseline['label']}' would agree {baseline['agree']}/"
+        f"{baseline['n']}; the owner decides whether the judge leaves 'measured'"
+    )
+
+
+def _set_detail(value: Mapping[str, Any], *, prefix: str) -> list[str]:
+    lines = [
+        f"    {prefix} DISAGREED  {row['id']}: owner {row['owner_label']}, judge "
+        f"{row['judge_label']} (groundedness {row['groundedness']}, "
+        f"actionability {row['actionability']})"
+        for row in value["disagreements"]
     ]
-    for row in value["disagreements"]:
-        lines.append(
-            f"    LABEL DISAGREED  {row['id']}: owner {row['owner_label']}, judge "
-            f"{row['judge_label']} (groundedness {row['groundedness']}, "
-            f"actionability {row['actionability']})"
-        )
     for label_id in value["missing_briefings"]:
         lines.append(f"    MISSING    {label_id}: briefing not in this checkout")
     for entry in value["errors"]:
@@ -153,9 +215,9 @@ def _summarize_labels(value: dict[str, Any]) -> list[str]:
 
 
 def _scripted_wrong_label(path: Path) -> tuple[str, ...]:
-    """The fake disagrees with the first label in force, so the disagreement fields run."""
-    in_force = labels.current_labels(path)
-    return tuple(list(in_force)[:1])
+    """The fake disagrees with the first label in the file, so the disagreement fields run."""
+    rows = label_leg.load_rows(path)
+    return tuple(str(row["id"]) for row in rows[:1])
 
 
 def _scan() -> int:
@@ -221,15 +283,47 @@ def main(argv: Sequence[str] | None = None) -> int:
         type=Path,
         help=f"briefing_judge only: add the owner-label leg (default {labels.LABELS_FILE.name}).",
     )
+    parser.add_argument(
+        "--packet",
+        type=int,
+        help=(
+            "briefing_judge only: count this label packet's held-out briefings only, and "
+            "report them against HELD_OUT_AGREEMENT_THRESHOLD (ADR 0082). Implies --labels."
+        ),
+    )
+    parser.add_argument(
+        "--dev-packet",
+        type=int,
+        help="briefing_judge only: score this packet beside --packet, marked NOT COUNTED.",
+    )
     args = parser.parse_args(argv)
 
     if args.scan:
         return _scan()
 
     judges = tuple(args.judge) if args.judge else CALIBRATED_ROLES
+    if args.dev_packet is not None and args.packet is None:
+        print(
+            "refusing: --dev-packet needs --packet: a dev set is shown beside a held-out "
+            "packet, never instead of one (O-58, ADR 0082).",
+            file=sys.stderr,
+        )
+        return 2
+    for value in (args.packet, args.dev_packet):
+        if value is not None and value < 1:
+            print(f"refusing: a label packet is numbered from 1; got {value}.", file=sys.stderr)
+            return 2
+    if args.dev_packet is not None and args.dev_packet == args.packet:
+        print(
+            f"refusing: --dev-packet and --packet must differ (both {args.packet}).",
+            file=sys.stderr,
+        )
+        return 2
+    if args.packet is not None and args.labels is None:
+        args.labels = labels.LABELS_FILE
     if args.labels is not None and judges != (BRIEFING_JUDGE,):
         print(
-            f"refusing: --labels needs --judge {BRIEFING_JUDGE} and no other judge.",
+            f"refusing: --labels (and --packet) need --judge {BRIEFING_JUDGE} and no other judge.",
             file=sys.stderr,
         )
         return 2
@@ -280,8 +374,10 @@ def main(argv: Sequence[str] | None = None) -> int:
                 client_kind=client_kind,
                 labels=args.labels,
                 model_role=leg_role(judge, model_role),
+                packet=args.packet,
+                dev_packet=args.dev_packet,
             )
-        except NoLabelsError as err:
+        except (NoLabelsError, labels.LabelError) as err:
             print(str(err), file=sys.stderr)
             return 2
         print("\n".join(_summarize(report)))

@@ -58,6 +58,13 @@ _NON_SETTINGS_TOKENS: Final[frozenset[str]] = frozenset(
         # A platform-side constant, not an env var: how long a breaker's state record lives
         # (backend/app/core/breaker_state.py), named in the runbook's drift-check section
         "BREAKER_STATE_TTL_SECONDS",
+        # The briefing judge's held-out scoring (WO-R3-378, ADR 0082): the register of judge
+        # calibration reports (evals/research_report.py), the threshold the label leg reports
+        # against (evals/judge_calibration/label_leg.py), and `make judge-calibration`'s flag
+        # for the dev packet scored beside the held-out one.
+        "JUDGE_CALIBRATION_REPORTS",
+        "HELD_OUT_AGREEMENT_THRESHOLD",
+        "DEV_PACKET",
         # Environment variables / make flags consumed outside Settings.
         "CHAOS_ENABLED",  # platform-side chaos gate (demo/compose.yml)
         # Platform-side SLO evaluator interval. v0.6.4 made the evaluator skip the seeded

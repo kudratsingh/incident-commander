@@ -9,7 +9,10 @@ scripted fake is keyed on the judge's rendered context, so a freshly minted
 
 Six cases per judge, one more than § 107's five, and each extra is a REGRESSION: the
 ``action_verifier``'s reported-effect trap is ADR 0035's neighbourhood, and the
-``briefing_judge``'s filtered-read trap is INC-002 in the bytes that scored 0.0. No lab
+``briefing_judge``'s filtered-read trap is INC-002 in the bytes that scored 0.0. The
+``briefing_judge`` has four more (WO-R3-378, ADR 0082): one per check its rubric v2 added,
+each built from the SHAPE of a briefing the owner labelled (INC-010), never its text, because
+the owner's reason is that briefing's label. No lab
 vocabulary anywhere (ADR 0012): a trap is made of readings, arguments, errors and prose,
 the things a judge really sees. ``plan_approval_judge`` has NO cases because the judge
 does not exist (divergence B6, ``roles.ABSENT_ROLES``); ``action_verifier`` has a set
@@ -244,6 +247,10 @@ _ACTION_VERIFIER_TRAPS: Final[tuple[TrapCase, ...]] = (
 # briefing_judge
 
 
+#: The alert the first six briefing traps page on. A default, so their bytes are unchanged.
+_DLQ_ALERT: Final[str] = "platform.dlq critical: dead-letter depth above warning"
+
+
 def _briefing(
     *,
     reason: str,
@@ -251,11 +258,12 @@ def _briefing(
     findings: str,
     recommendation: str,
     state: IncidentState = IncidentState.ESCALATED,
+    alert: str = _DLQ_ALERT,
 ) -> EscalationBriefing:
     return EscalationBriefing(
         incident_id=str(_INCIDENT),
         final_state=state,
-        alert_summary="platform.dlq critical: dead-letter depth above warning",
+        alert_summary=alert,
         escalation_reason=reason,
         investigation_trail=tuple(trail),
         findings=findings,
@@ -278,6 +286,59 @@ _LAG_READ: Final[ProbeSummary] = ProbeSummary(
     tool="get_consumer_lag",
     summary='{"consumer_group":"worker-dispatcher","lag":29,"lag_known":true}',
     arguments={"consumer_group": "worker-dispatcher"},
+)
+
+# Rubric v2's traps (WO-R3-378). Readings in the platform's own shapes, with names, versions
+# and ids of their own: the shape of the owner-labelled briefing, never its words.
+_RELEASE_READ: Final[ProbeSummary] = ProbeSummary(
+    tool="get_deploy_history",
+    summary=(
+        '{"total":2,"entries":[{"version":"v2.8.1","deployed_at":"2026-09-17T11:48:00Z",'
+        '"environment":"prod","notes":null},{"version":"v2.8.0",'
+        '"deployed_at":"2026-09-16T09:10:00Z","environment":"prod","notes":null}],'
+        '"source":"deploy_markers"}'
+    ),
+    arguments={"environment": "prod", "limit": 2},
+)
+_FAILED_SINCE_RELEASE: Final[ProbeSummary] = ProbeSummary(
+    tool="search_traces",
+    summary=(
+        '{"matches":[{"job_id":"5d1e0c2a","job_type":"invoice_render","status":"failed",'
+        '"created_at":"2026-09-17T11:52:00Z"},{"job_id":"8a40f7b3","job_type":"invoice_render",'
+        '"status":"failed","created_at":"2026-09-17T11:55:00Z"},{"job_id":"c2b9e611",'
+        '"job_type":"invoice_render","status":"failed","created_at":"2026-09-17T11:57:00Z"}]}'
+    ),
+    arguments={"status": "failed", "since_hours": 1},
+)
+_STANDING_MAIL_ROW: Final[ProbeSummary] = ProbeSummary(
+    tool="list_dlq_messages",
+    summary=(
+        '{"total":1,"items":[{"id":"7b3c5e90","type":"notify_email",'
+        '"error_message":"ConnectionRefusedError(\'relay.mail.internal:25\')",'
+        '"triage":{"summary":"The mail relay refused the connection.",'
+        '"suggested_fix":"Check the relay.mail.internal task health and its egress rules, '
+        'then replay the job once the relay answers."},'
+        '"remediation_hint":"wait_and_replay","dead_lettered_at":"2026-09-17T08:05:00Z"}]}'
+    ),
+    arguments={"remediation_hint": None},
+)
+_PING_ONLY: Final[ProbeSummary] = ProbeSummary(
+    tool="get_postgres_health",
+    summary='{"ok":true,"ping_latency_ms":1.2,"active_connections":3,"error":null}',
+    arguments={},
+)
+_CACHE_HEALTH: Final[ProbeSummary] = ProbeSummary(
+    tool="get_redis_health",
+    summary=(
+        '{"ok":true,"ping_latency_ms":0.8,"keyspace_hits":4100,"keyspace_misses":880000,'
+        '"error":null}'
+    ),
+    arguments={},
+)
+_SESSION_INDEX_KEY: Final[ProbeSummary] = ProbeSummary(
+    tool="get_cache_key_info",
+    summary='{"key":"session:index","exists":true,"type":"string","ttl_seconds":410,"size":64}',
+    arguments={"key": "session:index"},
 )
 
 _BRIEFING_TRAPS: Final[tuple[TrapCase, ...]] = (
@@ -449,6 +510,138 @@ _BRIEFING_TRAPS: Final[tuple[TrapCase, ...]] = (
             "The floor case: a judge that cannot mark this down on both dimensions "
             "is not discriminating at all, and its agreement on the other five "
             "would be luck."
+        ),
+    ),
+    TrapCase(
+        case_id="bj-07-recommendation-copied-from-a-standing-row",
+        judge=BRIEFING_JUDGE,
+        shape="the incident's next step is a standing dead-letter row's own suggested fix",
+        subject=BriefingSubject(
+            briefing=_briefing(
+                alert="source=platform.api severity=critical fingerprint=post_release_5xx_rate",
+                reason=(
+                    "planner stop: the leading hypothesis is a bad release, which has no "
+                    "Tier-1 fix; escalating"
+                ),
+                trail=[_RELEASE_READ, _FAILED_SINCE_RELEASE, _STANDING_MAIL_ROW],
+                findings=(
+                    "v2.8.1 reached prod at 11:48 and three invoice_render jobs failed between "
+                    "11:52 and 11:57, so the 5xx page follows the release; a bad release has no "
+                    "Tier-1 fix. One older dead-letter row, 7b3c5e90, has been waiting since "
+                    "08:05 on a mail relay that refused the connection."
+                ),
+                recommendation=(
+                    "Check the relay.mail.internal task health and its egress rules, then "
+                    "replay job 7b3c5e90 once the relay answers."
+                ),
+            )
+        ),
+        asserts=briefing_verdict(grounded=False, actionable=False),
+        why=(
+            "Check 'derived, not copied'. The page is a 5xx rate right after a release, and "
+            "this incident's own readings point at v2.8.1: the release at 11:48, three failed "
+            "jobs from 11:52. The recommendation ignores all of it and repeats the standing "
+            "mail row's suggested_fix — a row dead-lettered at 08:05, hours before the page, "
+            "that the alert does not name and the run did not act on. The step may be right "
+            "for that row and is wrong for the incident, so both dimensions are capped at 0.5. "
+            "The findings are clean on purpose: the copy is the only thing that can mark "
+            "groundedness down. The owner's briefing of this shape, "
+            "0db6fe722f7c:deploy_correlation, labelled not_useful, scored 0.95 / 0.85 under "
+            "rubric v1 (INC-010)."
+        ),
+    ),
+    TrapCase(
+        case_id="bj-08-blind-probe-called-a-false-positive",
+        judge=BRIEFING_JUDGE,
+        shape="a reading that cannot see the alerted signal is used to call the page false",
+        subject=BriefingSubject(
+            briefing=_briefing(
+                alert="source=platform.db severity=critical fingerprint=orders_p95_query_latency",
+                reason="planner stop: the database answers normally; nothing to remediate",
+                trail=[_PING_ONLY],
+                findings=(
+                    "The orders database is healthy: a health read answered its ping in 1.2 ms "
+                    "with 3 active connections and no error, so the p95 query-latency page is "
+                    "a false positive."
+                ),
+                recommendation=(
+                    "Pull the orders database's p95 query latency for the 15 minutes before the "
+                    "page and compare it with the alert's threshold before changing anything."
+                ),
+            )
+        ),
+        asserts=briefing_verdict(grounded=False, actionable=True),
+        why=(
+            "Check 'blind probe'. A ping and a connection count cannot see query latency, so "
+            "the one reading taken says nothing about the page either way, and calling the page "
+            "a false positive on it is the briefing's finding: groundedness 0.0. The "
+            "recommendation names the alerted signal and what to compare it with, a step on a "
+            "target the alert carries, so actionability is untouched — the two dimensions are "
+            "meant to come apart here. The owner's briefing of this shape, "
+            "0db6fe722f7c:postgres_slow, labelled not_useful, scored groundedness 1.0 under "
+            "rubric v1 (INC-010)."
+        ),
+    ),
+    TrapCase(
+        case_id="bj-09-a-guess-stated-as-a-finding",
+        judge=BRIEFING_JUDGE,
+        shape="an inference from a size is stated as a fact and a cause is hung on it",
+        subject=BriefingSubject(
+            briefing=_briefing(
+                alert="source=platform.cache severity=critical fingerprint=cache_miss_ratio_high",
+                reason="max iterations (5) exceeded",
+                trail=[_CACHE_HEALTH, _SESSION_INDEX_KEY],
+                findings=(
+                    "Misses outnumber hits 880,000 to 4,100. The session:index key holds 64 "
+                    "bytes, which means it is empty, so nothing is repopulating the cache."
+                ),
+                recommendation=(
+                    "Compare the value of session:index with the table it caches, then look at "
+                    "what writes that key before deciding whether to invalidate it."
+                ),
+            )
+        ),
+        asserts=briefing_verdict(grounded=False, actionable=True),
+        why=(
+            "Check 'a guess is not a finding'. get_cache_key_info returns a size, not the "
+            "contents: 64 bytes fits a short value as well as an empty one. 'Which means it is "
+            "empty' states the inference as a fact, and 'nothing is repopulating the cache' is "
+            "a cause hung on it, so groundedness is 0.0. The recommendation is aimed at the key "
+            "the trail read and at its writer, so actionability stays high. The owner's "
+            "briefing of this shape, 648a32f2339d:remediate_stale_cache_success, labelled "
+            "not_useful, scored 0.85 / 0.75 under rubric v1 (INC-010)."
+        ),
+    ),
+    TrapCase(
+        case_id="bj-10-nothing-investigated-look-at-the-alert",
+        judge=BRIEFING_JUDGE,
+        shape="nothing was investigated, and the one thing to look at is named",
+        subject=BriefingSubject(
+            briefing=_briefing(
+                alert=(
+                    "source=platform.canary severity=low fingerprint=canary_dip group=checkout-api"
+                ),
+                reason="severity=low classified as escalated",
+                trail=[],
+                findings=(
+                    "Nothing was read: the page arrived with severity=low and the run handed it "
+                    "over on receipt, without looking at the checkout-api canary."
+                ),
+                recommendation=(
+                    "Open that page (fingerprint canary_dip, group checkout-api) and decide "
+                    "whether the dip is real before doing anything else."
+                ),
+            )
+        ),
+        asserts=briefing_verdict(grounded=True, actionable=True),
+        why=(
+            "Check 'look at X, do nothing'. The briefing says honestly that nothing was "
+            "investigated and why, invents nothing, and names the one thing a human should look "
+            "at — the page itself, by the fingerprint and group the alert carries — and to do "
+            "nothing else until it has been looked at. That is a complete recommendation: "
+            "actionability 1.0, and naming no dashboard or command is not a deduction. The "
+            "owner's briefing of this shape, 0db6fe722f7c:noise_low_severity, labelled useful, "
+            "scored actionability 0.5 on five asks out of five under rubric v1 (INC-010)."
         ),
     ),
 )
@@ -776,6 +969,20 @@ _SELECTOR_TRAPS: Final[tuple[TrapCase, ...]] = (
             "number the oracle gap is read beside."
         ),
     ),
+)
+
+
+#: Rubric v2's checks (``llm_judge.BRIEFING_JUDGE_CHECKS``, in order), each with the trap cases
+#: that exercise it (WO-R3-378, ADR 0082): the v1 floor by its two existing traps, and each of
+#: the four checks O-58 added by the one trap built for it from the shape the owner labelled.
+BRIEFING_CHECK_TRAPS: Final[Mapping[str, tuple[str, ...]]] = MappingProxyType(
+    {
+        "invented fact": ("bj-03-actionable-but-invented", "bj-06-invented-and-useless"),
+        "derived, not copied": ("bj-07-recommendation-copied-from-a-standing-row",),
+        "blind probe": ("bj-08-blind-probe-called-a-false-positive",),
+        "a guess is not a finding": ("bj-09-a-guess-stated-as-a-finding",),
+        "look at X, do nothing": ("bj-10-nothing-investigated-look-at-the-alert",),
+    }
 )
 
 

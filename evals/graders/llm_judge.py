@@ -28,6 +28,32 @@ USEFUL_THRESHOLD: Final[float] = 0.7
 #: it and the calibration harness hashes it (plan 03 § 110's attribution rule).
 JUDGE_PROMPT: Final[str] = "briefing_judge"
 
+#: Rubric v2's checks, by the names the prompt gives them in bold and in the order the judge
+#: applies them (WO-R3-378, owner O-58, ADR 0082): the v1 floor kept as a check, then INC-010's
+#: three fault patterns and the actionability fix. ``reasoning`` must name the check that decided
+#: each score, so the calibration records which of these a reasoning cites (``cited_checks``).
+BRIEFING_JUDGE_CHECKS: Final[tuple[str, ...]] = (
+    "invented fact",
+    "derived, not copied",
+    "blind probe",
+    "a guess is not a finding",
+    "look at X, do nothing",
+)
+
+#: What ``reasoning`` says for a score no check lowered, also a citation.
+NO_CHECK_FIRED: Final[str] = "no check fired"
+
+
+def cited_checks(reasoning: str) -> tuple[str, ...]:
+    """The checks a judge's ``reasoning`` names, in rubric order; ``no check fired`` last.
+
+    Case-insensitive substring match on the bold names: a judge told to name the deciding check
+    by its name either does or does not, and this is how a report counts which.
+    """
+    lowered = reasoning.lower()
+    named = tuple(name for name in BRIEFING_JUDGE_CHECKS if name.lower() in lowered)
+    return named + ((NO_CHECK_FIRED,) if NO_CHECK_FIRED in lowered else ())
+
 
 class JudgeScore(StructuredOutput):
     """Per-briefing judge score. LLM emits the two numeric dimensions + reasoning."""

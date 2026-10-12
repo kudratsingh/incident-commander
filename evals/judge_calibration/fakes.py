@@ -19,7 +19,7 @@ from typing import Any
 from pydantic import BaseModel
 
 from evals.graders.llm_judge import format_briefing_context
-from evals.judge_calibration import labels
+from evals.judge_calibration import label_leg, labels
 from evals.judge_calibration.roles import (
     ACTION_VERIFIER,
     BRIEFING_JUDGE,
@@ -191,9 +191,19 @@ def answers_for_labels(
     wrong: Sequence[str] = (),
     root: Path | None = None,
 ) -> dict[str, list[Mapping[str, Any]]]:
-    """A script for the owner-label leg: agree with every label in force but those in ``wrong``."""
+    """A script for the owner-label leg: agree with every label in force but those in ``wrong``.
+
+    Keyed by rendered briefing, so a briefing labelled in two packets is ONE question; the fake
+    answers the label of the newest packet that holds it (WO-R3-378). Rows are read through the
+    leg's own ``load_rows``, the one reader of the label file the leg uses.
+    """
     script: dict[str, list[Mapping[str, Any]]] = {}
-    for label_id, row in labels.current_labels(labels_path).items():
+    newest: dict[str, Mapping[str, Any]] = {}
+    for in_force in label_leg.labels_by_packet(
+        label_leg.load_rows(labels_path or labels.LABELS_FILE)
+    ).values():
+        newest.update(in_force)
+    for label_id, row in newest.items():
         if not labels.briefing_path(label_id, root=root).is_file():
             continue
         useful = (row["label"] == labels.USEFUL) != (label_id in wrong)

@@ -80,6 +80,9 @@ help:
 	@echo "                   MODEL_ROLE=benchmark asks the candidate_selector leg on"
 	@echo "                   BENCHMARK_MODEL (the model the arm's selector runs on);"
 	@echo "                   the judge legs keep JUDGE_MODEL"
+	@echo "                   PACKET=<n> (with JUDGE=briefing_judge LABELS=1) counts that label"
+	@echo "                   packet's held-out briefings only; DEV_PACKET=<m> shows the dev"
+	@echo "                   set beside it, NOT COUNTED (WO-R3-378, ADR 0082)"
 	@echo "                   LABELS=1 (with JUDGE=briefing_judge) adds the owner-label leg"
 	@echo "  label-packet     FREE: write the briefing labelling packet from committed archives;"
 	@echo "                   IMPORT=<filled packet> appends its labels (append-only)."
@@ -159,12 +162,15 @@ research-report:
 # readiness is not authorization. MODEL_ROLE=<role> (only when given, never the
 # development fallback) asks the candidate_selector leg on that role's model, the
 # one a run's selector is called on; the judge legs keep JUDGE_MODEL (WO-R3-364).
+# PACKET=<n> counts one label packet's held-out briefings and DEV_PACKET=<m> shows the
+# dev set beside it, not counted (WO-R3-378, owner O-58, ADR 0082).
 judge-calibration:
 	uv run python -m evals.judge_calibration \
 		$(if $(SCAN),--scan,) $(if $(JUDGE),--judge $(JUDGE),) \
 		$(if $(REPS),--reps $(REPS),) $(if $(WRITE),--write,) \
 		$(if $(LIVE),--live,) $(if $(YES_SPEND),--yes-spend,) \
 		$(if $(LABELS),--labels $(filter-out 1,$(LABELS)),) \
+		$(if $(PACKET),--packet $(PACKET),) $(if $(DEV_PACKET),--dev-packet $(DEV_PACKET),) \
 		$(if $(MODEL_ROLE_GIVEN),--model-role $(MODEL_ROLE_GIVEN),)
 
 # The oracle-gap sample (WO-R3-347, evals/oracle_gap.py). FREE by default: it checks the

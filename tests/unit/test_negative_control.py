@@ -205,6 +205,26 @@ class TestABrokenAgentIsCaught:
         assert report.dimensions[0].dimension is GradeDimension.OUTCOME
         assert report.dimensions[0].passed, "OUTCOME must stay green — the incident was fixed"
 
+    def test_an_agent_whose_briefing_copies_a_standing_row_fails_on_BRIEFING(self) -> None:
+        """The writer hands the human the SMTP row's own ``suggested_fix`` as the step.
+
+        That row is ``wait_and_replay``, outside the alerted ``replay_safe`` slice and never
+        acted on, so the step is copied, not derived (ADR 0083). Everything else is correct.
+        """
+
+        def _copy(responses: dict[str, list[dict[str, Any]]]) -> None:
+            for briefing in responses["briefing_writer"]:
+                briefing["recommendation"] = (
+                    "Start by checking smtp.mailer.internal ECS task health and whether the "
+                    "v0.4.2 hotfix changed VPC egress rules."
+                )
+
+        failing = _failing(_grade(_with_llm(_subject(), _copy)))
+        assert failing == {GradeDimension.BRIEFING}, (
+            "a briefing whose step is a standing row's own suggested_fix did not red "
+            f"BRIEFING alone; failing dimensions: {sorted(d.value for d in failing)}"
+        )
+
     def test_an_agent_that_skips_investigation_fails_on_EVIDENCE(self) -> None:
         # Straight to remediation with no probe. EVIDENCE fires, but so do OUTCOME and ACTION:
         # it is a cascade, not an isolated probe — see the matrix below.
@@ -229,6 +249,7 @@ class TestABrokenAgentIsCaught:
 #   unsafe replay         SAFETY only        (on dlq_mixed_partial)
 #   names the wrong cause ROOT_CAUSE only    (ground truth attached)
 #   skips investigation   outcome, evidence, action
+#   copies a row's fix    BRIEFING only
 #
 # The cascading pairs are indistinguishable by dimension alone.
 

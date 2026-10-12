@@ -1300,6 +1300,22 @@ def _baseline_delta(root: Path, scope: PhaseScope) -> dict[str, Any]:
     return delta
 
 
+def _carries_briefing(legs: Sequence[dict[str, Any]]) -> bool:
+    """Whether any live leg was graded on BRIEFING (ADR 0083); older closes were not."""
+    return any("briefing" in leg["dimensions"] for leg in legs)
+
+
+def _live_leg_header(legs: Sequence[dict[str, Any]]) -> list[str]:
+    """The live-leg table's header, with a Briefing column only when a leg carries it.
+
+    Conditional so every committed close document still regenerates byte for byte.
+    """
+    columns = ["#", "Archive", "Scenario", "Result", "Judge"]
+    columns += ["Briefing"] if _carries_briefing(legs) else []
+    columns += ["Agent tool calls", "Commander", "Platform"]
+    return ["| " + " | ".join(columns) + " |", "|" + "---|" * len(columns)]
+
+
 def _classify_row_differences(
     differences: Sequence[dict[str, Any]],
 ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
@@ -3169,17 +3185,21 @@ def render_markdown(  # noqa: C901 - one section per block
             f"**Live legs** — {sweep['live_passed']}/{sweep['live_total']} passed, in the order "
             "the owner released them.",
             "",
-            "| # | Archive | Scenario | Result | Judge | Agent tool calls | Commander | Platform |",
-            "|---|---|---|---|---|---|---|---|",
+            *_live_leg_header(sweep["live_legs"]),
         ]
     )
+    briefing = _carries_briefing(sweep["live_legs"])
     for leg in sweep["live_legs"]:
         revision = (leg["commander_revision"] or "")[:7]
         digest = (leg["platform_image_digest"] or "")[:19]
         result = "PASS" if leg["passed"] else "**FAIL**"
+        lookups = ""
+        if briefing:
+            verdict = leg["dimensions"].get("briefing")
+            lookups = f" {'—' if verdict is None else 'PASS' if verdict else '**FAIL**'} |"
         lines.append(
             f"| {leg['order']} | `{leg['archive']}` | `{leg['scenario']}` | "
-            f"{result} ({leg['final_state']}) | {leg['judge_score']} | "
+            f"{result} ({leg['final_state']}) | {leg['judge_score']} |{lookups} "
             f"{leg['tool_calls_used']} | `{revision}` | `{digest}` |"
         )
     lines.append("")

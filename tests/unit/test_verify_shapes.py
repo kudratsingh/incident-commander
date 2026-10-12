@@ -130,10 +130,17 @@ class TestTheArchivedRunGradesGreen:
         assert json.loads(run.evidence[-2].result_summary) == {"total": 0, "items": []}
 
     def test_every_dimension_passes(self) -> None:
+        """Every dimension that grades the run's verify shape passes.
+
+        BRIEFING is the one red, and it is about the PROSE, not the shape this file pins: the
+        writer offered the SMTP row's own ``suggested_fix`` as the step (ADR 0083). This is
+        INC-001's briefing — the one that called four remaining rows "cleared or addressed".
+        """
         report = grade(_archived_run(), _shipped_expectation(), briefing=_archived_briefing())
         failing = {d.dimension.value: d.detail for d in report.dimensions if not d.passed}
+        briefing = failing.pop(GradeDimension.BRIEFING.value, "")
         assert failing == {}, f"the correct trajectory still grades red: {failing}"
-        assert report.passed is True
+        assert "copied from dead-letter row 97d91272-9774-5b8e-980b-f0d2fa6ed619" in briefing
 
     def test_the_report_names_the_verify_shape_that_satisfied_the_group(self) -> None:
         """A green ``any_of`` still says which branch held.

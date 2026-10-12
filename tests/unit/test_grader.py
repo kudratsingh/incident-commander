@@ -933,9 +933,10 @@ class TestAggregate:
         assert report.passed is True
         assert report.scenario == "happy"
         # Every dimension is emitted for every scenario, graded or vacuous — OUTCOME,
-        # EVIDENCE, BUDGET, ACTION, SAFETY, ROOT_CAUSE (see TestRootCauseDimension) and
-        # ATTRIBUTION (WP-14.1, vacuous wherever no timed fault was seeded).
-        assert len(report.dimensions) == 7
+        # EVIDENCE, BUDGET, ACTION, SAFETY, ROOT_CAUSE (see TestRootCauseDimension),
+        # ATTRIBUTION (WP-14.1, vacuous wherever no timed fault was seeded) and BRIEFING
+        # (ADR 0083, vacuous wherever no writer filled the briefing).
+        assert len(report.dimensions) == 8
 
     def test_any_dimension_fails_report_fails(self, run_state: RunState, now: datetime) -> None:
         run = _with_terminal(run_state, IncidentState.RESOLVED)

@@ -2949,6 +2949,30 @@ def root_cause_coverage(report: RunReport) -> RootCauseCoverage:
     )
 
 
+def briefing_lookups(report: RunReport) -> str | None:
+    """BRIEFING's line in the run summary: how many written briefings passed both lookups.
+
+    ``None`` for a report graded before the dimension existed (ADR 0083), so an old archive
+    prints nothing rather than "0 of 0". A vacuous row is a run whose briefing nobody wrote.
+    """
+    rows = [
+        dimension
+        for outcome in report.outcomes
+        for dimension in outcome.report.dimensions
+        if dimension.dimension is GradeDimension.BRIEFING
+    ]
+    if not rows:
+        return None
+    written = [row for row in rows if not is_vacuous_detail(row.detail)]
+    failed = sum(1 for row in written if not row.passed)
+    return (
+        f"briefing lookups: {len(written) - failed}/{len(written)} written briefing(s) pass "
+        f"(cached reading called confirmed; step copied from a non-subject dead-letter row)"
+        f"{f', {failed} FAIL' if failed else ''}; {len(rows) - len(written)} run(s) had no "
+        "briefing prose to read"
+    )
+
+
 def _print_summary(report: RunReport) -> None:
     # 1. The headline counts.
     print(f"scenarios: {report.total}, passed: {report.passed}, failed: {report.failed}")
@@ -2995,6 +3019,8 @@ def _print_summary(report: RunReport) -> None:
             f"mean overall {report.judge_mean_overall:.2f}"
         )
     print(root_cause_coverage(report).describe())
+    if (lookups := briefing_lookups(report)) is not None:
+        print(lookups)
     # 5. The bill, added up from the rows' own records rather than recomputed from settings. Silent
     #    on a canned suite, and loud when a row's per-role split misses its own budget ledger.
     accounted = [o.accounting for o in report.outcomes if o.accounting is not None]

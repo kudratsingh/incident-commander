@@ -1,0 +1,1351 @@
+{
+  "report_id": "b31b8e836163",
+  "judge": "briefing_judge",
+  "what_it_decides": "how grounded and how actionable one escalation briefing is. Informational: the run is already graded on five deterministic dimensions by the time this is called, and nothing passes or fails on it. INC-002 is this judge scoring an honest briefing 0.0 for groundedness.",
+  "generated_at": "2026-10-12T07:49:29.596912+00:00",
+  "model": "claude-sonnet-4-6",
+  "model_role": null,
+  "model_setting": "JUDGE_MODEL_OVERRIDE",
+  "judge_client": "live",
+  "reps": 5,
+  "protocol": "plan 03 \u00a7 9 (WP-6.3). Four legs: a hand-built trap set whose verdicts the evaluator asserts; self-agreement over N identical asks; an independent ground-truth leg where one exists; and a stated refusal where one does not. Rubric edits are ONE LINE AT A TIME with a rerun (plan 03 \u00a7 110), or, where the owner orders a rewrite, ONE change scored on a held-out label packet (ADR 0082), which is why rubric.sha256 is here: a delta between two calibrations is attributable only if each says which rubric bytes it measured. No selector or judge number is reported anywhere until its id appears in research_report.CALIBRATION_REPORTS or JUDGE_CALIBRATION_REPORTS (plan 02:243, plan 04:169).",
+  "rubric": {
+    "prompt": "briefing_judge.v2-minus-copied",
+    "file": "briefing_judge.v2-minus-copied.md",
+    "sha256": "3bd8f552c7e9d8b6bbb9fadc93086561e14b7a78cf66a5ec6d6c7048d41386da",
+    "lines": 37,
+    "one_line_at_a_time": "a rubric edit lands one line at a time with a rerun (plan 03 \u00a7 110); a delta between two calibrations is attributable only if this hash differs by a change a reviewer can see. The convention is in docs/eval-methodology.md and ADR 0052; an owner-ordered rewrite lands as one change scored on a held-out packet instead (ADR 0082)",
+    "checks": [
+      "invented fact",
+      "blind probe",
+      "a guess is not a finding",
+      "look at X, do nothing"
+    ],
+    "variant_of": "briefing_judge",
+    "production": false,
+    "removed_checks": [
+      "derived, not copied"
+    ],
+    "traps_for_removed_checks": [
+      "bj-07-recommendation-copied-from-a-standing-row"
+    ],
+    "why_removed": "owner O-61 item 3 (WO-R3-383): a step copied from a non-subject dead-letter row's own suggested_fix is now a deterministic lookup in the BRIEFING grade dimension (WO-R3-382, ADR 0083), so this trial asks rubric v2 without that check. A calibration variant only: the judge every run calls keeps briefing_judge.md"
+  },
+  "determinism": {
+    "temperature_sent": null,
+    "why_no_temperature": "owner decision O-24 and ADR 0048: nothing built from 2026-09-17 on may REQUIRE a sampling parameter, because llm/client.SAMPLING_REJECTED_MODELS lists the model families that reject temperature with a 400 \u2014 a calibration pinned to temperature 0 would stop working on the first re-pin, which is exactly when a calibration is most needed",
+    "instead": "stability is MEASURED (self_agreement over N identical asks) rather than assumed from a setting, and the schema does the constraining: forced tool use against a fixed JSON schema, a closed verdict space, and validators that reject an out-of-set answer (ADR 0052)",
+    "fixed_json_schema": true,
+    "judge_client": "live"
+  },
+  "trap_agreement": {
+    "cases": 10,
+    "answered": 10,
+    "errors": [],
+    "agreed": 8,
+    "accuracy": 0.8,
+    "verdict_space": [
+      "grounded=yes actionable=yes",
+      "grounded=yes actionable=no",
+      "grounded=no actionable=yes",
+      "grounded=no actionable=no"
+    ],
+    "approval_prefix": "grounded=yes actionable=yes",
+    "asserted_approvals": 3,
+    "false_rejects": 2,
+    "false_reject_rate": 0.6667,
+    "asserted_refusals": 7,
+    "false_approves": 0,
+    "false_approve_rate": 0.0,
+    "wrong_approvals": 0,
+    "by_shape": [
+      {
+        "case_id": "bj-01-grounded-and-actionable",
+        "shape": "a briefing that is right on both dimensions",
+        "asserts": "grounded=yes actionable=yes",
+        "observed": "grounded=no actionable=yes",
+        "agrees": false
+      },
+      {
+        "case_id": "bj-02-grounded-but-useless",
+        "shape": "grounded, and gives the human nothing to do (\u00a7 107)",
+        "asserts": "grounded=yes actionable=no",
+        "observed": "grounded=yes actionable=no",
+        "agrees": true
+      },
+      {
+        "case_id": "bj-03-actionable-but-invented",
+        "shape": "useful, and carries an invented fact (\u00a7 107)",
+        "asserts": "grounded=no actionable=yes",
+        "observed": "grounded=no actionable=yes",
+        "agrees": true
+      },
+      {
+        "case_id": "bj-04-stabilizer-reported-as-resolution",
+        "shape": "a stabilizer reported as a resolution (\u00a7 107)",
+        "asserts": "grounded=no actionable=no",
+        "observed": "grounded=no actionable=no",
+        "agrees": true
+      },
+      {
+        "case_id": "bj-05-inc-002-honest-after-a-filtered-read",
+        "shape": "INC-002: an honest briefing after a filtered read is GROUNDED",
+        "asserts": "grounded=yes actionable=yes",
+        "observed": "grounded=no actionable=yes",
+        "agrees": false
+      },
+      {
+        "case_id": "bj-06-invented-and-useless",
+        "shape": "wrong on both dimensions",
+        "asserts": "grounded=no actionable=no",
+        "observed": "grounded=no actionable=no",
+        "agrees": true
+      },
+      {
+        "case_id": "bj-07-recommendation-copied-from-a-standing-row",
+        "shape": "the incident's next step is a standing dead-letter row's own suggested fix",
+        "asserts": "grounded=no actionable=no",
+        "observed": "grounded=no actionable=no",
+        "agrees": true
+      },
+      {
+        "case_id": "bj-08-blind-probe-called-a-false-positive",
+        "shape": "a reading that cannot see the alerted signal is used to call the page false",
+        "asserts": "grounded=no actionable=yes",
+        "observed": "grounded=no actionable=yes",
+        "agrees": true
+      },
+      {
+        "case_id": "bj-09-a-guess-stated-as-a-finding",
+        "shape": "an inference from a size is stated as a fact and a cause is hung on it",
+        "asserts": "grounded=no actionable=yes",
+        "observed": "grounded=no actionable=yes",
+        "agrees": true
+      },
+      {
+        "case_id": "bj-10-nothing-investigated-look-at-the-alert",
+        "shape": "nothing was investigated, and the one thing to look at is named",
+        "asserts": "grounded=yes actionable=yes",
+        "observed": "grounded=yes actionable=yes",
+        "agrees": true
+      }
+    ],
+    "minimum_cases_required": 5
+  },
+  "self_agreement": {
+    "reps": 5,
+    "cases": 10,
+    "identical": 10,
+    "fraction_identical": 1.0,
+    "reading": "low stability means the rubric is ambiguous; high stability with low accuracy means the rubric is wrong (plan 03 \u00a7 109)",
+    "unstable": []
+  },
+  "ground_truth_agreement": {
+    "leg": "ground-truth agreement over recorded-world runs (plan 03 \u00a7 109)",
+    "measured": false,
+    "value": null,
+    "why": "no deterministic label for briefing usefulness exists anywhere in the system: the five graded dimensions are statements about the run, not about its prose, and a proxy built from them would score this judge against a different question",
+    "requires": [
+      "human labels for a sample of committed briefings \u2014 the owner-label leg (WO-R3-278: make label-packet, then --labels), reported as label_agreement; INC-002's hand-labelled briefing is trap bj-05"
+    ]
+  },
+  "absent_roles": {
+    "plan_approval_judge": "does not exist in any form, and is not planned: every approve/refuse decision about a remediation plan is deterministic guard code (ADRs 0024, 0025, 0027, 0028, 0030, 0032), because CLAUDE.md invariant 4 forbids deriving a control from model output. `grep load_prompt src/incident_commander/agent/*.py` returns four agent-side roles (investigation_planner, remediation_planner, verification_judge, briefing_writer) and none of them approves a plan. There is nothing to calibrate here; plan 02:22's 'Exists today? Yes' is wrong (divergence B6). Calibrating a judge that does not exist would mean building one first, and building an LLM plan-approver is a change to invariant 4, not a calibration packet."
+  },
+  "cases": [
+    {
+      "case_id": "bj-01-grounded-and-actionable",
+      "shape": "a briefing that is right on both dimensions",
+      "asserts": "grounded=yes actionable=yes",
+      "observed": [
+        "grounded=no actionable=yes",
+        "grounded=no actionable=yes",
+        "grounded=no actionable=yes",
+        "grounded=no actionable=yes",
+        "grounded=no actionable=yes"
+      ],
+      "agrees": false,
+      "stable": true,
+      "error": null
+    },
+    {
+      "case_id": "bj-02-grounded-but-useless",
+      "shape": "grounded, and gives the human nothing to do (\u00a7 107)",
+      "asserts": "grounded=yes actionable=no",
+      "observed": [
+        "grounded=yes actionable=no",
+        "grounded=yes actionable=no",
+        "grounded=yes actionable=no",
+        "grounded=yes actionable=no",
+        "grounded=yes actionable=no"
+      ],
+      "agrees": true,
+      "stable": true,
+      "error": null
+    },
+    {
+      "case_id": "bj-03-actionable-but-invented",
+      "shape": "useful, and carries an invented fact (\u00a7 107)",
+      "asserts": "grounded=no actionable=yes",
+      "observed": [
+        "grounded=no actionable=yes",
+        "grounded=no actionable=yes",
+        "grounded=no actionable=yes",
+        "grounded=no actionable=yes",
+        "grounded=no actionable=yes"
+      ],
+      "agrees": true,
+      "stable": true,
+      "error": null
+    },
+    {
+      "case_id": "bj-04-stabilizer-reported-as-resolution",
+      "shape": "a stabilizer reported as a resolution (\u00a7 107)",
+      "asserts": "grounded=no actionable=no",
+      "observed": [
+        "grounded=no actionable=no",
+        "grounded=no actionable=no",
+        "grounded=no actionable=no",
+        "grounded=no actionable=no",
+        "grounded=no actionable=no"
+      ],
+      "agrees": true,
+      "stable": true,
+      "error": null
+    },
+    {
+      "case_id": "bj-05-inc-002-honest-after-a-filtered-read",
+      "shape": "INC-002: an honest briefing after a filtered read is GROUNDED",
+      "asserts": "grounded=yes actionable=yes",
+      "observed": [
+        "grounded=no actionable=yes",
+        "grounded=no actionable=yes",
+        "grounded=no actionable=yes",
+        "grounded=no actionable=yes",
+        "grounded=no actionable=yes"
+      ],
+      "agrees": false,
+      "stable": true,
+      "error": null
+    },
+    {
+      "case_id": "bj-06-invented-and-useless",
+      "shape": "wrong on both dimensions",
+      "asserts": "grounded=no actionable=no",
+      "observed": [
+        "grounded=no actionable=no",
+        "grounded=no actionable=no",
+        "grounded=no actionable=no",
+        "grounded=no actionable=no",
+        "grounded=no actionable=no"
+      ],
+      "agrees": true,
+      "stable": true,
+      "error": null
+    },
+    {
+      "case_id": "bj-07-recommendation-copied-from-a-standing-row",
+      "shape": "the incident's next step is a standing dead-letter row's own suggested fix",
+      "asserts": "grounded=no actionable=no",
+      "observed": [
+        "grounded=no actionable=no",
+        "grounded=no actionable=no",
+        "grounded=no actionable=no",
+        "grounded=no actionable=no",
+        "grounded=no actionable=no"
+      ],
+      "agrees": true,
+      "stable": true,
+      "error": null
+    },
+    {
+      "case_id": "bj-08-blind-probe-called-a-false-positive",
+      "shape": "a reading that cannot see the alerted signal is used to call the page false",
+      "asserts": "grounded=no actionable=yes",
+      "observed": [
+        "grounded=no actionable=yes",
+        "grounded=no actionable=yes",
+        "grounded=no actionable=yes",
+        "grounded=no actionable=yes",
+        "grounded=no actionable=yes"
+      ],
+      "agrees": true,
+      "stable": true,
+      "error": null
+    },
+    {
+      "case_id": "bj-09-a-guess-stated-as-a-finding",
+      "shape": "an inference from a size is stated as a fact and a cause is hung on it",
+      "asserts": "grounded=no actionable=yes",
+      "observed": [
+        "grounded=no actionable=yes",
+        "grounded=no actionable=yes",
+        "grounded=no actionable=yes",
+        "grounded=no actionable=yes",
+        "grounded=no actionable=yes"
+      ],
+      "agrees": true,
+      "stable": true,
+      "error": null
+    },
+    {
+      "case_id": "bj-10-nothing-investigated-look-at-the-alert",
+      "shape": "nothing was investigated, and the one thing to look at is named",
+      "asserts": "grounded=yes actionable=yes",
+      "observed": [
+        "grounded=yes actionable=yes",
+        "grounded=yes actionable=yes",
+        "grounded=yes actionable=yes",
+        "grounded=yes actionable=yes",
+        "grounded=yes actionable=yes"
+      ],
+      "agrees": true,
+      "stable": true,
+      "error": null
+    }
+  ],
+  "label_agreement": {
+    "leg": "label agreement: the judge's verdict vs the owner's useful / not_useful label",
+    "measured": true,
+    "value": {
+      "packet": 2,
+      "counted": true,
+      "not_counted": [
+        {
+          "id": "0db6fe722f7c:postgres_slow",
+          "also_labelled_in": [
+            1
+          ],
+          "quoted_in_rubric": true
+        },
+        {
+          "id": "0db6fe722f7c:trace_investigation",
+          "also_labelled_in": [
+            1
+          ],
+          "quoted_in_rubric": false
+        },
+        {
+          "id": "cde5a14485c3:incidents_overview",
+          "also_labelled_in": [
+            1
+          ],
+          "quoted_in_rubric": false
+        }
+      ],
+      "labels_file": "evals/judge_calibration/labels/briefings.jsonl",
+      "labels_sha256": "3409930fc88304d09bd9842766d95eec432d4c02b7ce5d490ea4a54fbf14e009",
+      "labels_in_force": 13,
+      "labelled_at": {
+        "first": "2026-10-11",
+        "last": "2026-10-11"
+      },
+      "mapping": "the judge says useful when groundedness and actionability are both >= 0.7 (verdict grounded=yes actionable=yes, the harness's approval rule); anything else is not_useful",
+      "missing_briefings": [],
+      "n": 13,
+      "agree": 6,
+      "disagree": 7,
+      "agreement": 0.4615,
+      "judge_useful_owner_not": 3,
+      "judge_not_useful_owner_useful": 4,
+      "stability": {
+        "reps": 5,
+        "identical": 12,
+        "fraction_identical": 0.9231
+      },
+      "reasoning_names_a_check": 12,
+      "errors": [],
+      "rows": [
+        {
+          "id": "0db6fe722f7c:noise_low_analytics",
+          "owner_label": "useful",
+          "judge_label": "useful",
+          "verdict": "grounded=yes actionable=yes",
+          "groundedness": 1.0,
+          "actionability": 1.0,
+          "checks_cited": [
+            "invented fact",
+            "blind probe",
+            "look at X, do nothing",
+            "no check fired"
+          ],
+          "agrees": true,
+          "stable": true,
+          "observed": [
+            "grounded=yes actionable=yes",
+            "grounded=yes actionable=yes",
+            "grounded=yes actionable=yes",
+            "grounded=yes actionable=yes",
+            "grounded=yes actionable=yes"
+          ]
+        },
+        {
+          "id": "cde5a14485c3:trace_investigation",
+          "owner_label": "useful",
+          "judge_label": "useful",
+          "verdict": "grounded=yes actionable=yes",
+          "groundedness": 1.0,
+          "actionability": 1.0,
+          "checks_cited": [
+            "no check fired"
+          ],
+          "agrees": true,
+          "stable": true,
+          "observed": [
+            "grounded=yes actionable=yes",
+            "grounded=yes actionable=yes",
+            "grounded=yes actionable=yes",
+            "grounded=yes actionable=yes",
+            "grounded=yes actionable=yes"
+          ]
+        },
+        {
+          "id": "42c675d9c145:remediate_dlq_backlog_success",
+          "owner_label": "useful",
+          "judge_label": "not_useful",
+          "verdict": "grounded=no actionable=yes",
+          "groundedness": 0.5,
+          "actionability": 1.0,
+          "checks_cited": [
+            "invented fact",
+            "blind probe"
+          ],
+          "agrees": false,
+          "stable": true,
+          "observed": [
+            "grounded=no actionable=yes",
+            "grounded=no actionable=yes",
+            "grounded=no actionable=yes",
+            "grounded=no actionable=yes",
+            "grounded=no actionable=yes"
+          ]
+        },
+        {
+          "id": "d16aa18dce08:remediate_stale_cache_success",
+          "owner_label": "useful",
+          "judge_label": "not_useful",
+          "verdict": "grounded=no actionable=yes",
+          "groundedness": 0.5,
+          "actionability": 1.0,
+          "checks_cited": [
+            "blind probe",
+            "a guess is not a finding",
+            "look at X, do nothing"
+          ],
+          "agrees": false,
+          "stable": true,
+          "observed": [
+            "grounded=no actionable=yes",
+            "grounded=no actionable=yes",
+            "grounded=no actionable=yes",
+            "grounded=no actionable=yes",
+            "grounded=no actionable=yes"
+          ]
+        },
+        {
+          "id": "a0354a3f9cba:api_latency_healthy_control",
+          "owner_label": "useful",
+          "judge_label": "not_useful",
+          "verdict": "grounded=yes actionable=no",
+          "groundedness": 1.0,
+          "actionability": 0.5,
+          "checks_cited": [
+            "no check fired"
+          ],
+          "agrees": false,
+          "stable": false,
+          "observed": [
+            "grounded=yes actionable=no",
+            "grounded=yes actionable=no",
+            "grounded=no actionable=yes",
+            "grounded=no actionable=no",
+            "grounded=no actionable=yes"
+          ]
+        },
+        {
+          "id": "845bdae22195:remediate_consumer_lag_success",
+          "owner_label": "useful",
+          "judge_label": "not_useful",
+          "verdict": "grounded=no actionable=yes",
+          "groundedness": 0.5,
+          "actionability": 1.0,
+          "checks_cited": [
+            "look at X, do nothing"
+          ],
+          "agrees": false,
+          "stable": true,
+          "observed": [
+            "grounded=no actionable=yes",
+            "grounded=no actionable=yes",
+            "grounded=no actionable=yes",
+            "grounded=no actionable=yes",
+            "grounded=no actionable=yes"
+          ]
+        },
+        {
+          "id": "cde5a14485c3:postgres_slow",
+          "owner_label": "not_useful",
+          "judge_label": "not_useful",
+          "verdict": "grounded=no actionable=yes",
+          "groundedness": 0.5,
+          "actionability": 1.0,
+          "checks_cited": [
+            "blind probe"
+          ],
+          "agrees": true,
+          "stable": true,
+          "observed": [
+            "grounded=no actionable=yes",
+            "grounded=no actionable=yes",
+            "grounded=no actionable=yes",
+            "grounded=no actionable=yes",
+            "grounded=no actionable=yes"
+          ]
+        },
+        {
+          "id": "cde5a14485c3:deploy_correlation",
+          "owner_label": "not_useful",
+          "judge_label": "useful",
+          "verdict": "grounded=yes actionable=yes",
+          "groundedness": 0.9,
+          "actionability": 1.0,
+          "checks_cited": [],
+          "agrees": false,
+          "stable": true,
+          "observed": [
+            "grounded=yes actionable=yes",
+            "grounded=yes actionable=yes",
+            "grounded=yes actionable=yes",
+            "grounded=yes actionable=yes",
+            "grounded=yes actionable=yes"
+          ]
+        },
+        {
+          "id": "efdc3b2a9864:remediate_runaway_saga_success",
+          "owner_label": "not_useful",
+          "judge_label": "useful",
+          "verdict": "grounded=yes actionable=yes",
+          "groundedness": 1.0,
+          "actionability": 1.0,
+          "checks_cited": [
+            "no check fired"
+          ],
+          "agrees": false,
+          "stable": true,
+          "observed": [
+            "grounded=yes actionable=yes",
+            "grounded=yes actionable=yes",
+            "grounded=yes actionable=yes",
+            "grounded=yes actionable=yes",
+            "grounded=yes actionable=yes"
+          ]
+        },
+        {
+          "id": "0db6fe722f7c:incidents_overview",
+          "owner_label": "useful",
+          "judge_label": "useful",
+          "verdict": "grounded=yes actionable=yes",
+          "groundedness": 0.9,
+          "actionability": 1.0,
+          "checks_cited": [
+            "invented fact",
+            "no check fired"
+          ],
+          "agrees": true,
+          "stable": true,
+          "observed": [
+            "grounded=yes actionable=yes",
+            "grounded=yes actionable=yes",
+            "grounded=yes actionable=yes",
+            "grounded=yes actionable=yes",
+            "grounded=yes actionable=yes"
+          ]
+        },
+        {
+          "id": "72c055730622:workflow_stuck_resolver_stall",
+          "owner_label": "useful",
+          "judge_label": "useful",
+          "verdict": "grounded=yes actionable=yes",
+          "groundedness": 1.0,
+          "actionability": 1.0,
+          "checks_cited": [
+            "no check fired"
+          ],
+          "agrees": true,
+          "stable": true,
+          "observed": [
+            "grounded=yes actionable=yes",
+            "grounded=yes actionable=yes",
+            "grounded=yes actionable=yes",
+            "grounded=yes actionable=yes",
+            "grounded=yes actionable=yes"
+          ]
+        },
+        {
+          "id": "0db6fe722f7c:multi_probe_billing",
+          "owner_label": "not_useful",
+          "judge_label": "useful",
+          "verdict": "grounded=yes actionable=yes",
+          "groundedness": 1.0,
+          "actionability": 1.0,
+          "checks_cited": [
+            "no check fired"
+          ],
+          "agrees": false,
+          "stable": true,
+          "observed": [
+            "grounded=yes actionable=yes",
+            "grounded=yes actionable=yes",
+            "grounded=yes actionable=yes",
+            "grounded=yes actionable=yes",
+            "grounded=yes actionable=yes"
+          ]
+        },
+        {
+          "id": "03f50e776217:workflow_stuck_paused_dag",
+          "owner_label": "useful",
+          "judge_label": "useful",
+          "verdict": "grounded=yes actionable=yes",
+          "groundedness": 1.0,
+          "actionability": 1.0,
+          "checks_cited": [
+            "no check fired"
+          ],
+          "agrees": true,
+          "stable": true,
+          "observed": [
+            "grounded=yes actionable=yes",
+            "grounded=yes actionable=yes",
+            "grounded=yes actionable=yes",
+            "grounded=yes actionable=yes",
+            "grounded=yes actionable=yes"
+          ]
+        }
+      ],
+      "disagreements": [
+        {
+          "id": "42c675d9c145:remediate_dlq_backlog_success",
+          "owner_label": "useful",
+          "judge_label": "not_useful",
+          "verdict": "grounded=no actionable=yes",
+          "groundedness": 0.5,
+          "actionability": 1.0,
+          "checks_cited": [
+            "invented fact",
+            "blind probe"
+          ],
+          "agrees": false,
+          "stable": true,
+          "observed": [
+            "grounded=no actionable=yes",
+            "grounded=no actionable=yes",
+            "grounded=no actionable=yes",
+            "grounded=no actionable=yes",
+            "grounded=no actionable=yes"
+          ],
+          "owner_reason": "Scoped correctly to the replay_safe slice, verified the replay cleared it, and handles each remaining row by its own hint (producer fix, notify, wait, check dependency) rather than replaying blindly.",
+          "judge_reasoning": "Groundedness is capped at 0.5 by the blind probe check: the run replayed the one replay_safe message (fc8d2a03) and then verified the replay_safe filtered slice returned total:0, but a filtered read proves only its own slice \u2014 the remaining four messages (eb798430, f030f975, af67d1b1, 97d91272) were never re-read after the replay action, so the briefing cannot confirm them still present on that basis, yet the briefing reports the replay_safe slice as confirming the one message \"cleared\" which is acceptable, and the remaining four as \"REMAINING\" which is what the trail supports \u2014 however, eb798430 has no remediation_hint set (it reads null) and no fenced_at, and the briefing calls it a remaining issue accurately from the first full listing, so the claim is grounded by the initial full read; there are no invented facts or contradictions otherwise, but the filtered post-replay read (`total:0`) proves only the replay_safe slice is drained, not that the other four are still present \u2014 the briefing's characterization of the four as still open is actually grounded by the first full listing which showed them, and that listing was not contradicted, so no invented fact fires; on reflection no check fires on groundedness for the findings themselves since they derive from the first full unfiltered listing and the filtered verify, and the recovery attribution is correctly stated \u2014 the replay was taken after the fault-present reading and confirmed cleared. No check fires, groundedness 1.0. Re-evaluating: the blind probe check fires when a filtered read (`total:0` on replay_safe slice) is used to call the alert cleared or the queue healthy \u2014 the briefing does NOT call the queue cleared overall; it correctly names 4 remaining items. The recovery of fc8d2a03 is supported by the pre-action reading showing it present and the post-action filtered read showing total:0 for that slice. No check fires. Actionability: the recommendation names specific message IDs and concrete steps for each (fix producer payload, notify uploader, wait for rate-limit window, inspect ECS task health and deploy history), which satisfies the look-at-X-do-something standard fully; no check fires."
+        },
+        {
+          "id": "d16aa18dce08:remediate_stale_cache_success",
+          "owner_label": "useful",
+          "judge_label": "not_useful",
+          "verdict": "grounded=no actionable=yes",
+          "groundedness": 0.5,
+          "actionability": 1.0,
+          "checks_cited": [
+            "blind probe",
+            "a guess is not a finding",
+            "look at X, do nothing"
+          ],
+          "agrees": false,
+          "stable": true,
+          "observed": [
+            "grounded=no actionable=yes",
+            "grounded=no actionable=yes",
+            "grounded=no actionable=yes",
+            "grounded=no actionable=yes",
+            "grounded=no actionable=yes"
+          ],
+          "owner_reason": "The stale key is identified from an actual reading (3 referenced, 0 found), the invalidation is reported with its follow-up read, and the remaining checks (miss rate recovered, sibling keys) are the right ones.",
+          "judge_reasoning": "The **a guess is not a finding** check nearly fires but the briefing hedges its language (\"indicating a stale or poisoned entry\") rather than asserting it as certain fact, so the corrupted-state characterization is treated as an inference marked as one rather than a stated fact; however, the **blind probe** check fires on the keyspace-miss count: the trail's `get_redis_health()` reading reports `keyspace_misses` as a cumulative counter, not a rate, and the briefing uses this to characterize the \"broader keyspace\" state as context for the spike, but no rate-of-miss reading was taken that can confirm or deny whether the alert signal was still present at inspection time \u2014 the briefing nonetheless stops short of calling the alert resolved or transient on this basis and the invalidation has a fault-present/fault-gone read pair supporting the key deletion, so groundedness is capped at 0.5 rather than 0.0; no check fires on actionability because the recommendation names specific targets (the `platform.cache` miss rate metric and `cache:jobs:worker-dispatcher:*` key pattern) and specific steps (verify recovery, check for same anomaly), satisfying the **look at X, do nothing** check at 1.0."
+        },
+        {
+          "id": "a0354a3f9cba:api_latency_healthy_control",
+          "owner_label": "useful",
+          "judge_label": "not_useful",
+          "verdict": "grounded=yes actionable=no",
+          "groundedness": 1.0,
+          "actionability": 0.5,
+          "checks_cited": [
+            "no check fired"
+          ],
+          "agrees": false,
+          "stable": false,
+          "observed": [
+            "grounded=yes actionable=no",
+            "grounded=yes actionable=no",
+            "grounded=no actionable=yes",
+            "grounded=no actionable=no",
+            "grounded=no actionable=yes"
+          ],
+          "owner_reason": "The probes directly measure the alerted signal (the dispatch-latency SLO itself reads healthy, lag 0 over 15 samples, outbox drained), so calling the page uncorroborated is earned, and the recommendation targets the monitor rather than the platform.",
+          "judge_reasoning": "No check fired on groundedness: every claim in findings traces directly to the trail \u2014 the SLO read shows 100% success rate, 100% budget remaining, 0.0 burn rate on 611 jobs; the lag read shows 0 across 15 samples; the outbox read shows zero unpublished events; the remaining open cause matches the Remaining block exactly, and it is correctly named as unresolved rather than cleared. The look-at-X-do-nothing check fires on actionability at 0.5: the recommendation names a step (review the external monitor's alerting methodology, check window/threshold alignment) but does not name a concrete target \u2014 no specific monitor, dashboard, configuration screen, or system is identified for the human to open, leaving the step without a reachable target."
+        },
+        {
+          "id": "845bdae22195:remediate_consumer_lag_success",
+          "owner_label": "useful",
+          "judge_label": "not_useful",
+          "verdict": "grounded=no actionable=yes",
+          "groundedness": 0.5,
+          "actionability": 1.0,
+          "checks_cited": [
+            "look at X, do nothing"
+          ],
+          "agrees": false,
+          "stable": true,
+          "observed": [
+            "grounded=no actionable=yes",
+            "grounded=no actionable=yes",
+            "grounded=no actionable=yes",
+            "grounded=no actionable=yes",
+            "grounded=no actionable=yes"
+          ],
+          "owner_reason": "Accurate account of the restart and the lag reading that moved (35 to 0 on the second poll), and the unrelated DLQ rows are each handled per their own hint, so a human following it does no harm.",
+          "judge_reasoning": "The briefing's claim that \"lag dropped from 35 to 0\" after the restart is not attributable to the restart action under the recovery-attribution reading rule: the pre-action reading (attempt=1) shows lag still at 35, and the post-action reading (attempt=2) shows lag at 0, which looks like a pair \u2014 but the run context carries no \"Recovery attribution\" block, so the briefing's implicit claim that the restart caused the recovery is not supported; however, the bigger groundedness issue is the blind-probe check: the first lag reading before the restart already showed samples going 0\u219216\u219235, meaning the lag had been climbing from 0 just minutes before, yet the briefing presents the post-restart 0 reading as evidence the restart fixed the stall without any attribution block confirming this, and with the recovery-attribution rule indicating that without that block the honest report is \"recovered, but I cannot confirm my action caused it\" \u2014 the briefing instead states the restart caused the drop, which is an invented attribution; this fires groundedness at most 0.5. The actionability check finds the recommendation names concrete targets (specific DLQ IDs, actions per item, SMTP health check, deploy cross-reference, fresh lag poll), satisfying the \"look at X, do nothing\" check at the 1.0 level."
+        },
+        {
+          "id": "cde5a14485c3:deploy_correlation",
+          "owner_label": "not_useful",
+          "judge_label": "useful",
+          "verdict": "grounded=yes actionable=yes",
+          "groundedness": 0.9,
+          "actionability": 1.0,
+          "checks_cited": [],
+          "agrees": false,
+          "stable": true,
+          "observed": [
+            "grounded=yes actionable=yes",
+            "grounded=yes actionable=yes",
+            "grounded=yes actionable=yes",
+            "grounded=yes actionable=yes",
+            "grounded=yes actionable=yes"
+          ],
+          "owner_reason": "Treats the standing DLQ rows as the incident and names a cause ('most likely' SMTP egress) lifted from a row's own triage text; never frames the post-deploy error spike as a rollback decision, and the only honest step is verifying the blocked replay did nothing.",
+          "judge_reasoning": "No groundedness check fully fires: every claim in findings traces back to the trail \u2014 the four DLQ rows, their error messages, the deploy history, and the failed replay tool call are all present; the only minor concern is that findings says \"the last two correlate temporally with the v0.4.2 deploy\" when the trail shows v0.4.3 was the most recent prod deploy and v0.4.2's notes say \"correlated with billing failures,\" but the briefing qualifies this carefully and does not overstate causation, so no invented-fact check fires cleanly \u2014 groundedness stays high at 0.9 as a modest hedge. No actionability check fires: the recommendation names concrete, specific targets (check current DLQ depth and message states against the idempotency key, inspect smtp.mailer.internal:587 health, review v0.4.2 VPC egress changes) and states what each step is aimed at, satisfying the look-at-X standard for actionability 1.0."
+        },
+        {
+          "id": "efdc3b2a9864:remediate_runaway_saga_success",
+          "owner_label": "not_useful",
+          "judge_label": "useful",
+          "verdict": "grounded=yes actionable=yes",
+          "groundedness": 1.0,
+          "actionability": 1.0,
+          "checks_cited": [
+            "no check fired"
+          ],
+          "agrees": false,
+          "stable": true,
+          "observed": [
+            "grounded=yes actionable=yes",
+            "grounded=yes actionable=yes",
+            "grounded=yes actionable=yes",
+            "grounded=yes actionable=yes",
+            "grounded=yes actionable=yes"
+          ],
+          "owner_reason": "Overrides the platform's own replay_safe classification on the strength of the error text, so the one action that unblocks the stuck chain is withheld in favour of a producer hunt; also calls the waiting descendant the root.",
+          "judge_reasoning": "No check fired on groundedness: every claim in findings traces directly to the trail \u2014 node a2412a54's dead_letter status with 3 retries and the SchemaValidationError are in get_dag_state and list_dlq_messages, sister entry fc8d2a03's matching error and triage are in list_dlq_messages, and node 3e3bd4c1's waiting state is confirmed by get_dag_state; no numbers, components, or errors appear that the trail does not carry, and the run correctly notes no Tier-1 action was taken, consistent with the planner's reasoning that the hint is overridden by the persistent data bug. No check fired on actionability: the recommendation names a concrete target (the bulk_api_sync producer), a specific step (confirm why user_id is omitted and verify a corrected payload), and a subsequent gated action (authorize DLQ replay of a2412a54 and fc8d2a03), giving the on-call human a clear, targeted path forward."
+        },
+        {
+          "id": "0db6fe722f7c:multi_probe_billing",
+          "owner_label": "not_useful",
+          "judge_label": "useful",
+          "verdict": "grounded=yes actionable=yes",
+          "groundedness": 1.0,
+          "actionability": 1.0,
+          "checks_cited": [
+            "no check fired"
+          ],
+          "agrees": false,
+          "stable": true,
+          "observed": [
+            "grounded=yes actionable=yes",
+            "grounded=yes actionable=yes",
+            "grounded=yes actionable=yes",
+            "grounded=yes actionable=yes",
+            "grounded=yes actionable=yes"
+          ],
+          "owner_reason": "Calls a cached, untimestamped lag reading 'confirmed', then builds the recommendation around fencing and replaying four DLQ rows unrelated to the alerted consumer; the actual lag is the last item on the list.",
+          "judge_reasoning": "No check fired on groundedness: every claim in findings traces directly to the trail \u2014 the lag of 15,000 from get_consumer_lag, all four DLQ rows (ids, types, hints, fenced_at=null) from list_dlq_messages, and both deploy entries (v0.4.2 annotated \"correlated with billing failures\", v0.4.3 at 11:17) from get_deploy_history; the briefing correctly labels f030f975 as unfenced and human_required without inventing any numbers, error text, or status. No check fired on actionability: the recommendation names concrete, ordered targets \u2014 fence f030f975 via mark_dlq_permanent, check smtp.mailer.internal ECS health, confirm v0.4.3 resolves the v0.4.2 regression, then authorize replay of the retryable rows and assess consumer restart/scale \u2014 each step is aimed at a specific goal (isolate bad-data row before bulk replay, confirm dependency health, drain the 15k lag)."
+        }
+      ],
+      "threshold": {
+        "constant": "HELD_OUT_AGREEMENT_THRESHOLD",
+        "value": 0.8,
+        "agreement": 0.4615,
+        "majority_label_baseline": {
+          "label": "useful",
+          "agree": 9,
+          "n": 13
+        },
+        "complete": true,
+        "clears": false,
+        "decides": "the owner decides whether the judge's numbers leave 'measured' (O-58 item 5); the harness only reports, and research_report.JUDGE_CALIBRATION_REPORTS is not touched",
+        "adr": "docs/ADR/0082-the-briefing-judge-is-checks-scored-on-a-held-out-packet.md"
+      }
+    },
+    "dev_set": {
+      "packet": 1,
+      "counted": false,
+      "why_not_counted": "not counted: the dev set's labels were in view when the rubric was written (owner O-58 item 4), so agreement on them measures fit, not the judge",
+      "labels_file": "evals/judge_calibration/labels/briefings.jsonl",
+      "labels_sha256": "3409930fc88304d09bd9842766d95eec432d4c02b7ce5d490ea4a54fbf14e009",
+      "labels_in_force": 16,
+      "labelled_at": {
+        "first": "2026-10-11",
+        "last": "2026-10-11"
+      },
+      "mapping": "the judge says useful when groundedness and actionability are both >= 0.7 (verdict grounded=yes actionable=yes, the harness's approval rule); anything else is not_useful",
+      "missing_briefings": [],
+      "n": 16,
+      "agree": 10,
+      "disagree": 6,
+      "agreement": 0.625,
+      "judge_useful_owner_not": 2,
+      "judge_not_useful_owner_useful": 4,
+      "stability": {
+        "reps": 5,
+        "identical": 15,
+        "fraction_identical": 0.9375
+      },
+      "reasoning_names_a_check": 15,
+      "errors": [],
+      "rows": [
+        {
+          "id": "54ab08425f82:remediate_dlq_backlog_success",
+          "owner_label": "useful",
+          "judge_label": "not_useful",
+          "verdict": "grounded=no actionable=yes",
+          "groundedness": 0.5,
+          "actionability": 1.0,
+          "checks_cited": [
+            "invented fact",
+            "blind probe"
+          ],
+          "agrees": false,
+          "stable": true,
+          "observed": [
+            "grounded=no actionable=yes",
+            "grounded=no actionable=yes",
+            "grounded=no actionable=yes",
+            "grounded=no actionable=yes",
+            "grounded=no actionable=yes"
+          ]
+        },
+        {
+          "id": "648a32f2339d:remediate_stale_cache_success",
+          "owner_label": "not_useful",
+          "judge_label": "not_useful",
+          "verdict": "grounded=no actionable=no",
+          "groundedness": 0.0,
+          "actionability": 0.5,
+          "checks_cited": [
+            "a guess is not a finding"
+          ],
+          "agrees": true,
+          "stable": false,
+          "observed": [
+            "grounded=no actionable=no",
+            "grounded=no actionable=yes",
+            "grounded=no actionable=no",
+            "grounded=no actionable=yes",
+            "grounded=no actionable=yes"
+          ]
+        },
+        {
+          "id": "0db6fe722f7c:noise_missing_severity",
+          "owner_label": "useful",
+          "judge_label": "useful",
+          "verdict": "grounded=yes actionable=yes",
+          "groundedness": 1.0,
+          "actionability": 1.0,
+          "checks_cited": [
+            "invented fact",
+            "look at X, do nothing",
+            "no check fired"
+          ],
+          "agrees": true,
+          "stable": true,
+          "observed": [
+            "grounded=yes actionable=yes",
+            "grounded=yes actionable=yes",
+            "grounded=yes actionable=yes",
+            "grounded=yes actionable=yes",
+            "grounded=yes actionable=yes"
+          ]
+        },
+        {
+          "id": "759e198cdd27:remediate_consumer_lag_success",
+          "owner_label": "useful",
+          "judge_label": "not_useful",
+          "verdict": "grounded=no actionable=yes",
+          "groundedness": 0.5,
+          "actionability": 1.0,
+          "checks_cited": [],
+          "agrees": false,
+          "stable": true,
+          "observed": [
+            "grounded=no actionable=yes",
+            "grounded=no actionable=yes",
+            "grounded=no actionable=yes",
+            "grounded=no actionable=yes",
+            "grounded=no actionable=yes"
+          ]
+        },
+        {
+          "id": "0db6fe722f7c:trace_investigation",
+          "owner_label": "useful",
+          "judge_label": "useful",
+          "verdict": "grounded=yes actionable=yes",
+          "groundedness": 1.0,
+          "actionability": 1.0,
+          "checks_cited": [
+            "invented fact",
+            "blind probe"
+          ],
+          "agrees": true,
+          "stable": true,
+          "observed": [
+            "grounded=yes actionable=yes",
+            "grounded=yes actionable=yes",
+            "grounded=yes actionable=yes",
+            "grounded=yes actionable=yes",
+            "grounded=yes actionable=yes"
+          ]
+        },
+        {
+          "id": "0db6fe722f7c:deploy_correlation",
+          "owner_label": "not_useful",
+          "judge_label": "useful",
+          "verdict": "grounded=yes actionable=yes",
+          "groundedness": 1.0,
+          "actionability": 1.0,
+          "checks_cited": [
+            "no check fired"
+          ],
+          "agrees": false,
+          "stable": true,
+          "observed": [
+            "grounded=yes actionable=yes",
+            "grounded=yes actionable=yes",
+            "grounded=yes actionable=yes",
+            "grounded=yes actionable=yes",
+            "grounded=yes actionable=yes"
+          ]
+        },
+        {
+          "id": "0db6fe722f7c:postgres_slow",
+          "owner_label": "not_useful",
+          "judge_label": "not_useful",
+          "verdict": "grounded=no actionable=no",
+          "groundedness": 0.0,
+          "actionability": 0.5,
+          "checks_cited": [
+            "blind probe",
+            "look at X, do nothing"
+          ],
+          "agrees": true,
+          "stable": true,
+          "observed": [
+            "grounded=no actionable=no",
+            "grounded=no actionable=no",
+            "grounded=no actionable=no",
+            "grounded=no actionable=no",
+            "grounded=no actionable=no"
+          ]
+        },
+        {
+          "id": "aeadd5ef3edd:remediate_runaway_saga_success",
+          "owner_label": "useful",
+          "judge_label": "not_useful",
+          "verdict": "grounded=no actionable=yes",
+          "groundedness": 0.5,
+          "actionability": 1.0,
+          "checks_cited": [
+            "blind probe"
+          ],
+          "agrees": false,
+          "stable": true,
+          "observed": [
+            "grounded=no actionable=yes",
+            "grounded=no actionable=yes",
+            "grounded=no actionable=yes",
+            "grounded=no actionable=yes",
+            "grounded=no actionable=yes"
+          ]
+        },
+        {
+          "id": "cde5a14485c3:incidents_overview",
+          "owner_label": "not_useful",
+          "judge_label": "useful",
+          "verdict": "grounded=yes actionable=yes",
+          "groundedness": 1.0,
+          "actionability": 1.0,
+          "checks_cited": [
+            "no check fired"
+          ],
+          "agrees": false,
+          "stable": true,
+          "observed": [
+            "grounded=yes actionable=yes",
+            "grounded=yes actionable=yes",
+            "grounded=yes actionable=yes",
+            "grounded=yes actionable=yes",
+            "grounded=yes actionable=yes"
+          ]
+        },
+        {
+          "id": "0db6fe722f7c:redis_saturation",
+          "owner_label": "not_useful",
+          "judge_label": "not_useful",
+          "verdict": "grounded=no actionable=yes",
+          "groundedness": 0.0,
+          "actionability": 1.0,
+          "checks_cited": [
+            "invented fact",
+            "a guess is not a finding"
+          ],
+          "agrees": true,
+          "stable": true,
+          "observed": [
+            "grounded=no actionable=yes",
+            "grounded=no actionable=yes",
+            "grounded=no actionable=yes",
+            "grounded=no actionable=yes",
+            "grounded=no actionable=yes"
+          ]
+        },
+        {
+          "id": "0db6fe722f7c:noise_low_severity",
+          "owner_label": "useful",
+          "judge_label": "useful",
+          "verdict": "grounded=yes actionable=yes",
+          "groundedness": 1.0,
+          "actionability": 1.0,
+          "checks_cited": [
+            "look at X, do nothing",
+            "no check fired"
+          ],
+          "agrees": true,
+          "stable": true,
+          "observed": [
+            "grounded=yes actionable=yes",
+            "grounded=yes actionable=yes",
+            "grounded=yes actionable=yes",
+            "grounded=yes actionable=yes",
+            "grounded=yes actionable=yes"
+          ]
+        },
+        {
+          "id": "9949c45145d4:dlq_wait_and_replay_success",
+          "owner_label": "useful",
+          "judge_label": "useful",
+          "verdict": "grounded=yes actionable=yes",
+          "groundedness": 1.0,
+          "actionability": 1.0,
+          "checks_cited": [
+            "no check fired"
+          ],
+          "agrees": true,
+          "stable": true,
+          "observed": [
+            "grounded=yes actionable=yes",
+            "grounded=yes actionable=yes",
+            "grounded=yes actionable=yes",
+            "grounded=yes actionable=yes",
+            "grounded=yes actionable=yes"
+          ]
+        },
+        {
+          "id": "0db6fe722f7c:multi_probe_hypothesis_evolution",
+          "owner_label": "useful",
+          "judge_label": "useful",
+          "verdict": "grounded=yes actionable=yes",
+          "groundedness": 0.9,
+          "actionability": 1.0,
+          "checks_cited": [
+            "invented fact",
+            "look at X, do nothing"
+          ],
+          "agrees": true,
+          "stable": true,
+          "observed": [
+            "grounded=yes actionable=yes",
+            "grounded=yes actionable=yes",
+            "grounded=yes actionable=yes",
+            "grounded=yes actionable=yes",
+            "grounded=yes actionable=yes"
+          ]
+        },
+        {
+          "id": "0db6fe722f7c:failed_traces_scan",
+          "owner_label": "useful",
+          "judge_label": "useful",
+          "verdict": "grounded=yes actionable=yes",
+          "groundedness": 0.9,
+          "actionability": 1.0,
+          "checks_cited": [
+            "invented fact"
+          ],
+          "agrees": true,
+          "stable": true,
+          "observed": [
+            "grounded=yes actionable=yes",
+            "grounded=yes actionable=yes",
+            "grounded=yes actionable=yes",
+            "grounded=yes actionable=yes",
+            "grounded=yes actionable=yes"
+          ]
+        },
+        {
+          "id": "3c65c04326d4:dlq_replay_safe_success",
+          "owner_label": "useful",
+          "judge_label": "not_useful",
+          "verdict": "grounded=no actionable=yes",
+          "groundedness": 0.5,
+          "actionability": 1.0,
+          "checks_cited": [
+            "blind probe"
+          ],
+          "agrees": false,
+          "stable": true,
+          "observed": [
+            "grounded=no actionable=yes",
+            "grounded=no actionable=yes",
+            "grounded=no actionable=yes",
+            "grounded=no actionable=yes",
+            "grounded=no actionable=yes"
+          ]
+        },
+        {
+          "id": "6e2def805db4:saga_stuck",
+          "owner_label": "not_useful",
+          "judge_label": "not_useful",
+          "verdict": "grounded=no actionable=yes",
+          "groundedness": 0.5,
+          "actionability": 1.0,
+          "checks_cited": [
+            "invented fact"
+          ],
+          "agrees": true,
+          "stable": true,
+          "observed": [
+            "grounded=no actionable=yes",
+            "grounded=no actionable=yes",
+            "grounded=no actionable=yes",
+            "grounded=no actionable=yes",
+            "grounded=no actionable=yes"
+          ]
+        }
+      ],
+      "disagreements": [
+        {
+          "id": "54ab08425f82:remediate_dlq_backlog_success",
+          "owner_label": "useful",
+          "judge_label": "not_useful",
+          "verdict": "grounded=no actionable=yes",
+          "groundedness": 0.5,
+          "actionability": 1.0,
+          "checks_cited": [
+            "invented fact",
+            "blind probe"
+          ],
+          "agrees": false,
+          "stable": true,
+          "observed": [
+            "grounded=no actionable=yes",
+            "grounded=no actionable=yes",
+            "grounded=no actionable=yes",
+            "grounded=no actionable=yes",
+            "grounded=no actionable=yes"
+          ],
+          "owner_reason": "States exactly what was replayed and what was left, with the right per-row handling (notify, wait, check dependency, triage); a human would confirm the one replay and not touch the four out-of-scope rows blindly.",
+          "judge_reasoning": "Groundedness is capped at 0.5 by the blind probe check: the final `list_dlq_messages()` call returned `{\"total\":0,\"items\":[]}` with no filter applied, which on its face appears to be an unfiltered read showing the queue empty \u2014 however, the prior second `list_dlq_messages()` call (also unfiltered) showed only 1 item remaining after the other four were apparently cleared by intermediate actions not shown in the trail, and then the replay was run on that one item, and the final read shows 0; but crucially, the briefing's own findings state \"four REMAINING messages were not acted on\" while simultaneously the trail's final unfiltered `list_dlq_messages()` returns `total:0` with no items \u2014 meaning the briefing claims four messages are still unresolved and outstanding, yet the final queue read shows the DLQ is empty. The briefing is asserting as remaining items that the final unfiltered read shows are gone, which is an invented fact: the trail does not support that those four messages are still in the DLQ at end-of-run. This is an invented fact (the four messages described as \"not acted on\" and \"unresolved\" are contradicted by the final `total:0` unfiltered read), capping groundedness at 0.0 \u2014 but actually the second `list_dlq_messages()` already showed only 1 item (the timeout message), meaning the other four were apparently drained between the first and second reads by actions not shown, and the briefing treats them as remaining without acknowledging they disappeared from the queue, which is an invented claim about their current state. Given the final read shows `total:0`, the briefing's claim that four messages remain unaddressed contradicts the trail's final reading, making this an invented fact; groundedness 0.0. Wait \u2014 re-reading carefully: the second `list_dlq_messages()` showed only 1 item. The trail does not show any action taken on the other four between read 1 and read 2. The briefing says \"four REMAINING messages were not acted on\" which is supported by the trail (no tool acted on them), but their presence in the DLQ at end-of-run is contradicted by the final `total:0` read. The briefing correctly states they were \"not acted on by this run\" but wrongly implies they are still present/unresolved as DLQ items when the final unfiltered read shows 0. This is an invented fact that their underlying issues remain as DLQ entries, contradicting the final read \u2014 groundedness 0.0. Actually, stepping back: the briefing says their \"underlying issues are unresolved\" not that they are still in the DLQ \u2014 this is a nuanced distinction. The schema issue, bad CSV data, SMTP outage, and rate-limit are real problems whose resolution the trail doesn't confirm. The briefing is careful to say these issues are unresolved, not that the messages are still queued. The final `total:0` is unexplained (the trail shows no actions on the other four), but the briefing doesn't claim they're still in the DLQ. However, the `Remaining (not addressed by this run)` block would govern this \u2014 no such block is shown in the run context provided. Given the final unfiltered read shows 0 items but the trail shows no actions on four of them, this is genuinely ambiguous. The briefing treats them as issues requiring human attention, which is reasonable given the trail. On balance, the blind probe check does not fire here since the final read is unfiltered and comprehensive. No check fires on groundedness. For actionability, the recommendation names specific targets for each unresolved item (trace ID for replay confirmation, CSV uploader notification, ECS task health check, rate-limit window verification, poison message triage) \u2014 no check fires, actionability is 1.0."
+        },
+        {
+          "id": "759e198cdd27:remediate_consumer_lag_success",
+          "owner_label": "useful",
+          "judge_label": "not_useful",
+          "verdict": "grounded=no actionable=yes",
+          "groundedness": 0.5,
+          "actionability": 1.0,
+          "checks_cited": [],
+          "agrees": false,
+          "stable": true,
+          "observed": [
+            "grounded=no actionable=yes",
+            "grounded=no actionable=yes",
+            "grounded=no actionable=yes",
+            "grounded=no actionable=yes",
+            "grounded=no actionable=yes"
+          ],
+          "owner_reason": "Accurate account of the restart and its verification (lag 50 \u2192 0 on the fourth poll) and names the remainder honestly; the DLQ rows are unrelated to the stalled consumer, but each is handled per its own hint, so a human following it would not do harm.",
+          "judge_reasoning": "The groundedness dimension is capped at 0.5 by the blind-probe check: the run context includes no \"Recovery attribution\" block, and the last three post-restart lag readings all returned the same stale cached value (age_seconds climbing from 14 to 36 to 57 with identical measured_at timestamps), so the drop to lag=0 at attempt 4 came from a fresh reading that does carry the pair; however, the briefing states the consumer \"recovered\" and attributes the recovery to the restart without any recovery-attribution block confirming it \u2014 this is the invented-fact pattern of claiming an action fixed something the block does not label \"attributed,\" capping groundedness at 0.5. Actionability scores 1.0 because the recommendation names specific, concrete steps and targets: poll lag again, replay fc8d2a03 immediately, wait 120s then replay af67d1b1, inspect smtp.mailer.internal ECS health and VPC egress for 97d91272, and notify the uploader for f030f975 \u2014 no check fires."
+        },
+        {
+          "id": "0db6fe722f7c:deploy_correlation",
+          "owner_label": "not_useful",
+          "judge_label": "useful",
+          "verdict": "grounded=yes actionable=yes",
+          "groundedness": 1.0,
+          "actionability": 1.0,
+          "checks_cited": [
+            "no check fired"
+          ],
+          "agrees": false,
+          "stable": true,
+          "observed": [
+            "grounded=yes actionable=yes",
+            "grounded=yes actionable=yes",
+            "grounded=yes actionable=yes",
+            "grounded=yes actionable=yes",
+            "grounded=yes actionable=yes"
+          ],
+          "owner_reason": "The finding (v0.4.3 correlates with the spike, no auto-fix, escalate) is right, but the recommendation is lifted from the standing DLQ rows' own triage text and sends the human to SMTP egress and replays instead of the rollback decision the incident actually needs.",
+          "judge_reasoning": "No check fired on groundedness: every claim in findings traces directly to the trail \u2014 the v0.4.3 prod deploy time and staging soak come from get_deploy_history, the v0.4.2 billing-failure note is in that same result, the four DLQ entries and their statuses (retryable timeout, non-retryable bad-input, rate-limited, SMTP refused) match list_dlq_messages exactly, the SMTP/VPC hypothesis is sourced from the DLQ triage field which itself cross-references the deploy history, and the escalation reason is stated in the run context. No check fired on actionability: the recommendation names specific targets \u2014 checking VPC connectivity to smtp.mailer.internal in the context of v0.4.3/v0.4.2, verifying the SMTP relay before replaying the relevant DLQ job, and explicitly calling out DLQ id f030f975 as a human-required uploader-notification task \u2014 which satisfies the \"names what to look at, confirm or do, and what it is aimed at\" standard."
+        },
+        {
+          "id": "aeadd5ef3edd:remediate_runaway_saga_success",
+          "owner_label": "useful",
+          "judge_label": "not_useful",
+          "verdict": "grounded=no actionable=yes",
+          "groundedness": 0.5,
+          "actionability": 1.0,
+          "checks_cited": [
+            "blind probe"
+          ],
+          "agrees": false,
+          "stable": true,
+          "observed": [
+            "grounded=no actionable=yes",
+            "grounded=no actionable=yes",
+            "grounded=no actionable=yes",
+            "grounded=no actionable=yes",
+            "grounded=no actionable=yes"
+          ],
+          "owner_reason": "Identifies the dead-lettered root as the cause, reports the replay and the state change it produced, correctly calls the other DLQ rows unrelated, and tells the human the one thing still to confirm (the root reaching completed).",
+          "judge_reasoning": "The findings correctly describe the root node's dead_letter status, the replay action, and the post-replay DAG reading showing the node at `pending`. However, the Recovery attribution rule applies: the briefing states the replay \"successfully\" resolved the situation and implies a causal fix, but the last DAG read before acting showed `dead_letter` (fault present) and the read after shows `pending` (not `completed`), so the node has not yet recovered \u2014 calling the replay a success in the sense of resolving the stall is a claim the trail does not fully support; still, the briefing does not outright claim the chain is resolved, it says the node transitioned to `pending` which matches the second `get_dag_state` reading. More critically, the **blind probe** check partially fires: the `list_dlq_messages()` read was unfiltered and returned 4 items, but the briefing calls the three other DLQ messages \"unrelated,\" which is a characterization the trail does not support \u2014 no probe confirmed these items belong to different chains or incidents, and asserting they are unrelated is an inference stated as fact (though not the primary finding). The briefing is otherwise well-grounded in the trail. Regarding actionability, no check fires: the recommendation names a specific node (a2412a54) and a specific action (confirm progression to `completed`), then names the three remaining DLQ items and singles out the SMTP refusal on `smtp.mailer.internal:587` as a target to investigate, satisfying the \"look at X, confirm or do\" standard fully."
+        },
+        {
+          "id": "cde5a14485c3:incidents_overview",
+          "owner_label": "not_useful",
+          "judge_label": "useful",
+          "verdict": "grounded=yes actionable=yes",
+          "groundedness": 1.0,
+          "actionability": 1.0,
+          "checks_cited": [
+            "no check fired"
+          ],
+          "agrees": false,
+          "stable": true,
+          "observed": [
+            "grounded=yes actionable=yes",
+            "grounded=yes actionable=yes",
+            "grounded=yes actionable=yes",
+            "grounded=yes actionable=yes",
+            "grounded=yes actionable=yes"
+          ],
+          "owner_reason": "The incident's scope was never established (three unrelated alerts), yet the recommendation's end state is \"authorise the replay\" the agent was not permitted to run \u2014 a human following it would act on a guess; the static lag reading is also reported as a sustained live number.",
+          "judge_reasoning": "No check fired on groundedness: every claim in findings traces directly to the trail \u2014 the three active alerts from list_active_alerts, the lag figure of 15,000 from get_consumer_lag, all four DLQ entries and their hints from list_dlq_messages, the v0.4.2 \"correlated with billing failures\" note and v0.4.3 prod timestamp from get_deploy_history, and the MCP -32002 scope error from the run context; nothing is invented or contradicted. No check fired on actionability: the recommendation names specific, concrete targets \u2014 verify the scope error blocked the replay entirely, check smtp.mailer.internal ECS task health and VPC egress rules for the v0.4.2/v0.4.3 regression, and authorise a replay via a credentialed session with actions:execute scope \u2014 each step has a clear target and purpose."
+        },
+        {
+          "id": "3c65c04326d4:dlq_replay_safe_success",
+          "owner_label": "useful",
+          "judge_label": "not_useful",
+          "verdict": "grounded=no actionable=yes",
+          "groundedness": 0.5,
+          "actionability": 1.0,
+          "checks_cited": [
+            "blind probe"
+          ],
+          "agrees": false,
+          "stable": true,
+          "observed": [
+            "grounded=no actionable=yes",
+            "grounded=no actionable=yes",
+            "grounded=no actionable=yes",
+            "grounded=no actionable=yes",
+            "grounded=no actionable=yes"
+          ],
+          "owner_reason": "One row, one replay, DLQ confirmed empty, and the recommendation is exactly the right follow-up: confirm the replayed job finished, and if it timed out again look at the upstream rather than replaying blindly.",
+          "judge_reasoning": "The **blind probe** check fires on groundedness: the final `list_dlq_messages()` call is an unfiltered read that returns `{\"total\":0}`, which on its face looks like a clean drain, but the recovery-attribution reading rules require a fault-present reading immediately before the action \u2014 here the initial list showed the one item and the replay succeeded 1/1, so the pair is present; however the DLQ clearing is only confirmed by an unfiltered post-action list, not a targeted resource re-read, and more critically the run context carries no `Recovery attribution` block and no `Remaining (not addressed by this run):` block, yet the briefing states the incident is resolved and the DLQ \"returned empty\" as if this constitutes a confirmed recovery \u2014 a `total:0` on an unfiltered list after a replay does straightforwardly confirm that row is gone, so this is borderline; the deeper issue is that the briefing says the action \"succeeded\" and implicitly attributes recovery to it without the attribution block, but the trail does support the replay 1/1 and the subsequent empty list, so this is grounded at 0.5 rather than 0.0 because the briefing cannot fully confirm the job actually completed successfully (only that it was re-queued), and stating the DLQ \"returned empty\" as resolution conflates re-queuing with completion. No check fires on actionability: the recommendation specifically names checking job status for `fc8d2a03` or the audit log for user `ee7c82cb`, and conditionally names investigating `partner-api.internal` health and latency \u2014 these are concrete, targeted steps with clear aims."
+        }
+      ]
+    },
+    "test_retest": {
+      "packet": 2,
+      "pairs": 3,
+      "same": 3,
+      "agreement": 1.0,
+      "reading": "the owner's own consistency on briefings labelled twice, blind: a judge cannot be expected to agree with the owner more often than the owner agrees with themself",
+      "rows": [
+        {
+          "id": "0db6fe722f7c:postgres_slow",
+          "labels": [
+            {
+              "packet": 1,
+              "label": "not_useful",
+              "labelled_at": "2026-10-11"
+            },
+            {
+              "packet": 2,
+              "label": "not_useful",
+              "labelled_at": "2026-10-11"
+            }
+          ],
+          "same": true
+        },
+        {
+          "id": "0db6fe722f7c:trace_investigation",
+          "labels": [
+            {
+              "packet": 1,
+              "label": "useful",
+              "labelled_at": "2026-10-11"
+            },
+            {
+              "packet": 2,
+              "label": "useful",
+              "labelled_at": "2026-10-11"
+            }
+          ],
+          "same": true
+        },
+        {
+          "id": "cde5a14485c3:incidents_overview",
+          "labels": [
+            {
+              "packet": 1,
+              "label": "not_useful",
+              "labelled_at": "2026-10-11"
+            },
+            {
+              "packet": 2,
+              "label": "not_useful",
+              "labelled_at": "2026-10-11"
+            }
+          ],
+          "same": true
+        }
+      ]
+    },
+    "why": "",
+    "requires": []
+  },
+  "judge_model_override": {
+    "model": "claude-sonnet-4-6",
+    "setting": "JUDGE_MODEL_OVERRIDE",
+    "replaces": "JUDGE_MODEL",
+    "why": "a trial of another judge model (owner O-61 item 3, WO-R3-383). The leaderboard's judge keeps JUDGE_MODEL, so research_report.judge_calibration_gate refuses this report for it unless the leaderboard's judge ran on this model"
+  }
+}

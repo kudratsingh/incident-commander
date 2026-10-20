@@ -1,0 +1,34 @@
+{
+  "incident_id": "1719d951-f23b-4e5f-a685-8bdbb4dcdf59",
+  "final_state": "escalated",
+  "alert_summary": "source=monitoring.slo severity=critical fingerprint=job_dispatch_latency_above_objective",
+  "escalation_reason": "tool reported is_error=True (get_consumer_lag)",
+  "attempted_action": null,
+  "incidents": {
+    "primary": {
+      "category": "consumer_saturation",
+      "name": "worker-dispatcher-lag-causing-dispatch-latency",
+      "confidence": 0.45,
+      "addressed": false
+    },
+    "secondary": [],
+    "unresolved_extra": [
+      {
+        "category": "consumer_saturation",
+        "name": "worker-dispatcher-lag-causing-dispatch-latency",
+        "confidence": 0.45,
+        "addressed": false
+      }
+    ]
+  },
+  "attribution": null,
+  "investigation_trail": [],
+  "findings": "No diagnostic probes completed before escalation: the first tool call (`get_consumer_lag`) returned an error, leaving the primary suspected cause — consumer saturation on the worker-dispatcher driving job-dispatch latency above SLO — entirely uninvestigated and still open.",
+  "recommendation": "Check the worker-dispatcher consumer group lag directly to confirm whether saturation is the driver of elevated dispatch latency, and investigate why `get_consumer_lag` errored before attempting any remediation.",
+  "budget_used": {
+    "tool_calls": 0,
+    "tokens": 21889,
+    "wall_seconds": 16.798688,
+    "usd": "0.050319"
+  }
+}

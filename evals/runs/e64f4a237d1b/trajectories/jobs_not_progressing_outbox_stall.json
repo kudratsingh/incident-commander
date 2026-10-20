@@ -1,0 +1,170 @@
+{
+  "scenario": "jobs_not_progressing_outbox_stall",
+  "incident_id": "f3811de2-aca6-44e6-aee6-808b14b9c6cf",
+  "checkpoints": [
+    {
+      "schema_version": 3,
+      "incident_id": "f3811de2-aca6-44e6-aee6-808b14b9c6cf",
+      "state": "triage",
+      "alert": {
+        "source": "platform.jobs",
+        "severity": "critical",
+        "fingerprint": "jobs_accepted_not_executing",
+        "group": null,
+        "remediation_hint": null,
+        "dlq_scope": null,
+        "consumer_group": "worker-dispatcher",
+        "summary": "jobs are being accepted and are not executing; the worker-dispatcher pipeline is not making progress"
+      },
+      "budget": {
+        "max_tool_calls": 6,
+        "tool_calls_used": 0,
+        "max_tokens": 400000,
+        "tokens_used": 0,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.0,
+        "max_usd": "1.00",
+        "usd_used": "0"
+      },
+      "evidence": [],
+      "hypotheses": [],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-10-20T17:24:18.352848Z",
+      "updated_at": "2026-10-20T17:24:18.352848Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "f3811de2-aca6-44e6-aee6-808b14b9c6cf",
+      "state": "investigating",
+      "alert": {
+        "source": "platform.jobs",
+        "severity": "critical",
+        "fingerprint": "jobs_accepted_not_executing",
+        "group": null,
+        "remediation_hint": null,
+        "dlq_scope": null,
+        "consumer_group": "worker-dispatcher",
+        "summary": "jobs are being accepted and are not executing; the worker-dispatcher pipeline is not making progress"
+      },
+      "budget": {
+        "max_tool_calls": 6,
+        "tool_calls_used": 0,
+        "max_tokens": 400000,
+        "tokens_used": 0,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.03984,
+        "max_usd": "1.00",
+        "usd_used": "0"
+      },
+      "evidence": [
+        {
+          "evidence_id": "997db6c2-4f79-4e75-977b-41f16b6795d3",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "critical",
+            "dedup_key": "2957e254fb45f2c716287593f7498b06"
+          },
+          "result_summary": "severity=critical classified as investigating",
+          "timestamp": "2026-10-20T17:24:18.392688Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-10-20T17:24:18.352848Z",
+      "updated_at": "2026-10-20T17:24:18.392688Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "f3811de2-aca6-44e6-aee6-808b14b9c6cf",
+      "state": "escalated",
+      "alert": {
+        "source": "platform.jobs",
+        "severity": "critical",
+        "fingerprint": "jobs_accepted_not_executing",
+        "group": null,
+        "remediation_hint": null,
+        "dlq_scope": null,
+        "consumer_group": "worker-dispatcher",
+        "summary": "jobs are being accepted and are not executing; the worker-dispatcher pipeline is not making progress"
+      },
+      "budget": {
+        "max_tool_calls": 6,
+        "tool_calls_used": 3,
+        "max_tokens": 400000,
+        "tokens_used": 116265,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 113.646515,
+        "max_usd": "1.00",
+        "usd_used": "0.295748"
+      },
+      "evidence": [
+        {
+          "evidence_id": "997db6c2-4f79-4e75-977b-41f16b6795d3",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "critical",
+            "dedup_key": "2957e254fb45f2c716287593f7498b06"
+          },
+          "result_summary": "severity=critical classified as investigating",
+          "timestamp": "2026-10-20T17:24:18.392688Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "cc2e6605-2e4e-433f-9c88-a70a30dcce6d",
+          "tool_name": "get_consumer_lag",
+          "arguments": {
+            "consumer_group": "worker-dispatcher"
+          },
+          "result_summary": "{\"consumer_group\":\"worker-dispatcher\",\"lag\":0,\"lag_known\":true,\"source\":\"live\",\"cache_key\":\"kafka:consumer_lag:worker-dispatcher\",\"measured_at\":\"2026-10-20T17:25:02.262432Z\",\"age_seconds\":1,\"recent_samples\":[{\"lag\":0,\"measured_at\":\"2026-10-20T17:25:02.262432Z\"},{\"lag\":0,\"measured_at\":\"2026-10-20T17:24:57.060896Z\"},{\"lag\":0,\"measured_at\":\"2026-10-20T17:24:51.890303Z\"},{\"lag\":0,\"measured_at\":\"2026-10-20T17:24:46.745138Z\"},{\"lag\":0,\"measured_at\":\"2026-10-20T17:24:41.548173Z\"},{\"lag\":0,\"measured_at\":\"2026-10-20T17:24:36.339568Z\"},{\"lag\":0,\"measured_at\":\"2026-10-20T17:24:31.114937Z\"},{\"lag\":0,\"measured_at\":\"2026-10-20T17:24:25.953896Z\"},{\"lag\":0,\"measured_at\":\"2026-10-20T17:24:20.808726Z\"},{\"lag\":0,\"measured_at\":\"2026-10-20T17:24:15.665701Z\"},{\"lag\":0,\"measured_at\":\"2026-10-20T17:24:10.498596Z\"},{\"lag\":0,\"measured_at\":\"2026-10-20T17:24:05.399730Z\"},{\"lag\":0,\"measured_at\":\"2026-10-20T17:24:00.222983Z\"},{\"lag\":0,\"measured_at\":\"2026-10-20T17:23:55.036692Z\"},{\"lag\":0,\"measured_at\":\"2026-10-20T17:23:49.875541Z\"}],\"last_poll_at\":\"2026-10-20T17:25:02.257881Z\",\"last_poll_age_seconds\":1,\"polling\":true,\"poll_interval_seconds\":2.0}",
+          "timestamp": "2026-10-20T17:24:18.392699Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "24999595-7dfc-4c93-a4cd-78fa6a7113c2",
+          "tool_name": "get_control_loops",
+          "arguments": {},
+          "result_summary": "{\"measured_at\":\"2026-10-20T17:25:03.363881Z\",\"loops\":[{\"name\":\"outbox_relay\",\"paused\":true,\"paused_expires_in_seconds\":555,\"tick_interval_seconds\":1.0,\"last_run_at\":\"2026-10-20T17:24:17.721350Z\",\"last_run_age_seconds\":45.6},{\"name\":\"delayed_retry_promote\",\"paused\":false,\"paused_expires_in_seconds\":null,\"tick_interval_seconds\":0.5,\"last_run_at\":\"2026-10-20T17:25:03.300104Z\",\"last_run_age_seconds\":0.1},{\"name\":\"dlq_replay_promote\",\"paused\":false,\"paused_expires_in_seconds\":null,\"tick_interval_seconds\":0.5,\"last_run_at\":\"2026-10-20T17:25:03.301227Z\",\"last_run_age_seconds\":0.1},{\"name\":\"resume_unblocked_waiting\",\"paused\":false,\"paused_expires_in_seconds\":null,\"tick_interval_seconds\":10.0,\"last_run_at\":\"2026-10-20T17:24:54.129925Z\",\"last_run_age_seconds\":9.2},{\"name\":\"stale_pending_backstop\",\"paused\":false,\"paused_expires_in_seconds\":null,\"tick_interval_seconds\":60.0,\"last_run_at\":\"2026-10-20T17:24:03.558717Z\",\"last_run_age_seconds\":59.8},{\"name\":\"stale_running_sweep\",\"paused\":false,\"paused_expires_in_seconds\":null,\"tick_interval_seconds\":60.0,\"last_run_at\":\"2026-10-20T17:24:03.559181Z\",\"last_run_age_seconds\":59.8},{\"name\":\"lease_renewal\",\"paused\":false,\"paused_expires_in_seconds\":null,\"tick_interval_seconds\":20.0,\"last_run_at\":\"2026-10-20T17:24:43.567721Z\",\"last_run_age_seconds\":19.8},{\"name\":\"slo_evaluation\",\"paused\":false,\"paused_expires_in_seconds\":null,\"tick_interval_seconds\":300.0,\"last_run_at\":\"2026-10-20T00:02:43.658114Z\",\"last_run_age_seconds\":62539.7},{\"name\":\"metrics\",\"paused\":false,\"paused_expires_in_seconds\":null,\"tick_interval_seconds\":5.0,\"last_run_at\":\"2026-10-20T17:25:02.271611Z\",\"last_run_age_seconds\":1.1},{\"name\":\"digest\",\"paused\":false,\"paused_expires_in_seconds\":null,\"tick_interval_seconds\":86400.0,\"last_run_at\":null,\"last_run_age_seconds\":null},{\"name\":\"idempotency_reaper\",\"paused\":false,\"paused_expires_in_seconds\":null,\"tick_interval_seconds\":3600.0,\"last_run_at\":\"2026-10-20T00:02:40.667695Z\",\"last_run_age_seconds\":62542.7}],\"total\":11,\"unknown_reason\":null}",
+          "timestamp": "2026-10-20T17:24:18.392699Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "3d444399-42ae-4b4d-8b02-af3d2838ac78",
+          "tool_name": "get_outbox_status",
+          "arguments": {},
+          "result_summary": "{\"measured_at\":\"2026-10-20T17:25:03.342300Z\",\"unpublished_count\":12,\"oldest_unpublished_at\":\"2026-10-20T17:24:54.946424Z\",\"oldest_unpublished_age_s\":8.396,\"newest_unpublished_at\":\"2026-10-20T17:24:57.644895Z\",\"newest_unpublished_age_s\":5.697,\"unpublished_past_attempt_limit\":0,\"last_publish_at\":\"2026-10-19T23:49:50.802561Z\",\"seconds_since_last_publish\":63312.54,\"relay_last_tick_at\":\"2026-10-20T17:24:17.721350Z\",\"relay_heartbeat_age_s\":45.621,\"relay_heartbeat_known\":true,\"relay_heartbeat_unknown_reason\":null,\"relay_tick_interval_s\":1.0}",
+          "timestamp": "2026-10-20T17:24:18.392699Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "35fd7283-9166-41a5-8a19-985548c9b347",
+          "tool_name": "_planner_stop",
+          "arguments": {
+            "reason": "The outbox relay loop is paused (paused_expires_in_seconds=555, last_run_age_seconds=45.6) and the outbox has 12 unpublished events with the last successful publish ~63312 seconds ago (17+ hours). This is the most likely cause of 'jobs accepted but not executing': job state changes are committed to the DB but not reaching Kafka, so no downstream worker picks up execution. The worker-dispatcher consumer itself shows lag=0 and polling=true, confirming the Kafka consumer is alive — the blockage is in the outbox relay. However, outbox_stall has no Tier-1 fix in the remediation planner, so this requires human intervention to investigate and unpause the outbox_relay loop (currently held for ~555 more seconds). The relay should auto-resume when the pause expires, but the root cause of the pause needs human investigation to prevent recurrence."
+          },
+          "result_summary": "planner stop: The outbox relay loop is paused (paused_expires_in_seconds=555, last_run_age_seconds=45.6) and the outbox has 12 unpublished events with the last successful publish ~63312 seconds ago (17+ hours). This is the most likely cause of 'jobs accepted but not executing': job state changes are committed to the DB but not reaching Kafka, so no downstream worker picks up execution. The worker-dispatcher consumer itself shows lag=0 and polling=true, confirming the Kafka consumer is alive — the blockage is in the outbox relay. However, outbox_stall has no Tier-1 fix in the remediation planner, so this requires human intervention to investigate and unpause the outbox_relay loop (currently held for ~555 more seconds). The relay should auto-resume when the pause expires, but the root cause of the pause needs human investigation to prevent recurrence.",
+          "timestamp": "2026-10-20T17:26:11.999363Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [
+        {
+          "category": "outbox_stall",
+          "name": "outbox-relay-paused-63312s-backlog-12-events",
+          "confidence": 0.82,
+          "reasoning": "candidate C1 (select, score 0.92, selector uncertainty 0.1); The `get_control_loops()` probe shows `outbox_relay` is paused with 555 seconds remaining, and `get_outbox_status()` confirms 12 unpublished events with the last successful publish over 63,000 seconds ago — exactly matching C1's claim of a paused outbox relay causing a backlog. The consumer lag being persistently 0 (from `get_consumer_lag`) is consistent with the relay being the blocker rather than a downstream consumer stall, which is cited as evidence against C2 and C4/C7."
+        }
+      ],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-10-20T17:24:18.352848Z",
+      "updated_at": "2026-10-20T17:26:11.999363Z"
+    }
+  ],
+  "invocation_id": "e64f4a237d1b"
+}

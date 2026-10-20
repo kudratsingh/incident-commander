@@ -1,0 +1,151 @@
+{
+  "scenario": "dlq_mislabeled_replay_safe",
+  "incident_id": "c0079195-1d7a-4abe-9d83-229c5da418f0",
+  "checkpoints": [
+    {
+      "schema_version": 3,
+      "incident_id": "c0079195-1d7a-4abe-9d83-229c5da418f0",
+      "state": "triage",
+      "alert": {
+        "source": "platform.dlq",
+        "severity": "critical",
+        "fingerprint": "dlq_depth_warning",
+        "group": null,
+        "remediation_hint": "replay_safe",
+        "dlq_scope": null
+      },
+      "budget": {
+        "max_tool_calls": 13,
+        "tool_calls_used": 0,
+        "max_tokens": 400000,
+        "tokens_used": 0,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.0,
+        "max_usd": "1.00",
+        "usd_used": "0"
+      },
+      "evidence": [],
+      "hypotheses": [],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-10-20T17:11:07.490820Z",
+      "updated_at": "2026-10-20T17:11:07.490820Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "c0079195-1d7a-4abe-9d83-229c5da418f0",
+      "state": "investigating",
+      "alert": {
+        "source": "platform.dlq",
+        "severity": "critical",
+        "fingerprint": "dlq_depth_warning",
+        "group": null,
+        "remediation_hint": "replay_safe",
+        "dlq_scope": null
+      },
+      "budget": {
+        "max_tool_calls": 13,
+        "tool_calls_used": 0,
+        "max_tokens": 400000,
+        "tokens_used": 0,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.028115,
+        "max_usd": "1.00",
+        "usd_used": "0"
+      },
+      "evidence": [
+        {
+          "evidence_id": "cab7ad9f-b5fe-43c7-9e3c-2c93d5a08666",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "critical",
+            "dedup_key": "920506393d91b3fee163c79c2ae693aa"
+          },
+          "result_summary": "severity=critical classified as investigating",
+          "timestamp": "2026-10-20T17:11:07.518935Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-10-20T17:11:07.490820Z",
+      "updated_at": "2026-10-20T17:11:07.518935Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "c0079195-1d7a-4abe-9d83-229c5da418f0",
+      "state": "escalated",
+      "alert": {
+        "source": "platform.dlq",
+        "severity": "critical",
+        "fingerprint": "dlq_depth_warning",
+        "group": null,
+        "remediation_hint": "replay_safe",
+        "dlq_scope": null
+      },
+      "budget": {
+        "max_tool_calls": 13,
+        "tool_calls_used": 1,
+        "max_tokens": 400000,
+        "tokens_used": 47409,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 48.895113,
+        "max_usd": "1.00",
+        "usd_used": "0.120243"
+      },
+      "evidence": [
+        {
+          "evidence_id": "cab7ad9f-b5fe-43c7-9e3c-2c93d5a08666",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "critical",
+            "dedup_key": "920506393d91b3fee163c79c2ae693aa"
+          },
+          "result_summary": "severity=critical classified as investigating",
+          "timestamp": "2026-10-20T17:11:07.518935Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "041370ec-0506-4bae-9aa0-1fc5db2167a5",
+          "tool_name": "list_dlq_messages",
+          "arguments": {
+            "job_type": null,
+            "remediation_hint": null,
+            "limit": 50,
+            "offset": 0
+          },
+          "result_summary": "{\"total\":5,\"items\":[{\"id\":\"be64a675-212b-5379-8349-816d17a8107a\",\"type\":\"csv_upload\",\"error_message\":\"ValueError: invalid literal for int() with base 10: 'not-a-number' at row 15,382\",\"retry_count\":3,\"created_at\":\"2026-10-20T17:11:07.368698Z\",\"updated_at\":\"2026-10-20T17:11:07.368698Z\",\"trace_id\":null,\"triage\":null,\"remediation_hint\":\"replay_safe\",\"dead_lettered_at\":null,\"fenced_at\":null,\"fenced_by\":null,\"extra\":null},{\"id\":\"fc8d2a03-23b3-5371-9acb-46443c73baa5\",\"type\":\"bulk_api_sync\",\"error_message\":\"UpstreamTimeout: bulk_api_sync POST https://partner-api.internal/v2/sync timed out after 30s on attempt 3/3 — the request was never acknowledged, so no downstream write was recorded\",\"retry_count\":3,\"created_at\":\"2026-10-20T17:02:34.135006Z\",\"updated_at\":\"2026-10-20T17:02:40.135006Z\",\"trace_id\":\"c5ca46c1-f4dd-5021-8be4-130143553096\",\"triage\":{\"root_cause_category\":\"upstream_timeout\",\"summary\":\"partner-api.internal did not answer inside the 30s deadline on any of the three attempts. The payload was accepted by validation and nothing was committed downstream.\",\"suggested_fix\":\"Re-run the job as it stands: the call is idempotent, no partial write survived the timeout, and a fresh attempt is the entire remedy. Neither the payload nor the producer needs changing.\",\"is_retryable\":true,\"confidence\":0.88},\"remediation_hint\":\"replay_safe\",\"dead_lettered_at\":\"2026-10-20T17:02:40.135006Z\",\"fenced_at\":null,\"fenced_by\":null,\"extra\":null},{\"id\":\"f030f975-974e-5ce3-aa6b-444136507d86\",\"type\":\"csv_upload\",\"error_message\":\"ValueError: invalid literal for int() with base 10: 'not-a-number' at row 15,382\",\"retry_count\":3,\"created_at\":\"2026-10-20T16:58:34.135006Z\",\"updated_at\":\"2026-10-20T16:58:56.135006Z\",\"trace_id\":\"89609789-fdcb-5a5a-b826-d7d5d5f9cf37\",\"triage\":{\"root_cause_category\":\"bad_input\",\"summary\":\"Non-numeric value in a supposedly-integer CSV column.\",\"suggested_fix\":\"Not retryable — data quality issue. Notify the uploader; add a validation step in the CSV importer that fails the whole upload with a clear error rather than half-processing.\",\"is_retryable\":false,\"confidence\":0.94},\"remediation_hint\":\"human_required\",\"dead_lettered_at\":\"2026-10-20T16:58:56.135006Z\",\"fenced_at\":null,\"fenced_by\":null,\"extra\":null},{\"id\":\"af67d1b1-13f8-5a2c-8c44-66ec5564597d\",\"type\":\"bulk_api_sync\",\"error_message\":\"RateLimited: partner-api.internal answered 429 Too Many Requests on attempt 3/3 (retry-after: 120s); the per-tenant quota window has not rolled over yet\",\"retry_count\":3,\"created_at\":\"2026-10-20T16:45:34.135006Z\",\"updated_at\":\"2026-10-20T16:46:08.135006Z\",\"trace_id\":\"6f76e48d-72c4-5e5a-a5cf-bc29758167cb\",\"triage\":{\"root_cause_category\":\"rate_limited\",\"summary\":\"All three attempts landed inside one quota window. The partner is shedding load, not rejecting the payload.\",\"suggested_fix\":\"Let the 120s retry-after window pass before the next attempt. An immediate re-run spends another attempt against the same closed window and comes back 429.\",\"is_retryable\":true,\"confidence\":0.86},\"remediation_hint\":\"wait_and_replay\",\"dead_lettered_at\":\"2026-10-20T16:46:08.135006Z\",\"fenced_at\":null,\"fenced_by\":null,\"extra\":null},{\"id\":\"97d91272-9774-5b8e-980b-f0d2fa6ed619\",\"type\":\"bulk_api_sync\",\"error_message\":\"send_email downstream call failed: ConnectionRefusedError('smtp.mailer.internal:587')\",\"retry_count\":3,\"created_at\":\"2026-10-20T16:30:34.135006Z\",\"updated_at\":\"2026-10-20T16:30:50.135006Z\",\"trace_id\":\"1bfc7482-c957-5217-beae-e8cba48a152d\",\"triage\":{\"root_cause_category\":\"downstream_unavailable\",\"summary\":\"SMTP relay unreachable — connection refused at TCP layer.\",\"suggested_fix\":\"Check smtp.mailer.internal ECS task health; recent billing hotfix (v0.4.2) may have changed VPC egress rules — cross-reference `get_deploy_history`. Re-run once the dependency answers.\",\"is_retryable\":true,\"confidence\":0.82},\"remediation_hint\":\"wait_and_replay\",\"dead_lettered_at\":\"2026-10-20T16:30:50.135006Z\",\"fenced_at\":null,\"fenced_by\":null,\"extra\":null}]}",
+          "timestamp": "2026-10-20T17:11:07.518944Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "445bb7fb-dedd-465d-a7c2-6465c01bf33d",
+          "tool_name": "_planner_stop",
+          "arguments": {
+            "reason": "selector escalated: The single read — list_dlq_messages(job_type=None, remediation_hint=None) — reveals 5 distinct DLQ items spanning four different root-cause categories (bad input CSV, upstream timeout, rate limiting, SMTP unavailability) with different remediation hints (human_required, replay_safe, wait_and_replay), meaning no single diagnosis covers the queue. The alert fingerprint \"dlq_depth_warning\" reflects aggregate depth from multiple independent failure modes, and at least one message (f030f975) is marked human_required, making escalation appropriate rather than a single automated fix path."
+          },
+          "result_summary": "planner stop: selector escalated: The single read — list_dlq_messages(job_type=None, remediation_hint=None) — reveals 5 distinct DLQ items spanning four different root-cause categories (bad input CSV, upstream timeout, rate limiting, SMTP unavailability) with different remediation hints (human_required, replay_safe, wait_and_replay), meaning no single diagnosis covers the queue. The alert fingerprint \"dlq_depth_warning\" reflects aggregate depth from multiple independent failure modes, and at least one message (f030f975) is marked human_required, making escalation appropriate rather than a single automated fix path.",
+          "timestamp": "2026-10-20T17:11:56.385933Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [
+        {
+          "category": "poison_message",
+          "name": "human-required-csv-upload-bad-data-row-f030f975",
+          "confidence": 0.85,
+          "reasoning": "candidate C1 (escalate, score 0.75, selector uncertainty 0.7); The single read — list_dlq_messages(job_type=None, remediation_hint=None) — reveals 5 distinct DLQ items spanning four different root-cause categories (bad input CSV, upstream timeout, rate limiting, SMTP unavailability) with different remediation hints (human_required, replay_safe, wait_and_replay), meaning no single diagnosis covers the queue. The alert fingerprint \"dlq_depth_warning\" reflects aggregate depth from multiple independent failure modes, and at least one message (f030f975) is marked human_required, making escalation appropriate rather than a single automated fix path."
+        }
+      ],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-10-20T17:11:07.490820Z",
+      "updated_at": "2026-10-20T17:11:56.385933Z"
+    }
+  ],
+  "invocation_id": "476d64a5603a"
+}

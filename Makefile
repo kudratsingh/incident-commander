@@ -109,6 +109,8 @@ help:
 	@echo "  world-drift-all  FREE (zero-LLM) world-drift on every recording, a reset before"
 	@echo "                   each, then one table. WRITE=1 persists it for the phase close;"
 	@echo "                   FROM_LOGS=<dir> reads earlier world-drift logs instead"
+	@echo "  replay-coverage  FREE (no model, no stack) would each archived recorded run replay"
+	@echo "                   against its plan's pinned recording with no misses? PLAN= WORLD="
 	@echo "  trace-report     render evals/traces/*.jsonl → readable txt files"
 	@echo "  training-export  FREE (reads only) JSONL export of traced trajectories for a"
 	@echo "                   later training stage; TRACE_DIR= picks the trace store,"
@@ -514,6 +516,13 @@ endif
 world-drift-all:
 	PLATFORM_COMPOSE="$(PLATFORM_COMPOSE)" uv run python -m evals.world_drift_table \
 		$(if $(FROM_LOGS),--from-logs $(FROM_LOGS),--all) $(if $(WRITE),--write,)
+
+# Would an archived recorded run replay against its plan's pinned recording with no misses?
+# Free: no model, no platform (evals/replay_coverage.py, WO-R3-387). PLAN= defaults to the
+# main oracle-gap plan; WORLD=<scenario> limits it; RECORDING=<id> checks another recording.
+.PHONY: replay-coverage
+replay-coverage:
+	uv run python -m evals.replay_coverage $(if $(PLAN),--plan $(PLAN)) $(if $(WORLD),--world $(WORLD)) $(if $(RECORDING),--recording $(RECORDING))
 
 # Renders what is not yet rendered (WO-R3-257): a scenario whose newest
 # traced attempt no existing report covers. `make trace-report ARGS=--force`

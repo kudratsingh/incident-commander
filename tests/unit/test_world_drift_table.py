@@ -404,7 +404,9 @@ def test_the_newest_recording_of_each_scenario_is_what_the_loop_checks() -> None
     worlds = world_drift_table.newest_recordings()
     assert len(worlds) == len({scenario for scenario, _ in worlds}) == 17
     assert all(re.fullmatch(r"[0-9a-f]{12}", recording) for _, recording in worlds)
-    assert ("api_latency_db_query", "301c99c4ae11") in worlds
+    # WO-R3-387 re-recorded db_query wider (a52ff356e1fc read DRIFT on a pool count; 333a5f296990
+    # is the one drift-checked CLEAN and pinned), so the newest is the later of the two.
+    assert ("api_latency_db_query", "333a5f296990") in worlds
 
 
 def test_the_make_target_runs_every_recording_or_reads_logs() -> None:
@@ -475,9 +477,12 @@ def test_the_wo_r3_386_table_checks_every_newest_recording_by_trace_identity() -
     assert table["platform_pin"] == "v0.6.25"
     assert artifacts.newest("world_drift_table") == _TABLE_WO_R3_386
     rows = {row["scenario"]: row for row in table["rows"]}
-    assert {(name, row["recording"]) for name, row in rows.items()} == set(
-        world_drift_table.newest_recordings()
-    )
+    # WO-R3-387 re-recorded db_query since, so that row is the one no longer newest.
+    older = {"api_latency_db_query": "301c99c4ae11"}
+    assert {(name, row["recording"]) for name, row in rows.items()} == {
+        (name, older.get(name, recording))
+        for name, recording in world_drift_table.newest_recordings()
+    }
     assert (rows["api_latency_db_query"]["recording"], rows["api_latency_db_query"]["verdict"]) == (
         "301c99c4ae11",
         CLEAN,

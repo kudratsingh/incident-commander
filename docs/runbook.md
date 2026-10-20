@@ -1248,6 +1248,14 @@ Exit codes: `0` no drift, `1` drift, `2` selection refusal, `3` preflight, `4` p
 make world-drift-all WRITE=1
 ```
 
+**A recording is as wide as the reads the planner can propose: `make replay-coverage`** (WO-R3-387). A recorded run that asks for a read the recording does not hold gets `not_recorded` and is excluded — the oracle-gap pilot lost all three `api_latency_db_query` passes that way: the eight-candidate planner read `get_consumer_lag(consumer_group='worker-dispatcher')` first, and that world's alert names no consumer group, so the recorder's walk never recorded one. The walk now adds, per family, every read the planner proposed or made in the pilot's archives (a table in `evals/recorder.py`, derived from the archives and checked against them by a test). Before a paid recorded batch, run the free check: it looks every read each archived recorded trace asked for (evidence plus each step's chosen probe) and proposed (every candidate's `next_probe`) up in the plan's pinned recording, by the replay client's own key, and lists the family's planner reads each pinned recording cannot answer. No model, no stack. Exit `1` when any read a run actually asked for would miss; a proposed-only gap is printed, not failed — it is the next run's likely miss, and the remedy is the same: re-record that world wider.
+
+```bash
+make replay-coverage                                     # the main plan
+make replay-coverage PLAN=evals/samples/oracle_gap_pilot.json
+make replay-coverage WORLD=api_latency_db_query RECORDING=301c99c4ae11   # an older recording
+```
+
 **Exit 1 means the world moved, not that the check failed.** Three readings, and the check deliberately does not choose between them:
 
 1. the platform was released — re-record (`make world-record ONLY=<scenario>`) and re-pin whatever rested on the old recording;

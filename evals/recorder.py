@@ -305,12 +305,58 @@ def sweep_probes(scenario: Scenario) -> tuple[list[Probe], list[str]]:
     return probes, unfilled_notes
 
 
+#: The run archives ``PLANNER_PROPOSED_READS`` was derived from: the oracle-gap pilot's three passes
+#: (owner O-65, 2026-10-20), each a ``candidate_selector`` / ``best_of_n_enumerated`` / n=8 run.
+PLANNER_PROPOSED_SOURCES: Final[tuple[str, ...]] = ("476d64a5603a", "7467aae0f0ff", "e64f4a237d1b")
+
+#: A recording is as wide as the reads the planner can propose (WO-R3-387, ADR 0047's
+#: "re-record the world wider"). Per scenario FAMILY: every read the eight-candidate planner
+#: proposed, chose or made in that family's worlds across ``PLANNER_PROPOSED_SOURCES`` — each
+#: candidate's ``next_probe``, the planner's and the emitted step's ``next_action``, and every read
+#: in the trajectory's evidence — with the arguments the agent used. NOT typed from a guess:
+#: ``evals.replay_coverage.proposed_reads`` re-derives it from those archives and
+#: ``tests/unit/test_replay_coverage.py`` fails when the two disagree. Why the walk above missed
+#: one: ``api_latency_db_query``'s alert names an objective, not a consumer group, so ``_fill``
+#: has no group to give ``get_consumer_lag``; the planner read ``worker-dispatcher`` first in all
+#: three passes and the replay answered ``not_recorded``. Only ``api_latency`` today: its archived
+#: proposals are platform-wide names (two consumer groups) or argument-free reads, so they apply to
+#: every world of the family. The other three pilot families' proposals that their recordings
+#: miss are reported by ``make replay-coverage`` and wait for those worlds' next re-recording.
+PLANNER_PROPOSED_READS: Final[Mapping[str, tuple[tuple[str, tuple[tuple[str, Any], ...]], ...]]] = {
+    "api_latency": (
+        ("get_circuit_breakers", ()),
+        ("get_consumer_lag", (("consumer_group", "dependency-resolver"),)),
+        ("get_consumer_lag", (("consumer_group", "worker-dispatcher"),)),
+        ("get_control_loops", ()),
+        ("get_deploy_history", ()),
+        ("get_outbox_status", ()),
+        ("get_postgres_health", ()),
+        ("get_redis_health", ()),
+        ("get_slo_status", ()),
+    ),
+}
+
+
+def planner_probes(scenario: Scenario) -> list[Probe]:
+    """The archived planner reads for this scenario's family (``PLANNER_PROPOSED_READS``)."""
+    family = scenario.family.value if scenario.family is not None else None
+    reads = PLANNER_PROPOSED_READS.get(family or "", ())
+    origin = (
+        "planner-proposed reads: the eight-candidate planner proposed or made this read in a "
+        f"`{family}` world in run archives {', '.join(PLANNER_PROPOSED_SOURCES)} (WO-R3-387), "
+        "so a replayed planner that proposes it again gets an answer instead of a "
+        "`not_recorded` miss."
+    )
+    return [_probe(tool, dict(arguments), origin) for tool, arguments in reads]
+
+
 def recording_probes(scenario: Scenario) -> tuple[list[Probe], list[str]]:
     """The whole call set for one recording, and what could not be derived.
 
-    Three sources merged by ``dossier._merge``, so a call derived twice is made once and keeps
-    both reasons: ``derive_probes``, the scenario's own ``expected_precondition`` calls (which
-    are FILTERED where the derivation reads unfiltered, so either route replays), ``sweep_probes``.
+    Four sources merged by ``dossier._merge``, so a call derived twice is made once and keeps
+    every reason: ``derive_probes``, the scenario's own ``expected_precondition`` calls (which
+    are FILTERED where the derivation reads unfiltered, so either route replays), ``sweep_probes``,
+    and ``planner_probes`` (the archived planner's reads for the family, WO-R3-387).
     """
     derived, notes = derive_probes(scenario)
     probes = list(derived)
@@ -318,6 +364,7 @@ def recording_probes(scenario: Scenario) -> tuple[list[Probe], list[str]]:
         probes.append(_probe_for_precondition(probe))
     sweep, sweep_notes = sweep_probes(scenario)
     probes.extend(sweep)
+    probes.extend(planner_probes(scenario))
     return _merge(probes), list(notes) + sweep_notes
 
 

@@ -146,6 +146,7 @@ incident-commander/
 │   ├── recorder.py                 # zero-LLM recording of that world for replay (make world-record)
 │   ├── recorded_client.py          # replays one recording to the agent — misses counted, Tier-1 refused
 │   ├── recorded_applies.py         # does a recording's answer key describe its world? one rule, every report
+│   ├── replay_coverage.py          # would an archived recorded run replay with no misses? (make replay-coverage)
 │   ├── inventory.py                # counts and classifies the corpus (make inventory)
 │   ├── candidate_metrics.py        # pass@k, appeared-at-any-step, duplicate rate (WP-5.2)
 │   ├── oracle_gap.py               # the oracle-gap sample: one recorded batch per paid invocation, and its report

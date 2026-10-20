@@ -1,0 +1,485 @@
+{
+  "agent_model": "claude-sonnet-4-6",
+  "arm": "candidate_selector/best_of_n_enumerated/n=8",
+  "calibration": {
+    "model": "claude-sonnet-4-6",
+    "opens": true,
+    "report_id": "36e12b915900",
+    "why_not": ""
+  },
+  "design": "audit-ws docs/plans/research-buildout-v2.1/samples/oracle-gap.md \u00a7 The pilot",
+  "excluded": [
+    {
+      "archive": "476d64a5603a",
+      "reason": "not comparable: the replay missed 1 call(s) and refused 0 (ADR 0047) \u2014 re-record the world wider",
+      "scenario": "api_latency_db_query"
+    },
+    {
+      "archive": "7467aae0f0ff",
+      "reason": "not comparable: the replay missed 1 call(s) and refused 0 (ADR 0047) \u2014 re-record the world wider",
+      "scenario": "api_latency_db_query"
+    },
+    {
+      "archive": "e64f4a237d1b",
+      "reason": "not comparable: the replay missed 1 call(s) and refused 0 (ADR 0047) \u2014 re-record the world wider",
+      "scenario": "api_latency_db_query"
+    }
+  ],
+  "headline_k": 8,
+  "limits": [
+    "One model (claude-sonnet-4-6), one arm (candidate_selector/best_of_n_enumerated/n=8), recorded mode only: diagnosis is graded; outcome, action and safety are not claims a replay can make (ADR 0047).",
+    "n = 9 scored runs over 3 worlds \u2014 below plan 03 \u00a7 10's floor of ~100 paired trials. The interval resamples worlds, so it speaks for worlds like these, not for the whole corpus.",
+    "Per-world rows are a handful of runs each: read them as descriptions, never as rates.",
+    "pass@8 is close to its ceiling by construction when 8 candidates cover every cause a family can have; the gap is then mostly a statement about the selector.",
+    "A gap counts every run whose correct candidate was available and not taken, including a selector that escalated or asked for more; the split by decision says which.",
+    "The three-way split (picked correct / picked wrong / declined to pick) counts every scored run, not only the gap: a wrong pick or a decline with no correct candidate in the set is counted there and is not part of the gap.",
+    "3 run(s) are excluded and listed with the reason; none is counted as a miss.",
+    "Repeats of one world are the same recorded world replayed again (only the model's own sampling differs): whether they agree is a description of a handful of runs, not a rate.",
+    "This is the oracle_gap_pilot study (pooled_with_main: false): its runs are reported here on their own and are never pooled into the main sample's numbers."
+  ],
+  "planned": {
+    "batches": 1,
+    "worlds": 4
+  },
+  "pooled_with_main": false,
+  "scope": {
+    "archives": [
+      {
+        "archive": "476d64a5603a",
+        "generated_at": "2026-10-20T17:16:54.187849+00:00",
+        "repeat": 0,
+        "repeat_of": "476d64a5603a",
+        "runs": 4,
+        "sha256": "4b15437c333b13df53762a3ed483dc15b7675fc7aa1249a279c0c5e08778ec5b"
+      },
+      {
+        "archive": "7467aae0f0ff",
+        "generated_at": "2026-10-20T17:22:52.428191+00:00",
+        "repeat": 1,
+        "repeat_of": "476d64a5603a",
+        "runs": 4,
+        "sha256": "d05ba1a6bca9a2541f1f18b248a5bea2de9578c376b2457aa98fcd9c4d1431c2"
+      },
+      {
+        "archive": "e64f4a237d1b",
+        "generated_at": "2026-10-20T17:29:04.901372+00:00",
+        "repeat": 2,
+        "repeat_of": "476d64a5603a",
+        "runs": 4,
+        "sha256": "ddf668defbe1cd4983d250f8530aef7bd85a5512c3ef4d1f0790315111e218e7"
+      }
+    ]
+  },
+  "selector_gate": "plan 02:243 \u2014 NO SELECTOR NUMBER IS REPORTED BEFORE ITS CALIBRATION REPORT EXISTS. Every selected@k, oracle gap and selector-uncertainty value below is withheld unless its arm has an id in research_report.CALIBRATION_REPORTS whose report measured the model that run's selector was called on, and each row says which case it is in. An uncalibrated selector's confidence is a number whose scale nobody has checked, and an oracle gap read beside it would attribute to selection whatever the miscalibration did.",
+  "spend": {
+    "runs": 12,
+    "runs_with_a_bill": 12,
+    "usd_max": "0.444946",
+    "usd_median": "0.198179",
+    "usd_total": "2.851459"
+  },
+  "study": "oracle_gap_pilot",
+  "summary": {
+    "per_world": [
+      {
+        "agreement": {
+          "calibration_report_id": "36e12b915900",
+          "k": 8,
+          "pass_at_k_agree": true,
+          "runs": 3,
+          "selected_at_k_agree": true
+        },
+        "at_k": [
+          {
+            "calibration_report_id": "36e12b915900",
+            "gap_rate": 0.6667,
+            "k": 1,
+            "n": 3,
+            "oracle_gap": 2,
+            "pass_at_k": 2,
+            "pass_rate": 0.6667,
+            "selected_at_k": 0,
+            "selected_rate": 0.0
+          },
+          {
+            "calibration_report_id": "36e12b915900",
+            "gap_rate": 1.0,
+            "k": 2,
+            "n": 3,
+            "oracle_gap": 3,
+            "pass_at_k": 3,
+            "pass_rate": 1.0,
+            "selected_at_k": 0,
+            "selected_rate": 0.0
+          },
+          {
+            "calibration_report_id": "36e12b915900",
+            "gap_rate": 1.0,
+            "k": 4,
+            "n": 3,
+            "oracle_gap": 3,
+            "pass_at_k": 3,
+            "pass_rate": 1.0,
+            "selected_at_k": 0,
+            "selected_rate": 0.0
+          },
+          {
+            "calibration_report_id": "36e12b915900",
+            "gap_rate": 1.0,
+            "k": 8,
+            "n": 3,
+            "oracle_gap": 3,
+            "pass_at_k": 3,
+            "pass_rate": 1.0,
+            "selected_at_k": 0,
+            "selected_rate": 0.0
+          }
+        ],
+        "per_run": [
+          {
+            "archive": "476d64a5603a",
+            "calibration_report_id": "36e12b915900",
+            "decision": "escalate",
+            "gap": 1,
+            "pass_hit": true,
+            "repeat": 0,
+            "selected_hit": false
+          },
+          {
+            "archive": "7467aae0f0ff",
+            "calibration_report_id": "36e12b915900",
+            "decision": "escalate",
+            "gap": 1,
+            "pass_hit": true,
+            "repeat": 1,
+            "selected_hit": false
+          },
+          {
+            "archive": "e64f4a237d1b",
+            "calibration_report_id": "36e12b915900",
+            "decision": "escalate",
+            "gap": 1,
+            "pass_hit": true,
+            "repeat": 2,
+            "selected_hit": false
+          }
+        ],
+        "pick_split": {
+          "calibration_report_id": "36e12b915900",
+          "declined": {
+            "escalate": 3,
+            "none": 0,
+            "probe_more": 0
+          },
+          "declined_total": 3,
+          "k": 8,
+          "n": 3,
+          "picked_correct": 0,
+          "picked_wrong": 0
+        },
+        "recording": "e5d407945572",
+        "runs": 3,
+        "scenario": "dlq_mislabeled_replay_safe"
+      },
+      {
+        "agreement": {
+          "calibration_report_id": "36e12b915900",
+          "k": 8,
+          "pass_at_k_agree": true,
+          "runs": 3,
+          "selected_at_k_agree": true
+        },
+        "at_k": [
+          {
+            "calibration_report_id": "36e12b915900",
+            "gap_rate": 0.0,
+            "k": 1,
+            "n": 3,
+            "oracle_gap": 0,
+            "pass_at_k": 3,
+            "pass_rate": 1.0,
+            "selected_at_k": 3,
+            "selected_rate": 1.0
+          },
+          {
+            "calibration_report_id": "36e12b915900",
+            "gap_rate": 0.0,
+            "k": 2,
+            "n": 3,
+            "oracle_gap": 0,
+            "pass_at_k": 3,
+            "pass_rate": 1.0,
+            "selected_at_k": 3,
+            "selected_rate": 1.0
+          },
+          {
+            "calibration_report_id": "36e12b915900",
+            "gap_rate": 0.0,
+            "k": 4,
+            "n": 3,
+            "oracle_gap": 0,
+            "pass_at_k": 3,
+            "pass_rate": 1.0,
+            "selected_at_k": 3,
+            "selected_rate": 1.0
+          },
+          {
+            "calibration_report_id": "36e12b915900",
+            "gap_rate": 0.0,
+            "k": 8,
+            "n": 3,
+            "oracle_gap": 0,
+            "pass_at_k": 3,
+            "pass_rate": 1.0,
+            "selected_at_k": 3,
+            "selected_rate": 1.0
+          }
+        ],
+        "per_run": [
+          {
+            "archive": "476d64a5603a",
+            "calibration_report_id": "36e12b915900",
+            "decision": "select",
+            "gap": 0,
+            "pass_hit": true,
+            "repeat": 0,
+            "selected_hit": true
+          },
+          {
+            "archive": "7467aae0f0ff",
+            "calibration_report_id": "36e12b915900",
+            "decision": "select",
+            "gap": 0,
+            "pass_hit": true,
+            "repeat": 1,
+            "selected_hit": true
+          },
+          {
+            "archive": "e64f4a237d1b",
+            "calibration_report_id": "36e12b915900",
+            "decision": "select",
+            "gap": 0,
+            "pass_hit": true,
+            "repeat": 2,
+            "selected_hit": true
+          }
+        ],
+        "pick_split": {
+          "calibration_report_id": "36e12b915900",
+          "declined": {
+            "escalate": 0,
+            "none": 0,
+            "probe_more": 0
+          },
+          "declined_total": 0,
+          "k": 8,
+          "n": 3,
+          "picked_correct": 3,
+          "picked_wrong": 0
+        },
+        "recording": "c7f4746c4a61",
+        "runs": 3,
+        "scenario": "jobs_not_progressing_outbox_stall"
+      },
+      {
+        "agreement": {
+          "calibration_report_id": "36e12b915900",
+          "k": 8,
+          "pass_at_k_agree": true,
+          "runs": 3,
+          "selected_at_k_agree": true
+        },
+        "at_k": [
+          {
+            "calibration_report_id": "36e12b915900",
+            "gap_rate": 1.0,
+            "k": 1,
+            "n": 3,
+            "oracle_gap": 3,
+            "pass_at_k": 3,
+            "pass_rate": 1.0,
+            "selected_at_k": 0,
+            "selected_rate": 0.0
+          },
+          {
+            "calibration_report_id": "36e12b915900",
+            "gap_rate": 1.0,
+            "k": 2,
+            "n": 3,
+            "oracle_gap": 3,
+            "pass_at_k": 3,
+            "pass_rate": 1.0,
+            "selected_at_k": 0,
+            "selected_rate": 0.0
+          },
+          {
+            "calibration_report_id": "36e12b915900",
+            "gap_rate": 1.0,
+            "k": 4,
+            "n": 3,
+            "oracle_gap": 3,
+            "pass_at_k": 3,
+            "pass_rate": 1.0,
+            "selected_at_k": 0,
+            "selected_rate": 0.0
+          },
+          {
+            "calibration_report_id": "36e12b915900",
+            "gap_rate": 1.0,
+            "k": 8,
+            "n": 3,
+            "oracle_gap": 3,
+            "pass_at_k": 3,
+            "pass_rate": 1.0,
+            "selected_at_k": 0,
+            "selected_rate": 0.0
+          }
+        ],
+        "per_run": [
+          {
+            "archive": "476d64a5603a",
+            "calibration_report_id": "36e12b915900",
+            "decision": "select",
+            "gap": 1,
+            "pass_hit": true,
+            "repeat": 0,
+            "selected_hit": false
+          },
+          {
+            "archive": "7467aae0f0ff",
+            "calibration_report_id": "36e12b915900",
+            "decision": "select",
+            "gap": 1,
+            "pass_hit": true,
+            "repeat": 1,
+            "selected_hit": false
+          },
+          {
+            "archive": "e64f4a237d1b",
+            "calibration_report_id": "36e12b915900",
+            "decision": "select",
+            "gap": 1,
+            "pass_hit": true,
+            "repeat": 2,
+            "selected_hit": false
+          }
+        ],
+        "pick_split": {
+          "calibration_report_id": "36e12b915900",
+          "declined": {
+            "escalate": 0,
+            "none": 0,
+            "probe_more": 0
+          },
+          "declined_total": 0,
+          "k": 8,
+          "n": 3,
+          "picked_correct": 0,
+          "picked_wrong": 3
+        },
+        "recording": "6f030e848a9d",
+        "runs": 3,
+        "scenario": "workflow_stuck_resolver_stall"
+      }
+    ],
+    "pooled": {
+      "at_k": [
+        {
+          "calibration_report_id": "36e12b915900",
+          "gap_interval_95": [
+            0.0,
+            1.0
+          ],
+          "gap_rate": 0.5556,
+          "k": 1,
+          "n": 9,
+          "oracle_gap": 5,
+          "pass_at_k": 8,
+          "pass_rate": 0.8889,
+          "selected_at_k": 3,
+          "selected_rate": 0.3333
+        },
+        {
+          "calibration_report_id": "36e12b915900",
+          "gap_interval_95": [
+            0.0,
+            1.0
+          ],
+          "gap_rate": 0.6667,
+          "k": 2,
+          "n": 9,
+          "oracle_gap": 6,
+          "pass_at_k": 9,
+          "pass_rate": 1.0,
+          "selected_at_k": 3,
+          "selected_rate": 0.3333
+        },
+        {
+          "calibration_report_id": "36e12b915900",
+          "gap_interval_95": [
+            0.0,
+            1.0
+          ],
+          "gap_rate": 0.6667,
+          "k": 4,
+          "n": 9,
+          "oracle_gap": 6,
+          "pass_at_k": 9,
+          "pass_rate": 1.0,
+          "selected_at_k": 3,
+          "selected_rate": 0.3333
+        },
+        {
+          "calibration_report_id": "36e12b915900",
+          "gap_interval_95": [
+            0.0,
+            1.0
+          ],
+          "gap_rate": 0.6667,
+          "k": 8,
+          "n": 9,
+          "oracle_gap": 6,
+          "pass_at_k": 9,
+          "pass_rate": 1.0,
+          "selected_at_k": 3,
+          "selected_rate": 0.3333
+        }
+      ],
+      "gap_by_decision": {
+        "calibration_report_id": "36e12b915900",
+        "counts": {
+          "escalate": 3,
+          "select": 3
+        },
+        "k": 8
+      },
+      "pick_split": {
+        "calibration_report_id": "36e12b915900",
+        "declined": {
+          "escalate": 3,
+          "none": 0,
+          "probe_more": 0
+        },
+        "declined_total": 3,
+        "k": 8,
+        "n": 9,
+        "picked_correct": 3,
+        "picked_wrong": 3
+      },
+      "runs": 9,
+      "selector_vs_top_candidate": {
+        "calibration_report_id": "36e12b915900",
+        "counts": {
+          "both_right": 3,
+          "both_wrong": 1,
+          "n": 9,
+          "only_selector_right": 0,
+          "only_top_candidate_right": 5
+        },
+        "k": 8
+      },
+      "worlds": 3
+    }
+  },
+  "work_order": "WO-R3-347 pilot (WO-R3-375, owner O-55)"
+}

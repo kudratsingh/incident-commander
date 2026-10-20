@@ -1,0 +1,52 @@
+{
+  "incident_id": "7fc26754-2551-44c8-8eb5-4b30aa5f9f3a",
+  "final_state": "escalated",
+  "alert_summary": "source=platform.jobs severity=critical fingerprint=jobs_accepted_not_executing group=worker-dispatcher",
+  "escalation_reason": "planner stop: The outbox_relay control loop is paused (paused_expires_in_seconds=555, ~9 minutes remaining) and the outbox has 12 unpublished events with the last successful publish over 63,000 seconds ago (~17.5 hours). This explains why jobs accepted are not executing: state changes are committed to the DB but the relay is not publishing them to Kafka, so the worker-dispatcher has nothing to consume (lag=0 because nothing is arriving on the topic). outbox_stall has no Tier-1 fix — a paused outbox_relay loop must be investigated and unpaused by a human, as no automated tool is available to lift the pause. The relay pause expires in ~9 minutes on its own, but the 17.5-hour gap in last_publish_at suggests this may be a persistent or recurring issue requiring human investigation into why the relay was paused and whether the backlog will drain correctly once it resumes.",
+  "attempted_action": null,
+  "incidents": {
+    "primary": {
+      "category": "outbox_stall",
+      "name": "outbox-relay-paused-63k-seconds-since-last-publish",
+      "confidence": 0.82,
+      "addressed": false
+    },
+    "secondary": [],
+    "unresolved_extra": [
+      {
+        "category": "outbox_stall",
+        "name": "outbox-relay-paused-63k-seconds-since-last-publish",
+        "confidence": 0.82,
+        "addressed": false
+      }
+    ]
+  },
+  "attribution": null,
+  "investigation_trail": [
+    {
+      "tool": "get_consumer_lag",
+      "summary": "{\"consumer_group\":\"worker-dispatcher\",\"lag\":0,\"lag_known\":true,\"source\":\"live\",\"cache_key\":\"kafka:consumer_lag:worker-dispatcher\",\"measured_at\":\"2026-10-20T17:19:04.262432Z\",\"age_seconds\":1,\"recent_samples\":[{\"lag\":0,\"measured_at\":\"2026-10-20T17:19:04.262432Z\"},{\"lag\":0,\"measured_at\":\"2026-10-20T17:18:59.060896Z\"},{\"lag\":0,\"measured_at\":\"2026-10-20T17:18:53.890303Z\"},{\"lag\":0,\"measured_at\":\"2026-10-20T17:18:48.745138Z\"},{\"lag\":0,\"measured_at\":\"2026-10-20T17:18:43.548173Z\"},{\"lag\":0,\"measured_at\":\"2026-10-20T17:18:38.339568Z\"},{\"lag\":0,\"measured_at\":\"2026-10-20T17:18:33.114937Z\"},{\"lag\":0,\"measured_at\":\"2026-10-20T17:18:27.953896Z\"},{\"lag\":0,\"measured_at\":\"2026-10-20T17:18:22.808726Z\"},{\"lag\":0,\"measured_at\":\"2026-10-20T17:18:17.665701Z\"},{\"lag\":0,\"measured_at\":\"2026-10-20T17:18:12.498596Z\"},{\"lag\":0,\"measured_at\":\"2026-10-20T17:18:07.399730Z\"},{\"lag\":0,\"measured_at\":\"2026-10-20T17:18:02.222983Z\"},{\"lag\":0,\"measured_at\":\"2026-10-20T17:17:57.036692Z\"},{\"lag\":0,\"measured_at\":\"2026-10-20T17:17:51.875541Z\"}],\"last_poll_at\":\"2026-10-20T17:19:04.257881Z\",\"last_poll_age_seconds\":1,\"polling\":true,\"poll_interval_seconds\":2.0}",
+      "arguments": {
+        "consumer_group": "worker-dispatcher"
+      }
+    },
+    {
+      "tool": "get_control_loops",
+      "summary": "{\"measured_at\":\"2026-10-20T17:19:05.363881Z\",\"loops\":[{\"name\":\"outbox_relay\",\"paused\":true,\"paused_expires_in_seconds\":555,\"tick_interval_seconds\":1.0,\"last_run_at\":\"2026-10-20T17:18:19.721350Z\",\"last_run_age_seconds\":45.6},{\"name\":\"delayed_retry_promote\",\"paused\":false,\"paused_expires_in_seconds\":null,\"tick_interval_seconds\":0.5,\"last_run_at\":\"2026-10-20T17:19:05.300104Z\",\"last_run_age_seconds\":0.1},{\"name\":\"dlq_replay_promote\",\"paused\":false,\"paused_expires_in_seconds\":null,\"tick_interval_seconds\":0.5,\"last_run_at\":\"2026-10-20T17:19:05.301227Z\",\"last_run_age_seconds\":0.1},{\"name\":\"resume_unblocked_waiting\",\"paused\":false,\"paused_expires_in_seconds\":null,\"tick_interval_seconds\":10.0,\"last_run_at\":\"2026-10-20T17:18:56.129925Z\",\"last_run_age_seconds\":9.2},{\"name\":\"stale_pending_backstop\",\"paused\":false,\"paused_expires_in_seconds\":null,\"tick_interval_seconds\":60.0,\"last_run_at\":\"2026-10-20T17:18:05.558717Z\",\"last_run_age_seconds\":59.8},{\"name\":\"stale_running_sweep\",\"paused\":false,\"paused_expires_in_seconds\":null,\"tick_interval_seconds\":60.0,\"last_run_at\":\"2026-10-20T17:18:05.559181Z\",\"last_run_age_seconds\":59.8},{\"name\":\"lease_renewal\",\"paused\":false,\"paused_expires_in_seconds\":null,\"tick_interval_seconds\":20.0,\"last_run_at\":\"2026-10-20T17:18:45.567721Z\",\"last_run_age_seconds\":19.8},{\"name\":\"slo_evaluation\",\"paused\":false,\"paused_expires_in_seconds\":null,\"tick_interval_seconds\":300.0,\"last_run_at\":\"2026-10-19T23:56:45.658114Z\",\"last_run_age_seconds\":62539.7},{\"name\":\"metrics\",\"paused\":false,\"paused_expires_in_seconds\":null,\"tick_interval_seconds\":5.0,\"last_run_at\":\"2026-10-20T17:19:04.271611Z\",\"last_run_age_seconds\":1.1},{\"name\":\"digest\",\"paused\":false,\"paused_expires_in_seconds\":null,\"tick_interval_seconds\":86400.0,\"last_run_at\":null,\"last_run_age_seconds\":null},{\"name\":\"idempotency_reaper\",\"paused\":false,\"paused_expires_in_seconds\":null,\"tick_interval_seconds\":3600.0,\"last_run_at\":\"2026-10-19T23:56:42.667695Z\",\"last_run_age_seconds\":62542.7}],\"total\":11,\"unknown_reason\":null}",
+      "arguments": {}
+    },
+    {
+      "tool": "get_outbox_status",
+      "summary": "{\"measured_at\":\"2026-10-20T17:19:05.342300Z\",\"unpublished_count\":12,\"oldest_unpublished_at\":\"2026-10-20T17:18:56.946424Z\",\"oldest_unpublished_age_s\":8.396,\"newest_unpublished_at\":\"2026-10-20T17:18:59.644895Z\",\"newest_unpublished_age_s\":5.697,\"unpublished_past_attempt_limit\":0,\"last_publish_at\":\"2026-10-19T23:43:52.802561Z\",\"seconds_since_last_publish\":63312.54,\"relay_last_tick_at\":\"2026-10-20T17:18:19.721350Z\",\"relay_heartbeat_age_s\":45.621,\"relay_heartbeat_known\":true,\"relay_heartbeat_unknown_reason\":null,\"relay_tick_interval_s\":1.0}",
+      "arguments": {}
+    }
+  ],
+  "findings": "The outbox_relay control loop is paused with 555 seconds (~9 minutes) remaining on its pause, leaving 12 unpublished outbox events with no successful publish in ~63,312 seconds (~17.5 hours); because no events are reaching Kafka, the worker-dispatcher sees lag 0 and dispatches nothing, explaining the accepted-but-not-executing symptom. The remaining cause — outbox_stall / outbox-relay-paused-63k-seconds-since-last-publish (confidence 0.82) — is unaddressed, as no automated tool can lift the pause and the 17.5-hour publication gap strongly suggests this is a persistent or recurring issue beyond the current pause window.",
+  "recommendation": "Investigate why the outbox_relay loop was paused and confirm whether the 12-event backlog drains correctly once the pause expires; the 17.5-hour gap in last_publish_at warrants checking for a recurring pause trigger or upstream condition that will re-pause the relay after expiry.",
+  "budget_used": {
+    "tool_calls": 3,
+    "tokens": 95837,
+    "wall_seconds": 91.741027,
+    "usd": "0.238347"
+  }
+}

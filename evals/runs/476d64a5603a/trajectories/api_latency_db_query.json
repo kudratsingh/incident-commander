@@ -1,0 +1,141 @@
+{
+  "scenario": "api_latency_db_query",
+  "incident_id": "e1cd724d-c0ee-4c37-b62f-95b60c879175",
+  "checkpoints": [
+    {
+      "schema_version": 3,
+      "incident_id": "e1cd724d-c0ee-4c37-b62f-95b60c879175",
+      "state": "triage",
+      "alert": {
+        "source": "monitoring.slo",
+        "severity": "critical",
+        "fingerprint": "job_dispatch_latency_above_objective",
+        "group": null,
+        "remediation_hint": null,
+        "dlq_scope": null,
+        "summary": "an external monitor reports the job dispatch latency objective above budget; jobs are being accepted but the share dispatched inside 30 seconds is reported below target"
+      },
+      "budget": {
+        "max_tool_calls": 10,
+        "tool_calls_used": 0,
+        "max_tokens": 400000,
+        "tokens_used": 0,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.0,
+        "max_usd": "1.00",
+        "usd_used": "0"
+      },
+      "evidence": [],
+      "hypotheses": [],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-10-20T17:10:41.722318Z",
+      "updated_at": "2026-10-20T17:10:41.722318Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "e1cd724d-c0ee-4c37-b62f-95b60c879175",
+      "state": "investigating",
+      "alert": {
+        "source": "monitoring.slo",
+        "severity": "critical",
+        "fingerprint": "job_dispatch_latency_above_objective",
+        "group": null,
+        "remediation_hint": null,
+        "dlq_scope": null,
+        "summary": "an external monitor reports the job dispatch latency objective above budget; jobs are being accepted but the share dispatched inside 30 seconds is reported below target"
+      },
+      "budget": {
+        "max_tool_calls": 10,
+        "tool_calls_used": 0,
+        "max_tokens": 400000,
+        "tokens_used": 0,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 0.04533,
+        "max_usd": "1.00",
+        "usd_used": "0"
+      },
+      "evidence": [
+        {
+          "evidence_id": "12d954ec-bb18-4d91-a038-e28c5c533c23",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "critical",
+            "dedup_key": "9f284aacac6f975bf6a39142946c818b"
+          },
+          "result_summary": "severity=critical classified as investigating",
+          "timestamp": "2026-10-20T17:10:41.767648Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-10-20T17:10:41.722318Z",
+      "updated_at": "2026-10-20T17:10:41.767648Z"
+    },
+    {
+      "schema_version": 3,
+      "incident_id": "e1cd724d-c0ee-4c37-b62f-95b60c879175",
+      "state": "escalated",
+      "alert": {
+        "source": "monitoring.slo",
+        "severity": "critical",
+        "fingerprint": "job_dispatch_latency_above_objective",
+        "group": null,
+        "remediation_hint": null,
+        "dlq_scope": null,
+        "summary": "an external monitor reports the job dispatch latency objective above budget; jobs are being accepted but the share dispatched inside 30 seconds is reported below target"
+      },
+      "budget": {
+        "max_tool_calls": 10,
+        "tool_calls_used": 0,
+        "max_tokens": 400000,
+        "tokens_used": 21966,
+        "max_wall_seconds": 600,
+        "wall_seconds_used": 18.953452,
+        "max_usd": "1.00",
+        "usd_used": "0.088393"
+      },
+      "evidence": [
+        {
+          "evidence_id": "12d954ec-bb18-4d91-a038-e28c5c533c23",
+          "tool_name": "_triage",
+          "arguments": {
+            "severity": "critical",
+            "dedup_key": "9f284aacac6f975bf6a39142946c818b"
+          },
+          "result_summary": "severity=critical classified as investigating",
+          "timestamp": "2026-10-20T17:10:41.767648Z",
+          "hypothesis_ref": null
+        },
+        {
+          "evidence_id": "8ae65c9f-7249-48ce-9f70-80f173b943be",
+          "tool_name": "_planner_escalate",
+          "arguments": {
+            "reason": "tool reported is_error=True (get_consumer_lag)"
+          },
+          "result_summary": "tool reported is_error=True (get_consumer_lag)",
+          "timestamp": "2026-10-20T17:11:00.675770Z",
+          "hypothesis_ref": null
+        }
+      ],
+      "hypotheses": [
+        {
+          "category": "consumer_saturation",
+          "name": "worker-dispatcher-lag-causing-dispatch-latency-breach",
+          "confidence": 0.45,
+          "reasoning": "candidate C1 (probe_more, score 0.45, selector uncertainty 0.8); No probes have been run, so there is no trail evidence to support or contradict any candidate — all scores reflect only the stated priors. C1 (consumer_saturation via worker-dispatcher lag) carries the highest prior at 0.45 and its next_probe, get_consumer_lag for the worker-dispatcher group, is the most direct first read to confirm or eliminate the leading hypothesis."
+        }
+      ],
+      "pending_approval_id": null,
+      "remediation_plan": null,
+      "remediation_attempts": 0,
+      "created_at": "2026-10-20T17:10:41.722318Z",
+      "updated_at": "2026-10-20T17:11:00.675770Z"
+    }
+  ],
+  "invocation_id": "476d64a5603a"
+}

@@ -41,6 +41,9 @@ _TABLE_WO_R3_368 = (
 _TABLE_WO_R3_386 = (
     _REPO / "evals/reports/world-drift/world_drift_table.20261012T095055Z.3f2cddc323c3.json"
 )
+_TABLE_WO_R3_386B = (
+    _REPO / "evals/reports/world-drift/world_drift_table.20261020T181904Z.4e84bcd11fcc.json"
+)
 
 _CMD = 'PLATFORM_COMPOSE="demo/compose.yml" uv run python -m evals.world_drift --world '
 _FILE = "dlq_backlog/dlq_backlog.20260917T182256Z"
@@ -475,7 +478,8 @@ def test_the_wo_r3_386_table_checks_every_newest_recording_by_trace_identity() -
     assert len(table["rows"]) == 17
     assert table["counts"] == {CLEAN: 16, DRIFT: 0, REFUSED: 0, NOT_RUN: 1}
     assert table["platform_pin"] == "v0.6.25"
-    assert artifacts.newest("world_drift_table") == _TABLE_WO_R3_386
+    versions = artifacts.versions("world_drift_table")
+    assert versions.index(_TABLE_WO_R3_386) < versions.index(_TABLE_WO_R3_386B)
     rows = {row["scenario"]: row for row in table["rows"]}
     # WO-R3-387 re-recorded db_query since, so that row is the one no longer newest.
     older = {"api_latency_db_query": "301c99c4ae11"}
@@ -496,3 +500,29 @@ def test_the_wo_r3_386_table_checks_every_newest_recording_by_trace_identity() -
     assert {name for name, row in rows.items() if row["verdict"] == CLEAN} == set(rows) - {
         "api_latency_downstream"
     }
+
+
+def test_the_wo_r3_386b_table_reads_17_clean_with_the_downstream_row_checked() -> None:
+    """WO-R3-386b: api_latency_downstream, the one row WO-R3-386 could not run, checked on
+    v0.6.25 once the job window was empty; the other 16 rows read back from WO-R3-386's own
+    logs. Every newest recording, every row CLEAN — the table Phase 3's drift line reads."""
+    table = json.loads(_TABLE_WO_R3_386B.read_text())
+    assert len(table["rows"]) == 17
+    assert table["counts"] == {CLEAN: 17, DRIFT: 0, REFUSED: 0, NOT_RUN: 0}
+    assert table["platform_pin"] == "v0.6.25"
+    assert artifacts.newest("world_drift_table") == _TABLE_WO_R3_386B
+    rows = {row["scenario"]: row for row in table["rows"]}
+    assert {(name, row["recording"]) for name, row in rows.items()} == set(
+        world_drift_table.newest_recordings()
+    )
+    downstream = rows["api_latency_downstream"]
+    assert (downstream["recording"], downstream["verdict"]) == ("58ec70df7157", CLEAN)
+    assert downstream["disagreements"] == 0
+    # The 16 rows WO-R3-386 checked are its own rows, verdict and recording unchanged.
+    previous = {row["scenario"]: row for row in json.loads(_TABLE_WO_R3_386.read_text())["rows"]}
+    for name, row in rows.items():
+        if name != "api_latency_downstream":
+            assert (row["recording"], row["verdict"]) == (
+                previous[name]["recording"],
+                previous[name]["verdict"],
+            ), name

@@ -512,9 +512,13 @@ def test_the_wo_r3_386b_table_reads_17_clean_with_the_downstream_row_checked() -
     assert table["platform_pin"] == "v0.6.25"
     assert artifacts.newest("world_drift_table") == _TABLE_WO_R3_386B
     rows = {row["scenario"]: row for row in table["rows"]}
-    assert {(name, row["recording"]) for name, row in rows.items()} == set(
-        world_drift_table.newest_recordings()
-    )
+    # WO-R3-387 (#383) re-recorded db_query wider (333a5f296990) after this table was built,
+    # so that row is the one no longer newest; the next table (WO-R3-388) re-checks it.
+    older = {"api_latency_db_query": "301c99c4ae11"}
+    assert {(name, row["recording"]) for name, row in rows.items()} == {
+        (name, older.get(name, recording))
+        for name, recording in world_drift_table.newest_recordings()
+    }
     downstream = rows["api_latency_downstream"]
     assert (downstream["recording"], downstream["verdict"]) == ("58ec70df7157", CLEAN)
     assert downstream["disagreements"] == 0

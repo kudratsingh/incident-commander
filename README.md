@@ -1,8 +1,8 @@
-# Incident Commander
+# Incident Commander — Autonomous AI SRE
 
-An on-call agent that investigates and remediates incidents on the [Incident Platform](https://github.com/kudratsingh/incident-platform), with an evaluation harness that checks what it actually did.
+An **autonomous AI SRE and incident-response agent** that performs hypothesis-driven investigation, risk-tiered remediation and post-action verification on the [Incident Platform](https://github.com/kudratsingh/incident-platform). Its explicit state machine combines evidence-led tool selection, Postgres checkpoints, single-flight incident leases, bounded budgets and scoped **MCP** access.
 
-The agent is an external client. It uses scoped MCP tools and versioned REST endpoints; authorization, tenant isolation, idempotency and audit remain platform responsibilities. The model proposes a diagnosis or action. Deterministic code decides what may execute and whether the evidence supports resolution.
+**Best-of-N generation, candidate selection, reflection, bounded search and adaptive inference** share the same execution and safety boundaries. A chaos-driven evaluation harness checks outcomes through deterministic graders and platform audit evidence, connecting inference-time compute research with recoverable incident operations. The agent remains an external client: authorization, tenant isolation and idempotency are enforced by the platform.
 
 ## The incident loop
 
